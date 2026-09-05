@@ -33,7 +33,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 
 	vclusterVer := vc.Spec.VClusterVersion
 	if vclusterVer == "" {
-		vclusterVer = "0.37.0"
+		vclusterVer = "0.36.0"
 	}
 
 	labels := map[string]string{
@@ -68,7 +68,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 		return false, "", fmt.Errorf("failed reconciling vcluster configmap: %w", err)
 	}
 
-	// Reconcile vc-config secret required by vcluster v0.37+
+	// Reconcile vc-config secret required by vcluster v0.36+
 	vcConfigSec := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("vc-config-%s", vc.Name),
@@ -100,6 +100,21 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 	})
 	if err != nil {
 		return false, "", fmt.Errorf("failed reconciling vcluster serviceaccount: %w", err)
+	}
+
+	// Reconcile ServiceAccount for synced workloads
+	workloadSa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("vc-workload-%s", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, workloadSa, func() error {
+		workloadSa.Labels = labels
+		return controllerutil.SetControllerReference(vc, workloadSa, r.Scheme())
+	})
+	if err != nil {
+		return false, "", fmt.Errorf("failed reconciling workload serviceaccount: %w", err)
 	}
 
 	// Reconcile Role for namespaced workloads
@@ -161,6 +176,11 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 			{
 				Kind:      "ServiceAccount",
 				Name:      sa.Name,
+				Namespace: vc.Namespace,
+			},
+			{
+				Kind:      "ServiceAccount",
+				Name:      workloadSa.Name,
 				Namespace: vc.Namespace,
 			},
 		}
@@ -357,7 +377,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 					Containers: []corev1.Container{
 						{
 							Name:            "syncer",
-							Image:           fmt.Sprintf("ghcr.io/loft-sh/vcluster-pro:%s", vclusterVer),
+							Image:           fmt.Sprintf("ghcr.io/loft-sh/vcluster-oss:%s", vclusterVer),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command: []string{
 								"/vcluster",

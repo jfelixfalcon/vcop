@@ -32,7 +32,7 @@ export const ProvisioningWizard: React.FC = () => {
   // Advanced Mode
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   const [kubernetesVersion, setKubernetesVersion] = useState<string>('v1.31.0');
-  const [vclusterVersion, setVclusterVersion] = useState<string>('0.37.0');
+  const [vclusterVersion, setVclusterVersion] = useState<string>('0.36.0');
   const [customYaml, setCustomYaml] = useState<string>('');
 
   // Submission State
@@ -109,6 +109,7 @@ export const ProvisioningWizard: React.FC = () => {
   backingStore:
     etcd:
       deploy:
+        enabled: true
         statefulSet:
           highAvailability:
             replicas: ${sizePreset === 'small' ? 1 : 3}
@@ -116,10 +117,10 @@ export const ProvisioningWizard: React.FC = () => {
             volumeClaim:
               size: "${selectedPresetDetails.storage.split(' ')[0]}Gi"
   coreDNS:
-    enabled: ${enableMonitoringAndDNS}
+    enabled: false # Reconciled externally as standalone cluster addon
 integrations:
   metricsServer:
-    enabled: ${enableMonitoringAndDNS}
+    enabled: false # Reconciled externally as standalone cluster addon
 sync:
   toHost:
     pods:
@@ -127,6 +128,9 @@ sync:
     services:
       enabled: true
     ingresses:
+      enabled: true
+  fromHost:
+    nodes:
       enabled: true
 ${autoSleep ? 'policies:\n  autoSleep:\n    enabled: true' : ''}`;
 
@@ -359,10 +363,10 @@ ${autoSleep ? 'policies:\n  autoSleep:\n    enabled: true' : ''}`;
                   />
                   <div>
                     <span className="text-sm font-semibold text-white flex items-center gap-2">
-                      Enable Monitoring & Internal DNS (Recommended)
+                      Enable External CoreDNS & External Metrics-Server Add-ons (Recommended)
                     </span>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Deploys dedicated CoreDNS in the virtual plane for private service discovery, and enables the internal Kubernetes metrics-server so <code className="text-cyan-400 font-mono">kubectl top</code> and HPAs work automatically.
+                      Provisions external standalone CoreDNS for cluster service discovery and external standalone Metrics-Server so <code className="text-cyan-400 font-mono">kubectl top</code> and HPAs function automatically without proprietary/embedded features.
                     </p>
                   </div>
                 </label>
@@ -411,7 +415,7 @@ ${autoSleep ? 'policies:\n  autoSleep:\n    enabled: true' : ''}`;
                 className="flex items-center gap-2 text-xs font-mono text-slate-400 hover:text-cyber-accent transition-colors"
               >
                 <Settings2 className="w-4 h-4" />
-                <span>{showAdvanced ? 'Hide Advanced Settings' : 'Show Advanced Configuration (v0.37 vcluster.yaml)'}</span>
+                <span>{showAdvanced ? 'Hide Advanced Settings' : 'Show Advanced Configuration (v0.36 vcluster.yaml)'}</span>
               </button>
 
               {showAdvanced && (
@@ -448,7 +452,7 @@ ${autoSleep ? 'policies:\n  autoSleep:\n    enabled: true' : ''}`;
                   <div>
                     <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
                       <span>Generated vcluster.yaml Preview:</span>
-                      <span className="text-[10px] text-cyber-accent">Adheres to v0.37 unified schema</span>
+                      <span className="text-[10px] text-cyber-accent">Adheres to v0.36 unified schema</span>
                     </label>
                     <pre className="bg-cyber-900 border border-cyber-800 rounded-xl p-3 font-mono text-[11px] text-slate-300 max-h-48 overflow-y-auto">
                       {previewYaml}

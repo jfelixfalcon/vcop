@@ -6,18 +6,18 @@ You are a Principal DevSecOps and Cloud-Native Systems Architect specializing in
 
 The platform consists of two synchronized sub-systems:
 
-1. **vCluster Kubernetes Operator**: A Go-based operator (built with Kubebuilder / controller-runtime) managing the full lifecycle of tenant virtual clusters using **vCluster OSS v0.37**, high-availability etcd, CoreDNS, and native metrics-server.
+1. **vCluster Kubernetes Operator**: A Go-based operator (built with Kubebuilder / controller-runtime) managing the full lifecycle of tenant virtual clusters using **vCluster OSS v0.36**, high-availability etcd, CoreDNS, and native metrics-server.
 2. **Operations Center UI**: An ultra-responsive web dashboard built with **Astro (SSR + Interactive Islands)** that abstracts all Kubernetes complexity for non-technical users while remaining strictly Kubernetes-native under the hood.
 
 ---
 
 ## 1. Core Architectural Requirements
 
-### 1.1 Virtual Cluster Topology (vCluster OSS v0.37)
+### 1.1 Virtual Cluster Topology (vCluster OSS v0.36)
 
 Each virtual cluster provisioned by the operator must form a production-grade, isolated core control plane with the following baseline specifications:
 
-* **vCluster Engine:** `loft-sh/vcluster` OSS version `0.37.x` adhering to the unified `vcluster.yaml` schema.
+* **vCluster Engine:** `loft-sh/vcluster` OSS version `0.36.x` adhering to the unified `vcluster.yaml` schema.
 * **High Availability Backing Store:** A dedicated 3-node HA etcd cluster (`controlPlane.backingStore.etcd.deploy.statefulSet.highAvailability.replicas: 3`) running with quorum verification, persistent storage claims, and automated peer discovery.
 * **Core Internal Add-ons:**
 * **CoreDNS:** Enabled and configured inside the virtual control plane for independent intra-vcluster service discovery.
@@ -43,16 +43,16 @@ The entire system must operate purely on native Kubernetes storage and configura
 
 * **Language:** Go 1.22+
 * **Framework:** Controller-Runtime / Kubebuilder v4
-* **Target vCluster Version:** 0.37.x
+* **Target vCluster Version:** 0.36.x
 * **API Group / Version:** `vops.gitops.io/v1alpha1`
 * **Kind:** `VirtualCluster`
 
 ### 2.2 Custom Resource Definition (CRD)
 
-Design the `VirtualCluster` CRD to provide both friendly high-level abstractions and full underlying passthrough to vCluster v0.37 configurations:
+Design the `VirtualCluster` CRD to provide both friendly high-level abstractions and full underlying passthrough to vCluster v0.36 configurations:
 
 * **`spec.clusterName`** (string, required): Tenant-facing identifier.
-* **`spec.vclusterVersion`** (string, default: `0.37.0`): Target vcluster engine version.
+* **`spec.vclusterVersion`** (string, default: `0.36.0`): Target vcluster engine version.
 * **`spec.kubernetesVersion`** (string, default: `v1.31.0`): Virtual Kubernetes control plane version.
 * **`spec.sizePreset`** (enum: `small`, `medium`, `large`, `custom`): High-level preset driving CPU, memory requests, and etcd storage tiers.
 * **`spec.highAvailability`** (bool, default: `true`): Toggles 3-replica HA etcd and control-plane redundancy.
@@ -61,7 +61,7 @@ Design the `VirtualCluster` CRD to provide both friendly high-level abstractions
 * `metricsServer.enabled` (bool, default: `true`)
 
 
-* **`spec.helmValues` / `spec.rawConfig**` (`runtime.RawExtension`): Direct passthrough to the v0.37 `vcluster.yaml` configuration structure to ensure 100% feature parity with the official Helm chart/CLI values.
+* **`spec.helmValues` / `spec.rawConfig**` (`runtime.RawExtension`): Direct passthrough to the v0.36 `vcluster.yaml` configuration structure to ensure 100% feature parity with the official Helm chart/CLI values.
 * **`status`**:
 * `phase` (`Pending`, `Provisioning`, `Ready`, `Upgrading`, `Degraded`, `Terminating`)
 * `conditions` (Standard K8s conditions: `EtcdReady`, `ControlPlaneReady`, `AddonsReady`, `KubeconfigGenerated`)
@@ -135,7 +135,7 @@ Produce the implementation in structured, production-ready modules:
 * Version upgrade logic for vCluster and Kubernetes versions.
 
 
-3. **vCluster 0.37 Configuration Templates:** The reference Go template/ConfigMap converting `spec` inputs into the validated `vcluster.yaml` format.
+3. **vCluster 0.36 Configuration Templates:** The reference Go template/ConfigMap converting `spec` inputs into the validated `vcluster.yaml` format.
 4. **Astro Operations Center UI:**
 * Project directory layout and configuration (`astro.config.mjs`, `package.json`, Tailwind config).
 * Key API route handlers (`/api/vclusters/index.ts`, `/api/vclusters/[name].ts`).

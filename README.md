@@ -2,10 +2,10 @@
 
 [![Go](https://img.shields.io/badge/Go-1.22%2B-blue.svg)](https://golang.org)
 [![Astro](https://img.shields.io/badge/Astro-5.x%20SSR-orange.svg)](https://astro.build)
-[![vCluster](https://img.shields.io/badge/vCluster%20OSS-v0.37-purple.svg)](https://vcluster.com)
+[![vCluster](https://img.shields.io/badge/vCluster%20OSS-v0.36-purple.svg)](https://vcluster.com)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.31%2B-326CE5.svg)](https://kubernetes.io)
 
-An enterprise-grade, cloud-native **Virtual Cluster Management Platform** and Internal Developer Platform (IDP) designed to manage multi-tenant virtual clusters using **vCluster OSS v0.37**, high-availability etcd, internal CoreDNS, and metrics-server.
+An enterprise-grade, cloud-native **Virtual Cluster Management Platform** and Internal Developer Platform (IDP) designed to manage multi-tenant virtual clusters using **vCluster OSS v0.36**, high-availability etcd, internal CoreDNS, and metrics-server.
 
 ---
 
@@ -35,11 +35,11 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 │                                         │ Reconciles StatefulSets, Deployments, Secrets  │
 │                                         ▼                                                │
 │  ┌────────────────────────────────────────────────────────────────────────────────────┐  │
-│  │                   Tenant Virtual Cluster (vCluster OSS v0.37)                      │  │
+│  │                   Tenant Virtual Cluster (vCluster OSS v0.36)                      │  │
 │  │                                                                                    │  │
 │  │   ┌───────────────────────────────────┐    ┌───────────────────────────────────┐   │  │
 │  │   │      High-Availability Backing    │    │      Virtual Kubernetes Syncer    │   │  │
-│  │   │  - 3-Node Dedicated HA etcd       │◄───┤  - loft-sh/vcluster:0.37.x        │   │  │
+│  │   │  - 3-Node Dedicated HA etcd       │◄───┤  - loft-sh/vcluster:0.36.x        │   │  │
 │  │   │  - Peer Discovery (Port 2380)     │    │  - vcluster.yaml Unified Schema   │   │  │
 │  │   │  - Client Listener (Port 2379)    │    │  - Workload Sync (Pods, Ingress)  │   │  │
 │  │   │  - Persistent Volume Claims       │    │  - TLS Port 443 -> 8443           │   │  │
@@ -58,8 +58,8 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 
 ## Key Capabilities
 
-### 1. vCluster OSS v0.37 Unified Engine
-- Generates and enforces the unified `vcluster.yaml` schema introduced in v0.37.x.
+### 1. vCluster OSS v0.36 Unified Engine
+- Generates and enforces the unified `vcluster.yaml` schema introduced in v0.36.x.
 - Zero external database dependencies: all state resides in native Kubernetes `CustomResources`, `ConfigMaps`, and `Secrets`.
 
 ### 2. High-Availability Backing Store (3-Node Quorum etcd)
@@ -113,7 +113,7 @@ vc-operator/
 │   ├── vc-operator/                    # Go Kubernetes Operator
 │   │   ├── api/v1alpha1/               # Go CRD type definitions & deepcopy
 │   │   ├── controllers/                # Master reconciler, etcd, syncer, upgrades
-│   │   ├── pkg/vcluster/               # vCluster 0.37 vcluster.yaml generator & presets
+│   │   ├── pkg/vcluster/               # vCluster 0.36 vcluster.yaml generator & presets
 │   │   ├── pkg/webhook/                # Admission webhook validation logic
 │   │   ├── main.go                     # Operator entrypoint
 │   │   ├── Makefile                    # Go build and test targets
@@ -187,7 +187,7 @@ metadata:
   namespace: default
 spec:
   clusterName: billing-feature-auth
-  vclusterVersion: "0.37.0"
+  vclusterVersion: "0.36.0"
   kubernetesVersion: "v1.31.0"
   sizePreset: medium
   highAvailability: true

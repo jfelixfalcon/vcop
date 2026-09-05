@@ -19,7 +19,7 @@ func TestValidator_ValidateCreate(t *testing.T) {
 		Spec: v1alpha1.VirtualClusterSpec{
 			ClusterName:       "test-cluster",
 			KubernetesVersion: "v1.31.0",
-			VClusterVersion:   "0.37.0",
+			VClusterVersion:   "0.36.0",
 		},
 	}
 	if err := v.ValidateCreate(ctx, valid); err != nil {
@@ -59,7 +59,7 @@ func TestValidator_ValidateUpdate_DowngradesAndJumps(t *testing.T) {
 		Spec: v1alpha1.VirtualClusterSpec{
 			ClusterName:       "test-cluster",
 			KubernetesVersion: "v1.30.0",
-			VClusterVersion:   "0.37.0",
+			VClusterVersion:   "0.36.0",
 		},
 	}
 

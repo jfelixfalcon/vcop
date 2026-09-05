@@ -113,8 +113,8 @@ type VirtualClusterSpec struct {
 	// +kubebuilder:validation:Pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 	ClusterName string `json:"clusterName"`
 
-	// VClusterVersion defines the target vCluster OSS engine version (0.37.x)
-	// +kubebuilder:default="0.37.0"
+	// VClusterVersion defines the target vCluster OSS engine version (0.36.x)
+	// +kubebuilder:default="0.36.0"
 	// +optional
 	VClusterVersion string `json:"vclusterVersion,omitempty"`
 
@@ -149,7 +149,7 @@ type VirtualClusterSpec struct {
 	// +optional
 	Lifecycle LifecyclePolicy `json:"lifecycle,omitempty"`
 
-	// RawConfig provides direct passthrough overrides into the vCluster 0.37 vcluster.yaml schema
+	// RawConfig provides direct passthrough overrides into the vCluster 0.36 vcluster.yaml schema
 	// +optional
 	RawConfig *runtime.RawExtension `json:"rawConfig,omitempty"`
 

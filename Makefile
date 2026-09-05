@@ -6,8 +6,8 @@ DEPLOY_DIR = deploy
 CHART_DIR = charts/vcop
 KIND_CLUSTER ?= kind
 
-OPERATOR_IMG ?= vops/vc-operator:v0.37.0
-UI_IMG ?= vops/vc-operations-center:v0.37.0
+OPERATOR_IMG ?= vops/vc-operator:v0.36.0
+UI_IMG ?= vops/vc-operations-center:v0.36.0
 
 .PHONY: all
 all: build test

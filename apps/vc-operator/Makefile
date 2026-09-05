@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= vops/vc-operator:v0.37.0
+IMG ?= vops/vc-operator:v0.36.0
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))

@@ -30,7 +30,7 @@ func TestVirtualClusterReconciler_Reconcile(t *testing.T) {
 		Spec: v1alpha1.VirtualClusterSpec{
 			ClusterName:       "test-vcluster",
 			KubernetesVersion: "v1.31.0",
-			VClusterVersion:   "0.37.0",
+			VClusterVersion:   "0.36.0",
 			SizePreset:        v1alpha1.PresetMedium,
 			HighAvailability:  true,
 			Components: v1alpha1.ComponentsSpec{
@@ -60,6 +60,7 @@ func TestVirtualClusterReconciler_Reconcile(t *testing.T) {
 		EtcdReconciler:       NewEtcdReconciler(client),
 		SyncerReconciler:     NewSyncerReconciler(client),
 		KubeconfigReconciler: NewKubeconfigReconciler(client),
+		AddonsReconciler:     NewAddonsReconciler(client),
 		UpgradeManager:       NewUpgradeManager(client),
 	}
 
@@ -143,7 +144,7 @@ func TestVirtualClusterReconciler_NonHA(t *testing.T) {
 		Spec: v1alpha1.VirtualClusterSpec{
 			ClusterName:       "test-dev-small",
 			KubernetesVersion: "v1.31.0",
-			VClusterVersion:   "0.37.0",
+			VClusterVersion:   "0.36.0",
 			SizePreset:        v1alpha1.PresetSmall,
 			HighAvailability:  false,
 		},
@@ -164,6 +165,7 @@ func TestVirtualClusterReconciler_NonHA(t *testing.T) {
 		EtcdReconciler:       NewEtcdReconciler(client),
 		SyncerReconciler:     NewSyncerReconciler(client),
 		KubeconfigReconciler: NewKubeconfigReconciler(client),
+		AddonsReconciler:     NewAddonsReconciler(client),
 		UpgradeManager:       NewUpgradeManager(client),
 	}
 

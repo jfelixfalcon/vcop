@@ -9,13 +9,27 @@ import (
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
 )
 
-// VClusterConfig matches the official vCluster OSS v0.37 vcluster.yaml schema
+// VClusterConfig matches the official vCluster OSS v0.36 vcluster.yaml schema
 type VClusterConfig struct {
 	ControlPlane ControlPlaneConfig  `yaml:"controlPlane" json:"controlPlane"`
 	Integrations IntegrationsConfig  `yaml:"integrations" json:"integrations"`
+	Networking   *NetworkingConfig   `yaml:"networking,omitempty" json:"networking,omitempty"`
 	Sync         SyncConfig          `yaml:"sync" json:"sync"`
 	PrivateNodes *PrivateNodesConfig `yaml:"privateNodes,omitempty" json:"privateNodes,omitempty"`
 	Policies     *PoliciesConfig     `yaml:"policies,omitempty" json:"policies,omitempty"`
+}
+
+type NetworkingConfig struct {
+	Advanced AdvancedNetworkingConfig `yaml:"advanced" json:"advanced"`
+}
+
+type AdvancedNetworkingConfig struct {
+	ProxyKubelets ProxyKubeletsConfig `yaml:"proxyKubelets" json:"proxyKubelets"`
+}
+
+type ProxyKubeletsConfig struct {
+	ByHostname bool `yaml:"byHostname" json:"byHostname"`
+	ByIP       bool `yaml:"byIP" json:"byIP"`
 }
 
 type PrivateNodesConfig struct {
@@ -25,7 +39,7 @@ type PrivateNodesConfig struct {
 type ControlPlaneConfig struct {
 	Distro       DistroConfig             `yaml:"distro" json:"distro"`
 	BackingStore BackingStoreConfig       `yaml:"backingStore" json:"backingStore"`
-	CoreDNS      CoreDNSConfig            `yaml:"coreDNS" json:"coreDNS"`
+	CoreDNS      CoreDNSConfig            `yaml:"coredns" json:"coredns"`
 	Proxy        *ProxyConfig             `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 	StatefulSet  *ControlPlaneStatefulSet `yaml:"statefulSet,omitempty" json:"statefulSet,omitempty"`
 }
@@ -58,7 +72,8 @@ type K8sDistro struct {
 }
 
 type ComponentConfig struct {
-	Enabled bool `yaml:"enabled" json:"enabled"`
+	Enabled   bool     `yaml:"enabled" json:"enabled"`
+	ExtraArgs []string `yaml:"extraArgs,omitempty" json:"extraArgs,omitempty"`
 }
 
 type BackingStoreConfig struct {
@@ -155,7 +170,7 @@ type AutoSleepConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`
 }
 
-// GenerateVClusterConfig builds the v0.37 vcluster.yaml structure from a VirtualCluster spec
+// GenerateVClusterConfig builds the v0.36 vcluster.yaml structure from a VirtualCluster spec
 func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig, error) {
 	preset := GetPresetConfig(spec.SizePreset, spec.CustomResources)
 
@@ -232,6 +247,9 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 					Version: k8sVersion,
 					APIServer: &ComponentConfig{
 						Enabled: true,
+						ExtraArgs: []string{
+							"--api-audiences=https://kubernetes.default.svc.cluster.local,https://kubernetes.default.svc.,https://kubernetes.default.svc,https://kubernetes.default",
+						},
 					},
 					ControllerManager: &ComponentConfig{
 						Enabled: true,
@@ -240,7 +258,7 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 			},
 			BackingStore: backingStore,
 			CoreDNS: CoreDNSConfig{
-				Enabled: spec.Components.CoreDNS.Enabled,
+				Enabled: false,
 			},
 			Proxy: &ProxyConfig{
 				BindAddress: "0.0.0.0",
@@ -249,7 +267,15 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 		},
 		Integrations: IntegrationsConfig{
 			MetricsServer: MetricsServerConfig{
-				Enabled: spec.Components.MetricsServer.Enabled,
+				Enabled: false,
+			},
+		},
+		Networking: &NetworkingConfig{
+			Advanced: AdvancedNetworkingConfig{
+				ProxyKubelets: ProxyKubeletsConfig{
+					ByHostname: true,
+					ByIP:       true,
+				},
 			},
 		},
 		PrivateNodes: &PrivateNodesConfig{

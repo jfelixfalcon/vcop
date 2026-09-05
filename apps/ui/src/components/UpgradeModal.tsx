@@ -11,7 +11,7 @@ interface Props {
 
 export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgradeSuccess }) => {
   const [selectedK8s, setSelectedK8s] = useState<string>('v1.31.0');
-  const [selectedVCluster, setSelectedVCluster] = useState<string>('0.37.0');
+  const [selectedVCluster, setSelectedVCluster] = useState<string>('0.36.0');
   const [upgrading, setUpgrading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,8 +27,7 @@ export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgr
   ];
 
   const engineOptions = [
-    { version: '0.36.0', note: 'Legacy format' },
-    { version: '0.37.0', note: 'Unified vcluster.yaml schema' },
+    { version: '0.36.0', note: 'vCluster OSS (Unified Schema)' },
   ];
 
   const handleUpgrade = async () => {

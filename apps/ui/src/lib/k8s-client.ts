@@ -147,7 +147,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
     namespace,
     spec: {
       clusterName: spec.clusterName || name,
-      vclusterVersion: spec.vclusterVersion || '0.37.0',
+      vclusterVersion: spec.vclusterVersion || '0.36.0',
       kubernetesVersion: spec.kubernetesVersion || 'v1.31.0',
       sizePreset: (spec.sizePreset as SizePreset) || 'medium',
       highAvailability: spec.highAvailability ?? true,
@@ -165,7 +165,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       phase,
       conditions,
       virtualK8sVersion: status.virtualK8sVersion || spec.kubernetesVersion || 'v1.31.0',
-      vclusterVersion: status.vclusterVersion || spec.vclusterVersion || '0.37.0',
+      vclusterVersion: status.vclusterVersion || spec.vclusterVersion || '0.36.0',
       endpoint: status.endpoint || '',
       metrics: {
         activeNodeCount: metrics.activeNodeCount || 0,
@@ -235,7 +235,7 @@ export async function createVirtualCluster(data: {
 }): Promise<VirtualCluster> {
   const name = data.clusterName.trim().toLowerCase();
   const k8sVer = data.kubernetesVersion || 'v1.31.0';
-  const vclusterVer = data.vclusterVersion || '0.37.0';
+  const vclusterVer = data.vclusterVersion || '0.36.0';
   const isHA = data.preset === 'large';
   const namespace = (data as any).namespace || (name === 'team-alpha-dev' ? 'default' : name);
 

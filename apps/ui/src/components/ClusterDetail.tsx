@@ -77,7 +77,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName }) => {
 
   const isHA = cluster.spec.highAvailability;
   const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'v1.31.0';
-  const vclusterVer = cluster.status.vclusterVersion || cluster.spec.vclusterVersion || '0.37.0';
+  const vclusterVer = cluster.status.vclusterVersion || cluster.spec.vclusterVersion || '0.36.0';
 
   return (
     <div className="space-y-6">
@@ -351,11 +351,11 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName }) => {
         </div>
       )}
 
-      {/* TAB CONTENT: Effective vCluster 0.37 YAML */}
+      {/* TAB CONTENT: Effective vCluster 0.36 YAML */}
       {activeTab === 'yaml' && (
         <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 font-mono text-xs animate-in fade-in duration-150">
           <div className="flex justify-between items-center mb-3">
-            <span className="text-slate-300 font-semibold">Compiled vcluster.yaml (v0.37 Unified Schema)</span>
+            <span className="text-slate-300 font-semibold">Compiled vcluster.yaml (v0.36 Unified Schema)</span>
             <span className="text-slate-500 text-[10px]">Stored in host ConfigMap: {cluster.name}-config</span>
           </div>
           <pre className="bg-cyber-950 border border-cyber-800 rounded-xl p-4 text-slate-300 overflow-x-auto whitespace-pre leading-relaxed">

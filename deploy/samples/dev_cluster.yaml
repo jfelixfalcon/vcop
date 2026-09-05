@@ -5,7 +5,7 @@ metadata:
   namespace: default
 spec:
   clusterName: team-alpha-dev
-  vclusterVersion: "0.37.0"
+  vclusterVersion: "0.36.0"
   kubernetesVersion: "v1.31.0"
   sizePreset: small
   highAvailability: false

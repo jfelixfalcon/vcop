@@ -78,8 +78,8 @@ spec:
                   pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
                 vclusterVersion:
                   type: string
-                  description: Target vCluster OSS engine version (0.37.x).
-                  default: "0.37.0"
+                  description: Target vCluster OSS engine version (0.36.x).
+                  default: "0.36.0"
                   pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+.*$"
                 kubernetesVersion:
                   type: string
@@ -155,7 +155,7 @@ spec:
                 rawConfig:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
-                  description: Direct passthrough to the official vCluster v0.37 vcluster.yaml configuration schema.
+                  description: Direct passthrough to the official vCluster v0.36 vcluster.yaml configuration schema.
                 helmValues:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true

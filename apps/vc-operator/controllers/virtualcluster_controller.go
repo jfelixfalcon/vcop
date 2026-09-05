@@ -32,6 +32,7 @@ type VirtualClusterReconciler struct {
 	EtcdReconciler       *EtcdReconciler
 	SyncerReconciler     *SyncerReconciler
 	KubeconfigReconciler *KubeconfigReconciler
+	AddonsReconciler     *AddonsReconciler
 	UpgradeManager       *UpgradeManager
 }
 
@@ -117,34 +118,44 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	// 5. Reconcile Internal Add-ons (CoreDNS & Metrics Server)
-	if vc.Spec.Components.CoreDNS.Enabled || vc.Spec.Components.MetricsServer.Enabled {
-		if syncerReady {
-			r.setCondition(&vc, v1alpha1.ConditionAddonsReady, metav1.ConditionTrue, "AddonsConfigured", "CoreDNS and Metrics-Server enabled in control plane")
-		} else {
-			r.setCondition(&vc, v1alpha1.ConditionAddonsReady, metav1.ConditionFalse, "WaitingForControlPlane", "Add-ons awaiting control plane readiness")
-		}
-	}
-
-	// 6. Reconcile Kubeconfig Secret
+	// 5. Reconcile Kubeconfig Secret
+	var kubeconfigReady bool
 	if syncerReady {
 		if err := r.KubeconfigReconciler.ReconcileKubeconfig(ctx, &vc, endpoint); err != nil {
 			log.Error(err, "failed reconciling kubeconfig")
 			r.setCondition(&vc, v1alpha1.ConditionKubeconfigGenerated, metav1.ConditionFalse, "KubeconfigFailed", err.Error())
 		} else {
+			kubeconfigReady = true
 			r.setCondition(&vc, v1alpha1.ConditionKubeconfigGenerated, metav1.ConditionTrue, "KubeconfigReady", "Kubeconfig secret successfully generated")
 		}
 	}
 
+	// 6. Reconcile External Add-ons (CoreDNS & Metrics Server)
+	var addonsReady bool
+	if kubeconfigReady && (vc.Spec.Components.CoreDNS.Enabled || vc.Spec.Components.MetricsServer.Enabled) {
+		if err := r.AddonsReconciler.ReconcileAddons(ctx, &vc); err != nil {
+			log.Error(err, "failed reconciling external addons inside vcluster")
+			r.setCondition(&vc, v1alpha1.ConditionAddonsReady, metav1.ConditionFalse, "AddonsFailed", err.Error())
+		} else {
+			addonsReady = true
+			r.setCondition(&vc, v1alpha1.ConditionAddonsReady, metav1.ConditionTrue, "AddonsConfigured", "External CoreDNS and Metrics-Server successfully installed and reconciled inside vcluster")
+		}
+	} else if !vc.Spec.Components.CoreDNS.Enabled && !vc.Spec.Components.MetricsServer.Enabled {
+		addonsReady = true
+		r.setCondition(&vc, v1alpha1.ConditionAddonsReady, metav1.ConditionTrue, "AddonsDisabled", "External add-ons disabled in specification")
+	} else {
+		r.setCondition(&vc, v1alpha1.ConditionAddonsReady, metav1.ConditionFalse, "WaitingForControlPlane", "Add-ons awaiting control plane and kubeconfig readiness")
+	}
+
 	// 7. Update Observed Versions & Final Phase
-	if etcdReady && syncerReady {
+	if etcdReady && syncerReady && addonsReady {
 		targetK8s := vc.Spec.KubernetesVersion
 		if targetK8s == "" {
 			targetK8s = "v1.31.0"
 		}
 		targetVCluster := vc.Spec.VClusterVersion
 		if targetVCluster == "" {
-			targetVCluster = "0.37.0"
+			targetVCluster = "0.36.0"
 		}
 
 		vc.Status.VirtualK8sVersion = targetK8s
@@ -223,6 +234,7 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.EtcdReconciler = NewEtcdReconciler(mgr.GetClient())
 	r.SyncerReconciler = NewSyncerReconciler(mgr.GetClient())
 	r.KubeconfigReconciler = NewKubeconfigReconciler(mgr.GetClient())
+	r.AddonsReconciler = NewAddonsReconciler(mgr.GetClient())
 	r.UpgradeManager = NewUpgradeManager(mgr.GetClient())
 
 	return ctrl.NewControllerManagedBy(mgr).

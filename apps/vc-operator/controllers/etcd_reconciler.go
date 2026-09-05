@@ -141,8 +141,9 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 			Labels:    labels,
 		},
 		Spec: appsv1.StatefulSetSpec{
-			Replicas:    &replicas,
-			ServiceName: headlessSvc.Name,
+			Replicas:            &replicas,
+			ServiceName:         headlessSvc.Name,
+			PodManagementPolicy: appsv1.ParallelPodManagement,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
@@ -296,6 +297,10 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 	}
 
 	// If existing, update mutable fields if changed
+	if existingSts.Spec.PodManagementPolicy != appsv1.ParallelPodManagement {
+		_ = r.Delete(ctx, existingSts)
+		return false, nil
+	}
 	needsUpdate := false
 	if existingSts.Spec.Replicas == nil || *existingSts.Spec.Replicas != replicas {
 		existingSts.Spec.Replicas = &replicas

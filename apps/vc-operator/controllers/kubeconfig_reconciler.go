@@ -60,7 +60,7 @@ users:
 		}
 	}
 
-	// vCluster v0.37+ automatically generates secret "vc-<clusterName>" with "config" and "certificate-authority"
+	// vCluster v0.36+ automatically generates secret "vc-<clusterName>" with "config" and "certificate-authority"
 	vcSec := &corev1.Secret{}
 	vcSecName := fmt.Sprintf("vc-%s", vc.Name)
 	if err := r.Get(ctx, types.NamespacedName{Name: vcSecName, Namespace: vc.Namespace}, vcSec); err == nil {

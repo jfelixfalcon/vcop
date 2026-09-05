@@ -34,11 +34,11 @@ func TestGenerateYAML_DefaultHA(t *testing.T) {
 	if !strings.Contains(yamlStr, "replicas: 3") {
 		t.Errorf("Expected 3 replicas for HA etcd, got:\n%s", yamlStr)
 	}
-	if !strings.Contains(yamlStr, "metricsServer") || !strings.Contains(yamlStr, "enabled: true") {
-		t.Errorf("Expected metricsServer enabled, got:\n%s", yamlStr)
+	if !strings.Contains(yamlStr, "coredns:") || !strings.Contains(yamlStr, "enabled: false") {
+		t.Errorf("Expected built-in coredns disabled in favor of external, got:\n%s", yamlStr)
 	}
-	if !strings.Contains(yamlStr, "coreDNS") {
-		t.Errorf("Expected coreDNS enabled, got:\n%s", yamlStr)
+	if !strings.Contains(yamlStr, "metricsServer:") {
+		t.Errorf("Expected metricsServer section, got:\n%s", yamlStr)
 	}
 	if !strings.Contains(yamlStr, "deploy:") {
 		t.Errorf("Expected etcd deploy in HA, got:\n%s", yamlStr)
@@ -46,7 +46,7 @@ func TestGenerateYAML_DefaultHA(t *testing.T) {
 }
 
 func TestGenerateYAML_RawOverride(t *testing.T) {
-	rawJSON := `{"controlPlane":{"coreDNS":{"enabled":false}}}`
+	rawJSON := `{"controlPlane":{"coredns":{"enabled":false}}}`
 	spec := &v1alpha1.VirtualClusterSpec{
 		ClusterName:       "tenant-override",
 		KubernetesVersion: "v1.31.0",
@@ -64,8 +64,8 @@ func TestGenerateYAML_RawOverride(t *testing.T) {
 	if !strings.Contains(yamlStr, "replicas: 1") {
 		t.Errorf("Expected 1 replica for non-HA, got:\n%s", yamlStr)
 	}
-	if !strings.Contains(yamlStr, "coreDNS:") || !strings.Contains(yamlStr, "enabled: false") {
-		t.Errorf("Expected coreDNS enabled: false from override, got:\n%s", yamlStr)
+	if !strings.Contains(yamlStr, "coredns:") || !strings.Contains(yamlStr, "enabled: false") {
+		t.Errorf("Expected coredns enabled: false from override, got:\n%s", yamlStr)
 	}
 	if !strings.Contains(yamlStr, "database:") || !strings.Contains(yamlStr, "embedded:") {
 		t.Errorf("Expected embedded database for non-HA, got:\n%s", yamlStr)

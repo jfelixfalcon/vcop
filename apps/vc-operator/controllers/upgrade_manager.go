@@ -23,7 +23,7 @@ func NewUpgradeManager(c client.Client) *UpgradeManager {
 func (m *UpgradeManager) CheckUpgradeStatus(vc *v1alpha1.VirtualCluster) (needsUpgrade bool, desc string) {
 	desiredVCluster := vc.Spec.VClusterVersion
 	if desiredVCluster == "" {
-		desiredVCluster = "0.37.0"
+		desiredVCluster = "0.36.0"
 	}
 
 	desiredK8s := vc.Spec.KubernetesVersion

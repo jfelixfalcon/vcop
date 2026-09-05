@@ -139,7 +139,7 @@ export const FleetDashboard: React.FC = () => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Engine Version</p>
-              <h3 className="text-2xl font-bold font-mono text-cyber-accent mt-1.5">vCluster 0.37</h3>
+              <h3 className="text-2xl font-bold font-mono text-cyber-accent mt-1.5">vCluster 0.36</h3>
             </div>
             <div className="p-3 bg-cyber-800 rounded-xl border border-cyber-700 text-purple-400">
               <Activity className="w-5 h-5" />
