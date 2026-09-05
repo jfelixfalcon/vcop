@@ -322,6 +322,30 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 		k8sVersion = "v1.31.0"
 	}
 
+	isExternalEtcd := vc.Spec.HighAvailability || (preset.DefaultHA && vc.Spec.SizePreset != v1alpha1.PresetSmall)
+
+	var volumeClaimTemplates []corev1.PersistentVolumeClaim
+	if !isExternalEtcd {
+		// Only single-node embedded SQLite mode requires persistent storage on the syncer itself.
+		volumeClaimTemplates = []corev1.PersistentVolumeClaim{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "data",
+				},
+				Spec: corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{
+						corev1.ReadWriteOnce,
+					},
+					Resources: corev1.VolumeResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceStorage: storageQuantity,
+						},
+					},
+				},
+			},
+		}
+	}
+
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      vc.Name,
@@ -329,26 +353,10 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 			Labels:    labels,
 		},
 		Spec: appsv1.StatefulSetSpec{
-			Replicas:            &replicas,
-			ServiceName:         headlessSvc.Name,
-			PodManagementPolicy: appsv1.ParallelPodManagement,
-			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "data",
-					},
-					Spec: corev1.PersistentVolumeClaimSpec{
-						AccessModes: []corev1.PersistentVolumeAccessMode{
-							corev1.ReadWriteOnce,
-						},
-						Resources: corev1.VolumeResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceStorage: storageQuantity,
-							},
-						},
-					},
-				},
-			},
+			Replicas:             &replicas,
+			ServiceName:          headlessSvc.Name,
+			PodManagementPolicy:  appsv1.ParallelPodManagement,
+			VolumeClaimTemplates: volumeClaimTemplates,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: selectorLabels,
 			},
@@ -507,40 +515,51 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 							},
 						},
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "binaries",
-							VolumeSource: corev1.VolumeSource{
-								EmptyDir: &corev1.EmptyDirVolumeSource{},
-							},
-						},
-						{
-							Name: "certs",
-							VolumeSource: corev1.VolumeSource{
-								EmptyDir: &corev1.EmptyDirVolumeSource{},
-							},
-						},
-						{
-							Name: "helm-cache",
-							VolumeSource: corev1.VolumeSource{
-								EmptyDir: &corev1.EmptyDirVolumeSource{},
-							},
-						},
-						{
-							Name: "vcluster-config",
-							VolumeSource: corev1.VolumeSource{
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: vcConfigSec.Name,
+					Volumes: func() []corev1.Volume {
+						vols := []corev1.Volume{
+							{
+								Name: "binaries",
+								VolumeSource: corev1.VolumeSource{
+									EmptyDir: &corev1.EmptyDirVolumeSource{},
 								},
 							},
-						},
-						{
-							Name: "tmp",
-							VolumeSource: corev1.VolumeSource{
-								EmptyDir: &corev1.EmptyDirVolumeSource{},
+							{
+								Name: "certs",
+								VolumeSource: corev1.VolumeSource{
+									EmptyDir: &corev1.EmptyDirVolumeSource{},
+								},
 							},
-						},
-					},
+							{
+								Name: "helm-cache",
+								VolumeSource: corev1.VolumeSource{
+									EmptyDir: &corev1.EmptyDirVolumeSource{},
+								},
+							},
+							{
+								Name: "vcluster-config",
+								VolumeSource: corev1.VolumeSource{
+									Secret: &corev1.SecretVolumeSource{
+										SecretName: vcConfigSec.Name,
+									},
+								},
+							},
+							{
+								Name: "tmp",
+								VolumeSource: corev1.VolumeSource{
+									EmptyDir: &corev1.EmptyDirVolumeSource{},
+								},
+							},
+						}
+						if isExternalEtcd {
+							vols = append(vols, corev1.Volume{
+								Name: "data",
+								VolumeSource: corev1.VolumeSource{
+									EmptyDir: &corev1.EmptyDirVolumeSource{},
+								},
+							})
+						}
+						return vols
+					}(),
 				},
 			},
 		},
@@ -560,6 +579,28 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 		return false, endpoint, err
 	}
 
+	// VolumeClaimTemplates is immutable on StatefulSets; if template count changed, delete to recreate
+	if len(existingSts.Spec.VolumeClaimTemplates) != len(sts.Spec.VolumeClaimTemplates) {
+		if err := r.Delete(ctx, existingSts); err != nil && !errors.IsNotFound(err) {
+			return false, endpoint, err
+		}
+		return false, endpoint, nil
+	}
+
+	// If using external etcd and syncer StatefulSet no longer has VolumeClaimTemplates,
+	// clean up any legacy syncer PVCs (data-<name>-<idx>) so storage isn't leaked
+	if isExternalEtcd && len(existingSts.Spec.VolumeClaimTemplates) == 0 {
+		for i := int32(0); i < 10; i++ {
+			legacyPVC := &corev1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("data-%s-%d", sts.Name, i),
+					Namespace: vc.Namespace,
+				},
+			}
+			_ = r.Delete(ctx, legacyPVC)
+		}
+	}
+
 	needsUpdate := false
 	if existingSts.Spec.Replicas == nil || *existingSts.Spec.Replicas != replicas {
 		existingSts.Spec.Replicas = &replicas
@@ -567,6 +608,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 	}
 	if !reflect.DeepEqual(existingSts.Spec.Template.Spec.InitContainers, sts.Spec.Template.Spec.InitContainers) ||
 		!reflect.DeepEqual(existingSts.Spec.Template.Spec.Containers, sts.Spec.Template.Spec.Containers) ||
+		!reflect.DeepEqual(existingSts.Spec.Template.Spec.Volumes, sts.Spec.Template.Spec.Volumes) ||
 		existingSts.Spec.Template.Spec.ServiceAccountName != sts.Spec.Template.Spec.ServiceAccountName {
 		existingSts.Spec.Template = sts.Spec.Template
 		needsUpdate = true
