@@ -213,7 +213,16 @@ export async function getVirtualCluster(name: string, namespace?: string): Promi
     }
     const res = await k8sRequest<any>(`/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`);
     if (res.statusCode === 200 && res.data) {
-      return mapK8sResourceToVirtualCluster(res.data);
+      const cluster = mapK8sResourceToVirtualCluster(res.data);
+      try {
+        const cmRes = await k8sRequest<any>(`/api/v1/namespaces/${targetNs}/configmaps/${name}-config`);
+        if (cmRes.statusCode === 200 && cmRes.data?.data?.['vcluster.yaml']) {
+          cluster.compiledConfig = cmRes.data.data['vcluster.yaml'];
+        }
+      } catch {
+        // Fallback gracefully if ConfigMap is still provisioning
+      }
+      return cluster;
     }
     return null;
   } catch {

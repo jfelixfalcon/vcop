@@ -74,6 +74,7 @@ export interface VirtualCluster {
     cpu: number[];
     memory: number[];
   };
+  compiledConfig?: string;
 }
 
 export interface PresetDetails {

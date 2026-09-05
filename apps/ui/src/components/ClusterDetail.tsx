@@ -360,37 +360,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName }) => {
             <span className="text-slate-500 text-[10px]">Stored in host ConfigMap: {cluster.name}-config</span>
           </div>
           <pre className="bg-cyber-950 border border-cyber-800 rounded-xl p-4 text-slate-300 overflow-x-auto whitespace-pre leading-relaxed">
-{`controlPlane:
-  distro:
-    k8s:
-      enabled: true
-      version: "${k8sVer}"
-      image: "registry.k8s.io/kube-apiserver:${k8sVer}"
-      controllerManager:
-        image: "registry.k8s.io/kube-controller-manager:${k8sVer}"
-  backingStore:
-    etcd:
-      deploy:
-        enabled: true
-        statefulSet:
-          highAvailability:
-            replicas: ${isHA ? 3 : 1}
-          persistence:
-            volumeClaim:
-              size: "25Gi"
-  coredns:
-    enabled: false # External CoreDNS managed by vc-operator AddonsReconciler
-integrations:
-  metricsServer:
-    enabled: false # External Metrics-Server managed by vc-operator AddonsReconciler
-sync:
-  toHost:
-    pods:
-      enabled: true
-    services:
-      enabled: true
-    ingresses:
-      enabled: true`}
+{cluster.compiledConfig || `# vcluster.yaml is being reconciled by vc-operator for ${cluster.name}-config...`}
           </pre>
         </div>
       )}
