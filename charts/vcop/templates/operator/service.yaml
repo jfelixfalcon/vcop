@@ -1,0 +1,19 @@
+{{- if and .Values.operator.enabled .Values.operator.metrics.service.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vcop.fullname" . }}-operator-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+    {{- include "vcop.operator.selectorLabels" . | nindent 4 }}
+spec:
+  type: {{ .Values.operator.metrics.service.type }}
+  selector:
+    {{- include "vcop.operator.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.operator.metrics.service.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}

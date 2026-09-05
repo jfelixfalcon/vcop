@@ -3,6 +3,8 @@
 OPERATOR_DIR = apps/vc-operator
 UI_DIR = apps/ui
 DEPLOY_DIR = deploy
+CHART_DIR = charts/vcop
+KIND_CLUSTER ?= kind
 
 OPERATOR_IMG ?= vops/vc-operator:v0.37.0
 UI_IMG ?= vops/vc-operations-center:v0.37.0
@@ -30,7 +32,7 @@ dev-operator: ## Run the operator locally against host kubeconfig
 	@echo "=== Starting vCOp Operator locally ==="
 	cd $(OPERATOR_DIR) && go run ./main.go
 
-##@ Building
+##@ Building & Packaging
 
 .PHONY: build
 build: build-operator build-ui ## Build operator binary and Astro UI production bundle
@@ -51,14 +53,45 @@ docker-build: docker-build-operator docker-build-ui ## Build Docker images for O
 .PHONY: docker-build-operator
 docker-build-operator:
 	@echo "=== Building Operator Docker Image: $(OPERATOR_IMG) ==="
-	cd $(OPERATOR_DIR) && docker build -t $(OPERATOR_IMG) .
+	docker build -t $(OPERATOR_IMG) $(OPERATOR_DIR)
 
 .PHONY: docker-build-ui
 docker-build-ui:
 	@echo "=== Building UI Docker Image: $(UI_IMG) ==="
-	cd $(UI_DIR) && docker build -t $(UI_IMG) .
+	docker build -t $(UI_IMG) $(UI_DIR)
 
-##@ Deployment
+##@ Kind (Local Cluster Image Caching)
+
+.PHONY: kind-load
+kind-load: ## Cache and load built Docker images directly into Kind cluster
+	@echo "=== Loading container images into Kind cluster ($(KIND_CLUSTER)) ==="
+	kind load docker-image $(OPERATOR_IMG) --name $(KIND_CLUSTER)
+	kind load docker-image $(UI_IMG) --name $(KIND_CLUSTER)
+	@echo "=== Container images cached in Kind containerd! ==="
+
+##@ Helm Chart Management
+
+.PHONY: helm-lint
+helm-lint: ## Lint the vCOp Helm chart
+	@echo "=== Linting vCOp Helm Chart ==="
+	helm lint $(CHART_DIR)
+
+.PHONY: helm-install
+helm-install: ## Install vCOp via Helm chart (into vcop-system namespace)
+	@echo "=== Installing vCOp Helm Chart ==="
+	helm install vcop $(CHART_DIR) --namespace vcop-system --create-namespace
+
+.PHONY: helm-upgrade
+helm-upgrade: ## Upgrade vCOp Helm release
+	@echo "=== Upgrading vCOp Helm Chart ==="
+	helm upgrade vcop $(CHART_DIR) --namespace vcop-system
+
+.PHONY: helm-uninstall
+helm-uninstall: ## Uninstall vCOp Helm release
+	@echo "=== Uninstalling vCOp Helm Chart ==="
+	helm uninstall vcop --namespace vcop-system
+
+##@ Raw Manifest Deployment
 
 .PHONY: deploy-crds
 deploy-crds: ## Install CRDs into the target Kubernetes cluster
@@ -73,7 +106,7 @@ deploy-presets: ## Install standard ConfigMap templates and sizing presets
 	kubectl apply -f $(DEPLOY_DIR)/presets/
 
 .PHONY: deploy
-deploy: deploy-crds deploy-rbac deploy-presets ## Deploy entire vCOp stack (CRD, RBAC, Operator, UI, Presets)
+deploy: deploy-crds deploy-rbac deploy-presets ## Deploy entire vCOp stack via raw manifests
 	kubectl apply -f $(DEPLOY_DIR)/operator.yaml
 	kubectl apply -f $(DEPLOY_DIR)/ui.yaml
 
@@ -87,4 +120,4 @@ undeploy: ## Remove vCOp operator and UI from cluster
 
 .PHONY: help
 help: ## Display this help message
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)

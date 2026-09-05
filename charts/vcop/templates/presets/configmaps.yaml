@@ -1,0 +1,166 @@
+{{- if .Values.presets.enabled -}}
+{{- if .Values.presets.devSandbox.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vcluster-preset-dev-sandbox
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+    vops.gitops.io/template: "true"
+    vops.gitops.io/preset: "dev-sandbox"
+data:
+  description: "Lightweight sandbox for ephemeral pull requests and developer prototyping (2 vCPU / 4GB RAM)"
+  vcluster.yaml: |
+    controlPlane:
+      distro:
+        k8s:
+          enabled: true
+          version: "v1.31.0"
+          image: "registry.k8s.io/kube-apiserver:v1.31.0"
+          controllerManager:
+            image: "registry.k8s.io/kube-controller-manager:v1.31.0"
+      backingStore:
+        etcd:
+          deploy:
+            statefulSet:
+              highAvailability:
+                replicas: 1
+              persistence:
+                volumeClaim:
+                  size: "5Gi"
+              resources:
+                requests:
+                  cpu: "500m"
+                  memory: "1Gi"
+                limits:
+                  cpu: "2000m"
+                  memory: "4Gi"
+      coreDNS:
+        enabled: true
+    integrations:
+      metricsServer:
+        enabled: true
+    sync:
+      toHost:
+        pods:
+          enabled: true
+        services:
+          enabled: true
+        ingresses:
+          enabled: true
+    policies:
+      autoSleep:
+        enabled: true
+---
+{{- end }}
+{{- if .Values.presets.qaStaging.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vcluster-preset-qa-staging
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+    vops.gitops.io/template: "true"
+    vops.gitops.io/preset: "qa-staging"
+data:
+  description: "High-availability staging environment for team integration testing (4 vCPU / 8GB RAM, 3-node etcd)"
+  vcluster.yaml: |
+    controlPlane:
+      distro:
+        k8s:
+          enabled: true
+          version: "v1.31.0"
+          image: "registry.k8s.io/kube-apiserver:v1.31.0"
+          controllerManager:
+            image: "registry.k8s.io/kube-controller-manager:v1.31.0"
+      backingStore:
+        etcd:
+          deploy:
+            statefulSet:
+              highAvailability:
+                replicas: 3
+              persistence:
+                volumeClaim:
+                  size: "10Gi"
+              resources:
+                requests:
+                  cpu: "1000m"
+                  memory: "2Gi"
+                limits:
+                  cpu: "4000m"
+                  memory: "8Gi"
+      coreDNS:
+        enabled: true
+    integrations:
+      metricsServer:
+        enabled: true
+    sync:
+      toHost:
+        pods:
+          enabled: true
+        services:
+          enabled: true
+        ingresses:
+          enabled: true
+---
+{{- end }}
+{{- if .Values.presets.gpuIsolated.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vcluster-preset-gpu-isolated
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+    vops.gitops.io/template: "true"
+    vops.gitops.io/preset: "gpu-isolated"
+data:
+  description: "GPU-accelerated virtual cluster with dedicated NVMe backing store and high-throughput node synchronization"
+  vcluster.yaml: |
+    controlPlane:
+      distro:
+        k8s:
+          enabled: true
+          version: "v1.31.0"
+          image: "registry.k8s.io/kube-apiserver:v1.31.0"
+          controllerManager:
+            image: "registry.k8s.io/kube-controller-manager:v1.31.0"
+      backingStore:
+        etcd:
+          deploy:
+            statefulSet:
+              highAvailability:
+                replicas: 3
+              persistence:
+                volumeClaim:
+                  size: "50Gi"
+              resources:
+                requests:
+                  cpu: "2000m"
+                  memory: "8Gi"
+                limits:
+                  cpu: "8000m"
+                  memory: "32Gi"
+      coreDNS:
+        enabled: true
+    integrations:
+      metricsServer:
+        enabled: true
+    sync:
+      toHost:
+        pods:
+          enabled: true
+        services:
+          enabled: true
+        ingresses:
+          enabled: true
+      fromHost:
+        nodes:
+          enabled: true
+          selector:
+            labels:
+              accelerator: "nvidia-tesla"
+{{- end }}
+{{- end }}

@@ -1,0 +1,60 @@
+{{- if and .Values.ui.enabled .Values.ui.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "vcop.fullname" . }}-ui-role
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+rules:
+  # VirtualCluster CRD
+  - apiGroups:
+      - vops.gitops.io
+    resources:
+      - virtualclusters
+      - virtualclusters/status
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Core resources for reading secrets (kubeconfigs), configmaps, pods, services
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+      - configmaps
+      - pods
+      - services
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+  # Metrics API
+  - apiGroups:
+      - metrics.k8s.io
+    resources:
+      - pods
+      - nodes
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "vcop.fullname" . }}-ui-rolebinding
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "vcop.fullname" . }}-ui-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "vcop.ui.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

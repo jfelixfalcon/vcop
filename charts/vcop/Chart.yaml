@@ -1,0 +1,19 @@
+apiVersion: v2
+name: vcop
+description: Cloud-Native Virtual Cluster Operator & Operations Center (vCluster OSS v0.37)
+type: application
+version: 0.1.0
+appVersion: "0.37.0"
+icon: https://raw.githubusercontent.com/loft-sh/vcluster/main/docs/static/media/vcluster-logo.svg
+keywords:
+  - vcluster
+  - operator
+  - kubernetes
+  - multi-tenancy
+  - devops
+home: https://github.com/vops/vc-operator
+sources:
+  - https://github.com/vops/vc-operator
+maintainers:
+  - name: vCOp Team
+    email: maintainers@vops.gitops.io
