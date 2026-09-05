@@ -113,6 +113,106 @@ func (r *AddonsReconciler) ReconcileAddons(ctx context.Context, vc *v1alpha1.Vir
 		}
 	}
 
+	// 3. Reconcile Pod Readiness Conditions
+	// Under vCluster 0.36 syncer on K8s 1.36+ hosts, version skew can leave guest pod
+	// conditions (PodReadyToStartContainers / Ready) stuck in False even though containerStatuses are Ready.
+	// This ensures virtual Endpoints and APIServices (like metrics.k8s.io) become Ready.
+	if err := r.reconcilePodConditions(ctx, vClient); err != nil {
+		// Log or silently continue as this is an enhancement loop
+	}
+
+	return nil
+}
+
+func (r *AddonsReconciler) reconcilePodConditions(ctx context.Context, vClient client.Client) error {
+	podList := &corev1.PodList{}
+	if err := vClient.List(ctx, podList); err != nil {
+		return err
+	}
+
+	now := metav1.Now()
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if len(pod.Status.ContainerStatuses) == 0 {
+			continue
+		}
+
+		allReady := true
+		for _, cs := range pod.Status.ContainerStatuses {
+			if !cs.Ready {
+				allReady = false
+				break
+			}
+		}
+
+		if allReady && pod.Status.Phase == corev1.PodRunning {
+			needsUpdate := false
+			hasReady := false
+			hasContainersReady := false
+			hasPodReadyToStart := false
+
+			for j := range pod.Status.Conditions {
+				cond := &pod.Status.Conditions[j]
+				if cond.Type == corev1.PodReady {
+					hasReady = true
+					if cond.Status != corev1.ConditionTrue {
+						cond.Status = corev1.ConditionTrue
+						cond.Reason = ""
+						cond.Message = ""
+						cond.LastTransitionTime = now
+						needsUpdate = true
+					}
+				} else if cond.Type == corev1.ContainersReady {
+					hasContainersReady = true
+					if cond.Status != corev1.ConditionTrue {
+						cond.Status = corev1.ConditionTrue
+						cond.Reason = ""
+						cond.Message = ""
+						cond.LastTransitionTime = now
+						needsUpdate = true
+					}
+				} else if cond.Type == corev1.PodConditionType("PodReadyToStartContainers") {
+					hasPodReadyToStart = true
+					if cond.Status != corev1.ConditionTrue {
+						cond.Status = corev1.ConditionTrue
+						cond.Reason = ""
+						cond.Message = ""
+						cond.LastTransitionTime = now
+						needsUpdate = true
+					}
+				}
+			}
+
+			if !hasReady {
+				pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
+					Type:               corev1.PodReady,
+					Status:             corev1.ConditionTrue,
+					LastTransitionTime: now,
+				})
+				needsUpdate = true
+			}
+			if !hasContainersReady {
+				pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
+					Type:               corev1.ContainersReady,
+					Status:             corev1.ConditionTrue,
+					LastTransitionTime: now,
+				})
+				needsUpdate = true
+			}
+			if !hasPodReadyToStart {
+				pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
+					Type:               corev1.PodConditionType("PodReadyToStartContainers"),
+					Status:             corev1.ConditionTrue,
+					LastTransitionTime: now,
+				})
+				needsUpdate = true
+			}
+
+			if needsUpdate {
+				_ = vClient.Status().Update(ctx, pod)
+			}
+		}
+	}
 	return nil
 }
 
