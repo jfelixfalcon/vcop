@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -103,6 +104,22 @@ func TestVirtualClusterReconciler_Reconcile(t *testing.T) {
 		t.Errorf("Expected headless service test-vcluster-etcd-headless to be created: %v", err)
 	}
 
+	// Verify Syncer StatefulSet exists with 3 replicas
+	syncerSts := &appsv1.StatefulSet{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-vcluster", Namespace: "default"}, syncerSts); err != nil {
+		t.Errorf("Expected syncer StatefulSet test-vcluster to be created: %v", err)
+	} else if syncerSts.Spec.Replicas == nil || *syncerSts.Spec.Replicas != 3 {
+		t.Errorf("Expected syncer StatefulSet to have 3 replicas, got: %v", syncerSts.Spec.Replicas)
+	}
+
+	// Verify etcd StatefulSet exists with 3 replicas
+	etcdSts := &appsv1.StatefulSet{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-vcluster-etcd", Namespace: "default"}, etcdSts); err != nil {
+		t.Errorf("Expected etcd StatefulSet test-vcluster-etcd to be created: %v", err)
+	} else if etcdSts.Spec.Replicas == nil || *etcdSts.Spec.Replicas != 3 {
+		t.Errorf("Expected etcd StatefulSet to have 3 replicas, got: %v", etcdSts.Spec.Replicas)
+	}
+
 	// Check finalizer added
 	updatedVC := &v1alpha1.VirtualCluster{}
 	if err := client.Get(ctx, req.NamespacedName, updatedVC); err != nil {
@@ -110,5 +127,79 @@ func TestVirtualClusterReconciler_Reconcile(t *testing.T) {
 	}
 	if len(updatedVC.Finalizers) == 0 || updatedVC.Finalizers[0] != VirtualClusterFinalizer {
 		t.Errorf("Expected finalizer %s on VirtualCluster, got: %v", VirtualClusterFinalizer, updatedVC.Finalizers)
+	}
+}
+
+func TestVirtualClusterReconciler_NonHA(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-dev-small",
+			Namespace: "default",
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName:       "test-dev-small",
+			KubernetesVersion: "v1.31.0",
+			VClusterVersion:   "0.37.0",
+			SizePreset:        v1alpha1.PresetSmall,
+			HighAvailability:  false,
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc).
+		WithStatusSubresource(vc).
+		Build()
+
+	logger := zap.New(zap.UseDevMode(true))
+
+	reconciler := &VirtualClusterReconciler{
+		Client:               client,
+		Log:                  logger,
+		Scheme:               scheme,
+		EtcdReconciler:       NewEtcdReconciler(client),
+		SyncerReconciler:     NewSyncerReconciler(client),
+		KubeconfigReconciler: NewKubeconfigReconciler(client),
+		UpgradeManager:       NewUpgradeManager(client),
+	}
+
+	ctx := context.Background()
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      vc.Name,
+			Namespace: vc.Namespace,
+		},
+	}
+
+	// Step 1: Add finalizer
+	_, err := reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile pass 1 error: %v", err)
+	}
+
+	// Step 2: Create resources
+	_, err = reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile pass 2 error: %v", err)
+	}
+
+	// Verify Syncer StatefulSet has 1 replica
+	syncerSts := &appsv1.StatefulSet{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-dev-small", Namespace: "default"}, syncerSts); err != nil {
+		t.Fatalf("Failed to fetch syncer sts: %v", err)
+	}
+	if syncerSts.Spec.Replicas == nil || *syncerSts.Spec.Replicas != 1 {
+		t.Errorf("Expected 1 replica for non-HA, got %v", syncerSts.Spec.Replicas)
+	}
+
+	// Verify etcd StatefulSet does not exist
+	etcdSts := &appsv1.StatefulSet{}
+	err = client.Get(ctx, types.NamespacedName{Name: "test-dev-small-etcd", Namespace: "default"}, etcdSts)
+	if err == nil {
+		t.Errorf("Expected no etcd sts for non-HA, but found one")
 	}
 }

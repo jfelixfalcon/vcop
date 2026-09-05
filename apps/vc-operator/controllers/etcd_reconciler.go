@@ -3,6 +3,8 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -27,7 +29,9 @@ func NewEtcdReconciler(c client.Client) *EtcdReconciler {
 }
 
 func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.VirtualCluster) (bool, error) {
-	if !vc.Spec.HighAvailability {
+	preset := vcluster.GetPresetConfig(vc.Spec.SizePreset, vc.Spec.CustomResources)
+	isHA := vc.Spec.HighAvailability || (preset.DefaultHA && vc.Spec.SizePreset != v1alpha1.PresetSmall)
+	if !isHA {
 		// Clean up etcd resources if HA is disabled
 		sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-etcd", vc.Name), Namespace: vc.Namespace}}
 		_ = r.Delete(ctx, sts)
@@ -38,8 +42,10 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 		return true, nil
 	}
 
-	preset := vcluster.GetPresetConfig(vc.Spec.SizePreset, vc.Spec.CustomResources)
-	replicas := int32(3)
+	replicas := preset.EtcdReplicas
+	if replicas == 0 {
+		replicas = 3
+	}
 
 	labels := map[string]string{
 		"app.kubernetes.io/name":       "vcluster-etcd",
@@ -63,14 +69,16 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 			Selector:                 labels,
 			Ports: []corev1.ServicePort{
 				{
-					Name:       "server",
-					Port:       2380,
-					TargetPort: intstr.FromInt(2380),
-				},
-				{
-					Name:       "client",
+					Name:       "etcd",
 					Port:       2379,
 					TargetPort: intstr.FromInt(2379),
+					Protocol:   corev1.ProtocolTCP,
+				},
+				{
+					Name:       "peer",
+					Port:       2380,
+					TargetPort: intstr.FromInt(2380),
+					Protocol:   corev1.ProtocolTCP,
 				},
 			},
 		}
@@ -94,9 +102,16 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 			Selector: labels,
 			Ports: []corev1.ServicePort{
 				{
-					Name:       "client",
+					Name:       "etcd",
 					Port:       2379,
 					TargetPort: intstr.FromInt(2379),
+					Protocol:   corev1.ProtocolTCP,
+				},
+				{
+					Name:       "peer",
+					Port:       2380,
+					TargetPort: intstr.FromInt(2380),
+					Protocol:   corev1.ProtocolTCP,
 				},
 			},
 		}
@@ -111,6 +126,13 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 	if err != nil {
 		storageQuantity = resource.MustParse("10Gi")
 	}
+
+	initialCluster := make([]string, replicas)
+	for i := int32(0); i < replicas; i++ {
+		memberPod := fmt.Sprintf("%s-etcd-%d", vc.Name, i)
+		initialCluster[i] = fmt.Sprintf("%s=https://%s.%s.%s:2380", memberPod, memberPod, headlessSvc.Name, vc.Namespace)
+	}
+	initialClusterStr := strings.Join(initialCluster, ",")
 
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -131,20 +153,34 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  "etcd",
-							Image: "quay.io/coreos/etcd:v3.5.12",
+							Name:            "etcd",
+							Image:           "registry.k8s.io/etcd:3.6.8-0",
+							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command: []string{
-								"/usr/local/bin/etcd",
-								"--name=$(HOSTNAME)",
-								"--data-dir=/var/run/etcd/default.etcd",
-								"--listen-client-urls=http://0.0.0.0:2379",
-								"--advertise-client-urls=http://$(HOSTNAME)." + headlessSvc.Name + "." + vc.Namespace + ".svc:2379",
-								"--listen-peer-urls=http://0.0.0.0:2380",
-								"--initial-advertise-peer-urls=http://$(HOSTNAME)." + headlessSvc.Name + "." + vc.Namespace + ".svc:2380",
+								"etcd",
+								"--cert-file=/run/config/pki/etcd-server.crt",
+								"--client-cert-auth=true",
+								"--data-dir=/var/lib/etcd",
+								fmt.Sprintf("--advertise-client-urls=https://$(NAME).%s.%s:2379", headlessSvc.Name, vc.Namespace),
+								fmt.Sprintf("--initial-advertise-peer-urls=https://$(NAME).%s.%s:2380", headlessSvc.Name, vc.Namespace),
+								fmt.Sprintf("--initial-cluster=%s", initialClusterStr),
+								fmt.Sprintf("--initial-cluster-token=%s", vc.Name),
+								"--initial-cluster-state=new",
+								"--listen-client-urls=https://0.0.0.0:2379",
+								"--listen-metrics-urls=http://0.0.0.0:2381",
+								"--listen-peer-urls=https://0.0.0.0:2380",
+								"--key-file=/run/config/pki/etcd-server.key",
+								"--name=$(NAME)",
+								"--peer-cert-file=/run/config/pki/etcd-peer.crt",
+								"--peer-client-cert-auth=true",
+								"--peer-key-file=/run/config/pki/etcd-peer.key",
+								"--peer-trusted-ca-file=/run/config/pki/etcd-ca.crt",
+								"--snapshot-count=10000",
+								"--trusted-ca-file=/run/config/pki/etcd-ca.crt",
 							},
 							Env: []corev1.EnvVar{
 								{
-									Name: "HOSTNAME",
+									Name: "NAME",
 									ValueFrom: &corev1.EnvVarSource{
 										FieldRef: &corev1.ObjectFieldSelector{
 											FieldPath: "metadata.name",
@@ -155,22 +191,70 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 							Ports: []corev1.ContainerPort{
 								{Name: "client", ContainerPort: 2379},
 								{Name: "peer", ContainerPort: 2380},
+								{Name: "metrics", ContainerPort: 2381},
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "data",
-									MountPath: "/var/run/etcd",
+									MountPath: "/var/lib/etcd",
+								},
+								{
+									Name:      "certs",
+									MountPath: "/run/config/pki",
+									ReadOnly:  true,
 								},
 							},
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/health",
-										Port: intstr.FromInt(2379),
+										Path:   "/readyz",
+										Port:   intstr.FromInt(2381),
+										Scheme: corev1.URISchemeHTTP,
 									},
 								},
-								InitialDelaySeconds: 5,
+								InitialDelaySeconds: 10,
 								PeriodSeconds:       10,
+								TimeoutSeconds:      15,
+								SuccessThreshold:    1,
+								FailureThreshold:    8,
+							},
+							LivenessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									HTTPGet: &corev1.HTTPGetAction{
+										Path:   "/livez",
+										Port:   intstr.FromInt(2381),
+										Scheme: corev1.URISchemeHTTP,
+									},
+								},
+								InitialDelaySeconds: 10,
+								PeriodSeconds:       10,
+								TimeoutSeconds:      15,
+								SuccessThreshold:    1,
+								FailureThreshold:    8,
+							},
+							StartupProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									HTTPGet: &corev1.HTTPGetAction{
+										Path:   "/readyz",
+										Port:   intstr.FromInt(2381),
+										Scheme: corev1.URISchemeHTTP,
+									},
+								},
+								InitialDelaySeconds: 10,
+								PeriodSeconds:       10,
+								TimeoutSeconds:      15,
+								SuccessThreshold:    1,
+								FailureThreshold:    24,
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "certs",
+							VolumeSource: corev1.VolumeSource{
+								Secret: &corev1.SecretVolumeSource{
+									SecretName: fmt.Sprintf("%s-certs", vc.Name),
+								},
 							},
 						},
 					},
@@ -211,11 +295,20 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 		return false, fmt.Errorf("failed fetching etcd statefulset: %w", err)
 	}
 
-	// If existing, update mutable replicas if changed
-	if *existingSts.Spec.Replicas != replicas {
+	// If existing, update mutable fields if changed
+	needsUpdate := false
+	if existingSts.Spec.Replicas == nil || *existingSts.Spec.Replicas != replicas {
 		existingSts.Spec.Replicas = &replicas
+		needsUpdate = true
+	}
+	if !reflect.DeepEqual(existingSts.Spec.Template.Spec.Containers, sts.Spec.Template.Spec.Containers) ||
+		!reflect.DeepEqual(existingSts.Spec.Template.Spec.Volumes, sts.Spec.Template.Spec.Volumes) {
+		existingSts.Spec.Template = sts.Spec.Template
+		needsUpdate = true
+	}
+	if needsUpdate {
 		if err := r.Update(ctx, existingSts); err != nil && !errors.IsConflict(err) {
-			return false, fmt.Errorf("failed updating etcd statefulset replicas: %w", err)
+			return false, fmt.Errorf("failed updating etcd statefulset: %w", err)
 		}
 	}
 

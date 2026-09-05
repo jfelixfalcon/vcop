@@ -15,8 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"k8s.io/client-go/util/retry"
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
+	"k8s.io/client-go/util/retry"
 )
 
 const (
@@ -151,10 +151,16 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		vc.Status.VClusterVersion = targetVCluster
 		vc.Status.Phase = v1alpha1.PhaseReady
 
-		// Populate mock/observed metrics for status telemetry
+		// Query pods in namespace for live status telemetry
+		podCount := int32(1)
+		podList := &corev1.PodList{}
+		if err := r.List(ctx, podList, client.InNamespace(vc.Namespace)); err == nil && len(podList.Items) > 0 {
+			podCount = int32(len(podList.Items))
+		}
+
 		vc.Status.Metrics = v1alpha1.ClusterMetrics{
 			ActiveNodeCount: 1,
-			PodCount:        3,
+			PodCount:        podCount,
 			MemoryUsage:     "240Mi",
 			CPUUsage:        "85m",
 		}

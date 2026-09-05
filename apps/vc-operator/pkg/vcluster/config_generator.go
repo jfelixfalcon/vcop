@@ -23,10 +23,22 @@ type PrivateNodesConfig struct {
 }
 
 type ControlPlaneConfig struct {
-	Distro       DistroConfig       `yaml:"distro" json:"distro"`
-	BackingStore BackingStoreConfig `yaml:"backingStore" json:"backingStore"`
-	CoreDNS      CoreDNSConfig      `yaml:"coreDNS" json:"coreDNS"`
-	Proxy        *ProxyConfig       `yaml:"proxy,omitempty" json:"proxy,omitempty"`
+	Distro       DistroConfig             `yaml:"distro" json:"distro"`
+	BackingStore BackingStoreConfig       `yaml:"backingStore" json:"backingStore"`
+	CoreDNS      CoreDNSConfig            `yaml:"coreDNS" json:"coreDNS"`
+	Proxy        *ProxyConfig             `yaml:"proxy,omitempty" json:"proxy,omitempty"`
+	StatefulSet  *ControlPlaneStatefulSet `yaml:"statefulSet,omitempty" json:"statefulSet,omitempty"`
+}
+
+type ControlPlaneStatefulSet struct {
+	HighAvailability ControlPlaneHA `yaml:"highAvailability" json:"highAvailability"`
+}
+
+type ControlPlaneHA struct {
+	Replicas      int32 `yaml:"replicas" json:"replicas"`
+	LeaseDuration int32 `yaml:"leaseDuration,omitempty" json:"leaseDuration,omitempty"`
+	RenewDeadline int32 `yaml:"renewDeadline,omitempty" json:"renewDeadline,omitempty"`
+	RetryPeriod   int32 `yaml:"retryPeriod,omitempty" json:"retryPeriod,omitempty"`
 }
 
 type ProxyConfig struct {
@@ -50,7 +62,16 @@ type ComponentConfig struct {
 }
 
 type BackingStoreConfig struct {
-	Etcd EtcdConfig `yaml:"etcd" json:"etcd"`
+	Etcd     *EtcdConfig     `yaml:"etcd,omitempty" json:"etcd,omitempty"`
+	Database *DatabaseConfig `yaml:"database,omitempty" json:"database,omitempty"`
+}
+
+type DatabaseConfig struct {
+	Embedded DatabaseEmbeddedConfig `yaml:"embedded" json:"embedded"`
+}
+
+type DatabaseEmbeddedConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
 }
 
 type EtcdConfig struct {
@@ -58,13 +79,14 @@ type EtcdConfig struct {
 }
 
 type EtcdDeployConfig struct {
+	Enabled     bool                  `yaml:"enabled" json:"enabled"`
 	StatefulSet EtcdStatefulSetConfig `yaml:"statefulSet" json:"statefulSet"`
 }
 
 type EtcdStatefulSetConfig struct {
-	HighAvailability EtcdHAConfig         `yaml:"highAvailability" json:"highAvailability"`
+	HighAvailability EtcdHAConfig          `yaml:"highAvailability" json:"highAvailability"`
 	Persistence      EtcdPersistenceConfig `yaml:"persistence" json:"persistence"`
-	Resources        ResourceRequirements `yaml:"resources,omitempty" json:"resources,omitempty"`
+	Resources        ResourceRequirements  `yaml:"resources,omitempty" json:"resources,omitempty"`
 }
 
 type EtcdHAConfig struct {
@@ -102,7 +124,7 @@ type MetricsServerConfig struct {
 }
 
 type SyncConfig struct {
-	ToHost   SyncToHostConfig `yaml:"toHost" json:"toHost"`
+	ToHost   SyncToHostConfig    `yaml:"toHost" json:"toHost"`
 	FromHost *SyncFromHostConfig `yaml:"fromHost,omitempty" json:"fromHost,omitempty"`
 }
 
@@ -142,13 +164,68 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 		k8sVersion = "v1.31.0"
 	}
 
+	isHA := spec.HighAvailability || (preset.DefaultHA && spec.SizePreset != v1alpha1.PresetSmall)
 	replicas := int32(1)
-	if spec.HighAvailability {
-		replicas = 3
+	if isHA {
+		replicas = preset.SyncerReplicas
+		if replicas == 0 {
+			replicas = 3
+		}
+	}
+
+	var backingStore BackingStoreConfig
+	if isHA {
+		etcdReplicas := preset.EtcdReplicas
+		if etcdReplicas == 0 {
+			etcdReplicas = 3
+		}
+		backingStore = BackingStoreConfig{
+			Etcd: &EtcdConfig{
+				Deploy: EtcdDeployConfig{
+					Enabled: true,
+					StatefulSet: EtcdStatefulSetConfig{
+						HighAvailability: EtcdHAConfig{
+							Replicas: etcdReplicas,
+						},
+						Persistence: EtcdPersistenceConfig{
+							VolumeClaim: VolumeClaimConfig{
+								Size: preset.StorageSize,
+							},
+						},
+						Resources: ResourceRequirements{
+							Requests: ResourceList{
+								CPU:    preset.CPURequest,
+								Memory: preset.MemoryRequest,
+							},
+							Limits: ResourceList{
+								CPU:    preset.CPULimit,
+								Memory: preset.MemoryLimit,
+							},
+						},
+					},
+				},
+			},
+		}
+	} else {
+		backingStore = BackingStoreConfig{
+			Database: &DatabaseConfig{
+				Embedded: DatabaseEmbeddedConfig{
+					Enabled: true,
+				},
+			},
+		}
 	}
 
 	cfg := &VClusterConfig{
 		ControlPlane: ControlPlaneConfig{
+			StatefulSet: &ControlPlaneStatefulSet{
+				HighAvailability: ControlPlaneHA{
+					Replicas:      replicas,
+					LeaseDuration: 60,
+					RenewDeadline: 40,
+					RetryPeriod:   15,
+				},
+			},
 			Distro: DistroConfig{
 				K8s: K8sDistro{
 					Enabled: true,
@@ -161,32 +238,7 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 					},
 				},
 			},
-			BackingStore: BackingStoreConfig{
-				Etcd: EtcdConfig{
-					Deploy: EtcdDeployConfig{
-						StatefulSet: EtcdStatefulSetConfig{
-							HighAvailability: EtcdHAConfig{
-								Replicas: replicas,
-							},
-							Persistence: EtcdPersistenceConfig{
-								VolumeClaim: VolumeClaimConfig{
-									Size: preset.StorageSize,
-								},
-							},
-							Resources: ResourceRequirements{
-								Requests: ResourceList{
-									CPU:    preset.CPURequest,
-									Memory: preset.MemoryRequest,
-								},
-								Limits: ResourceList{
-									CPU:    preset.CPULimit,
-									Memory: preset.MemoryLimit,
-								},
-							},
-						},
-					},
-				},
-			},
+			BackingStore: backingStore,
 			CoreDNS: CoreDNSConfig{
 				Enabled: spec.Components.CoreDNS.Enabled,
 			},
@@ -228,6 +280,11 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 				},
 				Ingresses: SyncResourceConfig{
 					Enabled: spec.Sync.Ingresses,
+				},
+			},
+			FromHost: &SyncFromHostConfig{
+				Nodes: SyncResourceConfig{
+					Enabled: true,
 				},
 			},
 		},

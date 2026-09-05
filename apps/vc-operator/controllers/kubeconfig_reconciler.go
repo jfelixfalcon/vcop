@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -64,7 +65,7 @@ users:
 	vcSecName := fmt.Sprintf("vc-%s", vc.Name)
 	if err := r.Get(ctx, types.NamespacedName{Name: vcSecName, Namespace: vc.Namespace}, vcSec); err == nil {
 		if cfg, ok := vcSec.Data["config"]; ok && len(cfg) > 0 {
-			rawKubeconfig = string(cfg)
+			rawKubeconfig = strings.ReplaceAll(string(cfg), "https://localhost:8443", endpoint)
 		}
 	}
 

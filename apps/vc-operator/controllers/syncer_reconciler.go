@@ -279,8 +279,13 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 	}
 	_ = r.Delete(ctx, legacyDep)
 
-	// 3. Reconcile StatefulSet for vCluster syncer (matches official Helm chart architecture)
 	replicas := int32(1)
+	if vc.Spec.HighAvailability || (preset.DefaultHA && vc.Spec.SizePreset != v1alpha1.PresetSmall) {
+		replicas = preset.SyncerReplicas
+		if replicas == 0 {
+			replicas = 3
+		}
+	}
 
 	storageQuantity, err := resource.ParseQuantity(preset.StorageSize)
 	if err != nil {
@@ -553,7 +558,11 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 		}
 	}
 
-	isReady := existingSts.Status.ReadyReplicas > 0
+	quorumThreshold := int32(1)
+	if replicas > 1 {
+		quorumThreshold = (replicas / 2) + 1
+	}
+	isReady := existingSts.Status.ReadyReplicas >= quorumThreshold
 	return isReady, endpoint, nil
 }
 

@@ -40,6 +40,9 @@ func TestGenerateYAML_DefaultHA(t *testing.T) {
 	if !strings.Contains(yamlStr, "coreDNS") {
 		t.Errorf("Expected coreDNS enabled, got:\n%s", yamlStr)
 	}
+	if !strings.Contains(yamlStr, "deploy:") {
+		t.Errorf("Expected etcd deploy in HA, got:\n%s", yamlStr)
+	}
 }
 
 func TestGenerateYAML_RawOverride(t *testing.T) {
@@ -63,5 +66,8 @@ func TestGenerateYAML_RawOverride(t *testing.T) {
 	}
 	if !strings.Contains(yamlStr, "coreDNS:") || !strings.Contains(yamlStr, "enabled: false") {
 		t.Errorf("Expected coreDNS enabled: false from override, got:\n%s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "database:") || !strings.Contains(yamlStr, "embedded:") {
+		t.Errorf("Expected embedded database for non-HA, got:\n%s", yamlStr)
 	}
 }
