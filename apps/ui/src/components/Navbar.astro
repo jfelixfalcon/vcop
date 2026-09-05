@@ -1,0 +1,50 @@
+---
+import { ShieldCheck, Plus, Terminal, Activity } from 'lucide-react';
+---
+
+<header class="sticky top-0 z-40 w-full border-b border-cyber-700/60 bg-cyber-950/80 backdrop-blur-md">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <!-- Brand -->
+    <div class="flex items-center gap-6">
+      <a href="/" class="flex items-center gap-3 group">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center text-slate-950 font-bold font-mono shadow-glow-sm group-hover:shadow-glow-md transition-all">
+          <span class="text-base tracking-tighter">vC</span>
+        </div>
+        <div>
+          <span class="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
+            vCOp <span class="text-[10px] font-mono text-cyan-400 font-semibold px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800">v0.37</span>
+          </span>
+          <p class="text-[10px] font-mono text-slate-400 -mt-0.5">Virtual Cluster Operations Center</p>
+        </div>
+      </a>
+
+      <!-- Quick nav links -->
+      <nav class="hidden md:flex items-center gap-1 font-sans text-xs">
+        <a href="/" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
+          Fleet Clusters
+        </a>
+        <a href="/new" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
+          Provision
+        </a>
+      </nav>
+    </div>
+
+    <!-- Right Controls -->
+    <div class="flex items-center gap-3">
+      <!-- Operator Status Pill -->
+      <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyber-900/80 border border-cyber-700/60 text-xs font-mono text-slate-300">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-glow-emerald animate-pulse"></span>
+        <span>Operator: <strong class="text-emerald-400 font-semibold">Active</strong></span>
+      </div>
+
+      <!-- Quick Action -->
+      <a
+        href="/new"
+        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm transition-all"
+      >
+        <span class="font-bold">+</span>
+        <span>New Cluster</span>
+      </a>
+    </div>
+  </div>
+</header>

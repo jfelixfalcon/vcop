@@ -1,0 +1,229 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: virtualclusters.vops.gitops.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+    api-approved.kubernetes.io: "https://github.com/vops/vc-operator"
+labels:
+  app.kubernetes.io/name: vc-operator
+  app.kubernetes.io/part-of: vcop
+spec:
+  group: vops.gitops.io
+  names:
+    kind: VirtualCluster
+    listKind: VirtualClusterList
+    plural: virtualclusters
+    singular: virtualcluster
+    shortNames:
+      - vc
+      - vcluster
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Cluster Name
+          type: string
+          jsonPath: .spec.clusterName
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: vCluster Ver
+          type: string
+          jsonPath: .status.vclusterVersion
+        - name: K8s Ver
+          type: string
+          jsonPath: .status.virtualK8sVersion
+        - name: Preset
+          type: string
+          jsonPath: .spec.sizePreset
+        - name: HA
+          type: boolean
+          jsonPath: .spec.highAvailability
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: VirtualCluster is the Schema for the virtualclusters API in vCluster Center of Operations (vCOp).
+          x-kubernetes-validations:
+            - rule: "!has(oldSelf.spec) || !has(oldSelf.spec.clusterName) || self.spec.clusterName == oldSelf.spec.clusterName"
+              message: "spec.clusterName is immutable after creation"
+            - rule: "!has(oldSelf.spec) || !has(oldSelf.spec.kubernetesVersion) || self.spec.kubernetesVersion >= oldSelf.spec.kubernetesVersion"
+              message: "Downgrading spec.kubernetesVersion is prohibited"
+            - rule: "!has(oldSelf.spec) || !has(oldSelf.spec.vclusterVersion) || self.spec.vclusterVersion >= oldSelf.spec.vclusterVersion"
+              message: "Downgrading spec.vclusterVersion is prohibited"
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required:
+                - clusterName
+              properties:
+                clusterName:
+                  type: string
+                  description: Tenant-facing identifier for the virtual cluster.
+                  minLength: 1
+                  maxLength: 63
+                  pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+                vclusterVersion:
+                  type: string
+                  description: Target vCluster OSS engine version (0.37.x).
+                  default: "0.37.0"
+                  pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+.*$"
+                kubernetesVersion:
+                  type: string
+                  description: Virtual Kubernetes control plane version.
+                  default: "v1.31.0"
+                  pattern: "^v?[0-9]+\\.[0-9]+\\.[0-9]+.*$"
+                sizePreset:
+                  type: string
+                  description: Sizing preset driving CPU, memory requests, and etcd storage tiers.
+                  default: "medium"
+                  enum:
+                    - small
+                    - medium
+                    - large
+                    - custom
+                customResources:
+                  type: object
+                  description: Custom resource requests and limits when sizePreset is set to 'custom'.
+                  properties:
+                    cpu:
+                      type: string
+                      description: CPU limit (e.g. '2', '4000m').
+                    memory:
+                      type: string
+                      description: Memory limit (e.g. '4Gi', '16Gi').
+                    storage:
+                      type: string
+                      description: Backing etcd storage size (e.g. '10Gi', '50Gi').
+                highAvailability:
+                  type: boolean
+                  description: Toggles 3-replica HA etcd and control-plane redundancy with automated quorum.
+                  default: true
+                components:
+                  type: object
+                  description: Embedded internal add-ons.
+                  properties:
+                    coreDNS:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: true
+                    metricsServer:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: true
+                sync:
+                  type: object
+                  description: Resource boundary synchronization into host cluster.
+                  properties:
+                    pods:
+                      type: boolean
+                      default: true
+                    services:
+                      type: boolean
+                      default: true
+                    ingresses:
+                      type: boolean
+                      default: true
+                lifecycle:
+                  type: object
+                  description: Automated lifecycle policies (idle sleep and TTL cleanup).
+                  properties:
+                    autoSleep:
+                      type: boolean
+                      default: false
+                    ttlHours:
+                      type: integer
+                      default: 0
+                      minimum: 0
+                rawConfig:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: Direct passthrough to the official vCluster v0.37 vcluster.yaml configuration schema.
+                helmValues:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: Alternative direct passthrough for Helm values overrides.
+            status:
+              type: object
+              description: Observed state of the virtual cluster.
+              properties:
+                phase:
+                  type: string
+                  description: Current lifecycle phase.
+                  enum:
+                    - Pending
+                    - Provisioning
+                    - Ready
+                    - Upgrading
+                    - Degraded
+                    - Terminating
+                conditions:
+                  type: array
+                  description: Standard Kubernetes lifecycle conditions.
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                      - reason
+                      - message
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                virtualK8sVersion:
+                  type: string
+                  description: Actual running virtual Kubernetes API version.
+                vclusterVersion:
+                  type: string
+                  description: Actual running vCluster engine version.
+                endpoint:
+                  type: string
+                  description: Accessible API server endpoint.
+                kubeconfigSecretRef:
+                  type: object
+                  description: Reference to host Secret containing admin kubeconfig.
+                  properties:
+                    name:
+                      type: string
+                metrics:
+                  type: object
+                  description: Real-time tenant telemetry summary.
+                  properties:
+                    activeNodeCount:
+                      type: integer
+                    podCount:
+                      type: integer
+                    memoryUsage:
+                      type: string
+                    cpuUsage:
+                      type: string
+                observedGeneration:
+                  type: integer
+                  format: int64

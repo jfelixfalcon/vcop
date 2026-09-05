@@ -1,0 +1,14 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { ClusterDetail } from '../../components/ClusterDetail';
+
+const { name } = Astro.params;
+
+if (!name) {
+  return Astro.redirect('/');
+}
+---
+
+<Layout title={`${name} - Virtual Cluster Operations Center`}>
+  <ClusterDetail clusterName={name} client:load />
+</Layout>

@@ -1,0 +1,23 @@
+apiVersion: vops.gitops.io/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: team-alpha-dev
+  namespace: default
+spec:
+  clusterName: team-alpha-dev
+  vclusterVersion: "0.37.0"
+  kubernetesVersion: "v1.31.0"
+  sizePreset: small
+  highAvailability: false
+  components:
+    coreDNS:
+      enabled: true
+    metricsServer:
+      enabled: true
+  sync:
+    pods: true
+    services: true
+    ingresses: true
+  lifecycle:
+    autoSleep: true
+    ttlHours: 72

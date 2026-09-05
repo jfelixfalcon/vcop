@@ -1,0 +1,22 @@
+# Binaries & build artifacts
+bin/
+dist/
+*.out
+cover.out
+
+# Node dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.astro/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

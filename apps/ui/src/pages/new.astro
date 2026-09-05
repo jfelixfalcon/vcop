@@ -1,0 +1,20 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { ProvisioningWizard } from '../components/ProvisioningWizard';
+---
+
+<Layout title="Provision Virtual Cluster - vCluster Operations Center">
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+        Provision New Virtual Cluster
+      </h1>
+      <p class="text-xs sm:text-sm text-slate-400 mt-1">
+        Deploy a 100% isolated virtual Kubernetes control plane with HA etcd and CoreDNS in seconds.
+      </p>
+    </div>
+
+    <!-- Provisioning Wizard React Island -->
+    <ProvisioningWizard client:load />
+  </div>
+</Layout>

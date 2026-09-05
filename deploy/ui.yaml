@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vcop-ui
+  namespace: vcop-system
+  labels:
+    app.kubernetes.io/name: vcop-ui
+    app.kubernetes.io/component: dashboard
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vcop-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vcop-ui
+    spec:
+      serviceAccountName: vcop-ui
+      containers:
+        - name: ui
+          image: vops/vc-operations-center:latest
+          env:
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: "4321"
+            - name: NODE_ENV
+              value: "production"
+          ports:
+            - name: http
+              containerPort: 4321
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          livenessProbe:
+            httpGet:
+              path: /api/metrics
+              port: 4321
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 4321
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vcop-ui
+  namespace: vcop-system
+  labels:
+    app.kubernetes.io/name: vcop-ui
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vcop-ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: 4321

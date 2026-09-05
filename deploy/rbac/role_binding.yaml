@@ -1,0 +1,25 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vc-operator-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vc-operator-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: vc-operator-controller-manager
+    namespace: vcop-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vcop-ui-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vcop-ui-role
+subjects:
+  - kind: ServiceAccount
+    name: vcop-ui
+    namespace: vcop-system

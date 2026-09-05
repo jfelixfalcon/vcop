@@ -1,0 +1,29 @@
+apiVersion: vops.gitops.io/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: payments-production
+  namespace: default
+spec:
+  clusterName: payments-production
+  vclusterVersion: "0.37.0"
+  kubernetesVersion: "v1.31.0"
+  sizePreset: large
+  highAvailability: true
+  components:
+    coreDNS:
+      enabled: true
+    metricsServer:
+      enabled: true
+  sync:
+    pods: true
+    services: true
+    ingresses: true
+  lifecycle:
+    autoSleep: false
+    ttlHours: 0
+  rawConfig:
+    sync:
+      toHost:
+        pods:
+          translateImage:
+            registry.internal.corp: mirror.internal.corp

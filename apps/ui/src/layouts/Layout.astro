@@ -1,0 +1,70 @@
+---
+import Navbar from '../components/Navbar.astro';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'vCOp - Virtual Cluster Operations Center',
+  description = 'Cloud-Native Virtual Cluster Operator & Operations Center dashboard for vCluster OSS v0.37',
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" class="dark h-full bg-cyber-950 text-slate-100 antialiased">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body class="min-h-full flex flex-col font-sans selection:bg-cyan-500/20 selection:text-cyan-300 relative overflow-x-hidden bg-cyber-950">
+    <!-- Cybernetic Ambient Background Glows -->
+    <div class="fixed inset-0 pointer-events-none z-0">
+      <div class="absolute -top-40 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-gradient-to-b from-cyan-500/10 via-blue-600/5 to-transparent blur-3xl rounded-full"></div>
+      <div class="absolute top-1/3 -left-40 w-[500px] h-[500px] bg-purple-600/5 blur-3xl rounded-full"></div>
+      <div class="absolute bottom-10 right-0 w-[600px] h-[600px] bg-cyan-600/5 blur-3xl rounded-full"></div>
+    </div>
+
+    <!-- Top Navbar -->
+    <Navbar />
+
+    <!-- Main Viewport -->
+    <main class="relative z-10 flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <slot />
+    </main>
+
+    <!-- Footer -->
+    <footer class="relative z-10 border-t border-cyber-800/80 bg-cyber-950/60 py-6 text-center text-xs font-mono text-slate-500">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
+        <span>vCluster Center of Operations (vCOp) • Powered by vCluster OSS 0.37</span>
+        <span class="text-slate-400">Kubernetes-Native Operator + Astro SSR</span>
+      </div>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  /* Custom scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0b1118;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1d2e45;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2b4363;
+  }
+</style>

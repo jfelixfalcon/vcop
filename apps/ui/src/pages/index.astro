@@ -1,0 +1,23 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { FleetDashboard } from '../components/FleetDashboard';
+---
+
+<Layout title="Fleet Overview - vCluster Operations Center">
+  <div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+          Virtual Cluster Fleet
+        </h1>
+        <p class="text-xs sm:text-sm text-slate-400 mt-1">
+          Production-grade, isolated multi-tenant clusters managed by vCOp Operator.
+        </p>
+      </div>
+    </div>
+
+    <!-- Fleet Dashboard React Island -->
+    <FleetDashboard client:load />
+  </div>
+</Layout>
