@@ -307,6 +307,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName }) => {
       )}
 
       {/* TAB CONTENT: Add-ons & DNS */}
+      {/* TAB CONTENT: Add-ons & Components */}
       {activeTab === 'addons' && (
         <div className="space-y-6 animate-in fade-in duration-150">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -317,15 +318,15 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName }) => {
                   <CheckCircle2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-white">Internal CoreDNS Add-on</h4>
+                  <h4 className="text-sm font-bold text-white">External CoreDNS Add-on</h4>
                   <p className="text-xs text-slate-400">Independent intra-vcluster service discovery</p>
                 </div>
               </div>
               <p className="text-xs text-slate-300 leading-relaxed mb-3">
-                CoreDNS runs inside the virtual control plane. Tenant workloads resolve local service names (e.g. <code className="text-cyber-accent">svc.default.cluster.local</code>) completely isolated from the host cluster DNS.
+                CoreDNS runs as a dedicated external workload deployed by the operator into the host namespace. Tenant workloads resolve local service names (e.g. <code className="text-cyber-accent">svc.default.cluster.local</code>) completely isolated from the host cluster DNS without embedding DNS in the vCluster syncer.
               </p>
               <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
-                Status: Serving Queries
+                Status: Serving Queries (External)
               </span>
             </div>
 
@@ -336,15 +337,15 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName }) => {
                   <CheckCircle2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-white">Metrics Server Integration</h4>
+                  <h4 className="text-sm font-bold text-white">External Metrics-Server Add-on</h4>
                   <p className="text-xs text-slate-400">kubectl top & HPA controller enablement</p>
                 </div>
               </div>
               <p className="text-xs text-slate-300 leading-relaxed mb-3">
-                Integrations metrics server allows tenant horizontal pod autoscalers (HPAs) to evaluate pod memory and CPU without exposing host cluster metrics.
+                External metrics-server runs standalone in the host cluster namespace, collecting resource usage and populating Kubernetes APIService endpoints. Allows tenant horizontal pod autoscalers (HPAs) and <code className="text-cyber-accent">kubectl top</code> to function without relying on proprietary embedded integrations.
               </p>
               <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
-                Status: Active (integrations.metricsServer.enabled)
+                Status: Active (External Add-on)
               </span>
             </div>
           </div>
@@ -370,17 +371,18 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName }) => {
   backingStore:
     etcd:
       deploy:
+        enabled: true
         statefulSet:
           highAvailability:
             replicas: ${isHA ? 3 : 1}
           persistence:
             volumeClaim:
-              size: "10Gi"
-  coreDNS:
-    enabled: true
+              size: "25Gi"
+  coredns:
+    enabled: false # External CoreDNS managed by vc-operator AddonsReconciler
 integrations:
   metricsServer:
-    enabled: true
+    enabled: false # External Metrics-Server managed by vc-operator AddonsReconciler
 sync:
   toHost:
     pods:

@@ -146,7 +146,7 @@ export const FleetDashboard: React.FC = () => {
             </div>
           </div>
           <div className="mt-3 text-xs font-mono text-slate-400">
-            <span>Unified schema + CoreDNS native</span>
+            <span>Unified schema + External Add-ons</span>
           </div>
         </div>
       </div>
@@ -286,11 +286,11 @@ export const FleetDashboard: React.FC = () => {
                   {/* Add-on features summary */}
                   <div className="text-[11px] font-mono text-slate-400 space-y-1 mb-4">
                     <div className="flex justify-between">
-                      <span>Internal CoreDNS:</span>
+                      <span>External CoreDNS:</span>
                       <span className="text-emerald-400">Enabled</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Metrics Server (HPA):</span>
+                      <span>External Metrics (HPA):</span>
                       <span className="text-emerald-400">Enabled</span>
                     </div>
                     <div className="flex justify-between">
