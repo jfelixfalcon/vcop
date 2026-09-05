@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	"k8s.io/client-go/util/retry"
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
 )
 
@@ -62,6 +63,7 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if err := r.Update(ctx, &vc); err != nil {
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{}, nil
 	}
 
 	// Initialize phase if empty
@@ -159,7 +161,15 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	vc.Status.ObservedGeneration = vc.Generation
-	if err := r.Status().Update(ctx, &vc); err != nil {
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &v1alpha1.VirtualCluster{}
+		if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+			return err
+		}
+		latest.Status = vc.Status
+		return r.Status().Update(ctx, latest)
+	})
+	if err != nil {
 		log.Error(err, "failed updating status")
 		return ctrl.Result{}, err
 	}
@@ -175,6 +185,11 @@ func (r *VirtualClusterReconciler) handleDeletion(ctx context.Context, log logr.
 	// Clean up HA etcd PVCs and StatefulSet
 	if err := r.EtcdReconciler.CleanupEtcd(ctx, vc); err != nil {
 		log.Error(err, "error cleaning up etcd during deletion")
+	}
+
+	// Clean up syncer cluster resources (ClusterRoleBinding)
+	if err := r.SyncerReconciler.CleanupSyncer(ctx, vc); err != nil {
+		log.Error(err, "error cleaning up syncer during deletion")
 	}
 
 	// Remove finalizer

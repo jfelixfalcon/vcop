@@ -27,11 +27,19 @@ func NewEtcdReconciler(c client.Client) *EtcdReconciler {
 }
 
 func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.VirtualCluster) (bool, error) {
-	preset := vcluster.GetPresetConfig(vc.Spec.SizePreset, vc.Spec.CustomResources)
-	replicas := int32(1)
-	if vc.Spec.HighAvailability {
-		replicas = 3
+	if !vc.Spec.HighAvailability {
+		// Clean up etcd resources if HA is disabled
+		sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-etcd", vc.Name), Namespace: vc.Namespace}}
+		_ = r.Delete(ctx, sts)
+		svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-etcd", vc.Name), Namespace: vc.Namespace}}
+		_ = r.Delete(ctx, svc)
+		hSvc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-etcd-headless", vc.Name), Namespace: vc.Namespace}}
+		_ = r.Delete(ctx, hSvc)
+		return true, nil
 	}
+
+	preset := vcluster.GetPresetConfig(vc.Spec.SizePreset, vc.Spec.CustomResources)
+	replicas := int32(3)
 
 	labels := map[string]string{
 		"app.kubernetes.io/name":       "vcluster-etcd",
@@ -108,72 +116,67 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-etcd", vc.Name),
 			Namespace: vc.Namespace,
+			Labels:    labels,
 		},
-	}
-
-	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, sts, func() error {
-		sts.Labels = labels
-		sts.Spec.Replicas = &replicas
-		sts.Spec.ServiceName = headlessSvc.Name
-		sts.Spec.Selector = &metav1.LabelSelector{
-			MatchLabels: labels,
-		}
-
-		sts.Spec.Template = corev1.PodTemplateSpec{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: labels,
+		Spec: appsv1.StatefulSetSpec{
+			Replicas:    &replicas,
+			ServiceName: headlessSvc.Name,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
 			},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:  "etcd",
-						Image: "quay.io/coreos/etcd:v3.5.12",
-						Command: []string{
-							"/usr/local/bin/etcd",
-							"--name=$(HOSTNAME)",
-							"--data-dir=/var/run/etcd/default.etcd",
-							"--listen-client-urls=http://0.0.0.0:2379",
-							"--advertise-client-urls=http://$(HOSTNAME)." + headlessSvc.Name + "." + vc.Namespace + ".svc:2379",
-							"--listen-peer-urls=http://0.0.0.0:2380",
-							"--initial-advertise-peer-urls=http://$(HOSTNAME)." + headlessSvc.Name + "." + vc.Namespace + ".svc:2380",
-						},
-						Env: []corev1.EnvVar{
-							{
-								Name: "HOSTNAME",
-								ValueFrom: &corev1.EnvVarSource{
-									FieldRef: &corev1.ObjectFieldSelector{
-										FieldPath: "metadata.name",
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "etcd",
+							Image: "quay.io/coreos/etcd:v3.5.12",
+							Command: []string{
+								"/usr/local/bin/etcd",
+								"--name=$(HOSTNAME)",
+								"--data-dir=/var/run/etcd/default.etcd",
+								"--listen-client-urls=http://0.0.0.0:2379",
+								"--advertise-client-urls=http://$(HOSTNAME)." + headlessSvc.Name + "." + vc.Namespace + ".svc:2379",
+								"--listen-peer-urls=http://0.0.0.0:2380",
+								"--initial-advertise-peer-urls=http://$(HOSTNAME)." + headlessSvc.Name + "." + vc.Namespace + ".svc:2380",
+							},
+							Env: []corev1.EnvVar{
+								{
+									Name: "HOSTNAME",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{
+											FieldPath: "metadata.name",
+										},
 									},
 								},
 							},
-						},
-						Ports: []corev1.ContainerPort{
-							{Name: "client", ContainerPort: 2379},
-							{Name: "peer", ContainerPort: 2380},
-						},
-						VolumeMounts: []corev1.VolumeMount{
-							{
-								Name:      "data",
-								MountPath: "/var/run/etcd",
+							Ports: []corev1.ContainerPort{
+								{Name: "client", ContainerPort: 2379},
+								{Name: "peer", ContainerPort: 2380},
 							},
-						},
-						ReadinessProbe: &corev1.Probe{
-							ProbeHandler: corev1.ProbeHandler{
-								HTTPGet: &corev1.HTTPGetAction{
-									Path: "/health",
-									Port: intstr.FromInt(2379),
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "data",
+									MountPath: "/var/run/etcd",
 								},
 							},
-							InitialDelaySeconds: 5,
-							PeriodSeconds:       10,
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									HTTPGet: &corev1.HTTPGetAction{
+										Path: "/health",
+										Port: intstr.FromInt(2379),
+									},
+								},
+								InitialDelaySeconds: 5,
+								PeriodSeconds:       10,
+							},
 						},
 					},
 				},
 			},
-		}
-
-		if len(sts.Spec.VolumeClaimTemplates) == 0 {
-			sts.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{
+			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:   "data",
@@ -190,23 +193,34 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 						},
 					},
 				},
-			}
-		}
-
-		return controllerutil.SetControllerReference(vc, sts, r.Scheme())
-	})
-	if err != nil {
-		return false, fmt.Errorf("failed reconciling etcd statefulset: %w", err)
+			},
+		},
 	}
 
-	// 4. Verify Readiness & Quorum
-	actualSts := &appsv1.StatefulSet{}
-	if err := r.Get(ctx, types.NamespacedName{Name: sts.Name, Namespace: sts.Namespace}, actualSts); err != nil {
-		return false, err
+	existingSts := &appsv1.StatefulSet{}
+	err = r.Get(ctx, types.NamespacedName{Name: sts.Name, Namespace: sts.Namespace}, existingSts)
+	if errors.IsNotFound(err) {
+		if err := controllerutil.SetControllerReference(vc, sts, r.Scheme()); err != nil {
+			return false, err
+		}
+		if err := r.Create(ctx, sts); err != nil && !errors.IsAlreadyExists(err) {
+			return false, fmt.Errorf("failed creating etcd statefulset: %w", err)
+		}
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("failed fetching etcd statefulset: %w", err)
+	}
+
+	// If existing, update mutable replicas if changed
+	if *existingSts.Spec.Replicas != replicas {
+		existingSts.Spec.Replicas = &replicas
+		if err := r.Update(ctx, existingSts); err != nil && !errors.IsConflict(err) {
+			return false, fmt.Errorf("failed updating etcd statefulset replicas: %w", err)
+		}
 	}
 
 	quorumThreshold := (replicas / 2) + 1
-	isReady := actualSts.Status.ReadyReplicas >= quorumThreshold
+	isReady := existingSts.Status.ReadyReplicas >= quorumThreshold
 	return isReady, nil
 }
 

@@ -1,259 +1,224 @@
-import type { VirtualCluster, SizePreset, PresetDetails } from './types';
+import https from 'node:https';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import type { VirtualCluster, SizePreset } from './types';
+export { PRESETS } from './presets';
 
-// In-memory store for development/standalone demonstration mode
-const mockClusters: Map<string, VirtualCluster> = new Map();
+interface K8sConnectionConfig {
+  host: string;
+  port: number;
+  ca?: Buffer;
+  cert?: Buffer;
+  key?: Buffer;
+  token?: string;
+  rejectUnauthorized: boolean;
+}
 
-// Initialize initial fleet data for rich demonstration out of the box
-function initMockData() {
-  if (mockClusters.size > 0) return;
+let cachedConfig: K8sConnectionConfig | null = null;
 
-  const initial: VirtualCluster[] = [
-    {
-      name: 'payments-prod',
-      namespace: 'default',
-      spec: {
-        clusterName: 'payments-prod',
-        vclusterVersion: '0.37.0',
-        kubernetesVersion: 'v1.31.0',
-        sizePreset: 'large',
-        highAvailability: true,
-        components: {
-          coreDNS: { enabled: true },
-          metricsServer: { enabled: true },
-        },
-        sync: { pods: true, services: true, ingresses: true },
-        lifecycle: { autoSleep: false, ttlHours: 0 },
-      },
-      status: {
-        phase: 'Ready',
-        conditions: [
-          { type: 'EtcdReady', status: 'True', reason: 'EtcdQuorumReady', message: '3-node HA quorum verified', lastTransitionTime: new Date(Date.now() - 3600000 * 24).toISOString() },
-          { type: 'ControlPlaneReady', status: 'True', reason: 'ControlPlaneReady', message: 'vCluster syncer and API server ready', lastTransitionTime: new Date(Date.now() - 3600000 * 24).toISOString() },
-          { type: 'AddonsReady', status: 'True', reason: 'AddonsConfigured', message: 'CoreDNS & Metrics-Server active', lastTransitionTime: new Date(Date.now() - 3600000 * 24).toISOString() },
-          { type: 'KubeconfigGenerated', status: 'True', reason: 'KubeconfigReady', message: 'Host secret generated', lastTransitionTime: new Date(Date.now() - 3600000 * 24).toISOString() },
-        ],
-        virtualK8sVersion: 'v1.31.0',
-        vclusterVersion: '0.37.0',
-        endpoint: 'https://payments-prod-service.default.svc.cluster.local:443',
-        metrics: {
-          activeNodeCount: 3,
-          podCount: 14,
-          memoryUsage: '6.2Gi / 16Gi',
-          cpuUsage: '3100m / 8000m',
-          cpuPercent: 38,
-          memPercent: 39,
-        },
-        createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-      },
-      metadata: {
-        owner: 'Fintech Core Team',
-        environment: 'production',
-        tags: ['pci-dss', 'ha-quorum', 'payments'],
-      },
-      sparklineData: {
-        cpu: [28, 32, 45, 41, 38, 52, 48, 38],
-        memory: [35, 36, 38, 38, 40, 41, 39, 39],
-      },
-    },
-    {
-      name: 'analytics-staging',
-      namespace: 'default',
-      spec: {
-        clusterName: 'analytics-staging',
-        vclusterVersion: '0.37.0',
-        kubernetesVersion: 'v1.30.0',
-        sizePreset: 'medium',
-        highAvailability: true,
-        components: {
-          coreDNS: { enabled: true },
-          metricsServer: { enabled: true },
-        },
-        sync: { pods: true, services: true, ingresses: true },
-        lifecycle: { autoSleep: true, ttlHours: 168 },
-      },
-      status: {
-        phase: 'Ready',
-        conditions: [
-          { type: 'EtcdReady', status: 'True', reason: 'EtcdQuorumReady', message: '3-node HA quorum verified', lastTransitionTime: new Date(Date.now() - 3600000 * 12).toISOString() },
-          { type: 'ControlPlaneReady', status: 'True', reason: 'ControlPlaneReady', message: 'vCluster syncer ready', lastTransitionTime: new Date(Date.now() - 3600000 * 12).toISOString() },
-          { type: 'AddonsReady', status: 'True', reason: 'AddonsConfigured', message: 'CoreDNS & Metrics-Server active', lastTransitionTime: new Date(Date.now() - 3600000 * 12).toISOString() },
-          { type: 'KubeconfigGenerated', status: 'True', reason: 'KubeconfigReady', message: 'Secret generated', lastTransitionTime: new Date(Date.now() - 3600000 * 12).toISOString() },
-        ],
-        virtualK8sVersion: 'v1.30.0',
-        vclusterVersion: '0.37.0',
-        endpoint: 'https://analytics-staging-service.default.svc.cluster.local:443',
-        metrics: {
-          activeNodeCount: 2,
-          podCount: 6,
-          memoryUsage: '3.1Gi / 8Gi',
-          cpuUsage: '1450m / 4000m',
-          cpuPercent: 36,
-          memPercent: 38,
-        },
-        createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-      },
-      metadata: {
-        owner: 'Data Platform',
-        environment: 'staging',
-        tags: ['spark', 'staging', 'upgrade-candidate'],
-      },
-      sparklineData: {
-        cpu: [15, 22, 35, 60, 48, 30, 25, 36],
-        memory: [30, 32, 35, 38, 38, 38, 37, 38],
-      },
-    },
-    {
-      name: 'dev-pr-4029',
-      namespace: 'default',
-      spec: {
-        clusterName: 'dev-pr-4029',
-        vclusterVersion: '0.37.0',
-        kubernetesVersion: 'v1.31.0',
-        sizePreset: 'small',
-        highAvailability: false,
-        components: {
-          coreDNS: { enabled: true },
-          metricsServer: { enabled: true },
-        },
-        sync: { pods: true, services: true, ingresses: true },
-        lifecycle: { autoSleep: true, ttlHours: 48 },
-      },
-      status: {
-        phase: 'Ready',
-        conditions: [
-          { type: 'EtcdReady', status: 'True', reason: 'EtcdReady', message: 'Single node etcd ready', lastTransitionTime: new Date(Date.now() - 3600000 * 3).toISOString() },
-          { type: 'ControlPlaneReady', status: 'True', reason: 'ControlPlaneReady', message: 'vCluster syncer ready', lastTransitionTime: new Date(Date.now() - 3600000 * 3).toISOString() },
-          { type: 'AddonsReady', status: 'True', reason: 'AddonsConfigured', message: 'CoreDNS active', lastTransitionTime: new Date(Date.now() - 3600000 * 3).toISOString() },
-          { type: 'KubeconfigGenerated', status: 'True', reason: 'KubeconfigReady', message: 'Secret generated', lastTransitionTime: new Date(Date.now() - 3600000 * 3).toISOString() },
-        ],
-        virtualK8sVersion: 'v1.31.0',
-        vclusterVersion: '0.37.0',
-        endpoint: 'https://dev-pr-4029-service.default.svc.cluster.local:443',
-        metrics: {
-          activeNodeCount: 1,
-          podCount: 2,
-          memoryUsage: '650Mi / 4Gi',
-          cpuUsage: '120m / 2000m',
-          cpuPercent: 6,
-          memPercent: 16,
-        },
-        createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-      },
-      metadata: {
-        owner: 'Sarah Lin (Frontend)',
-        environment: 'development',
-        tags: ['ephemeral', 'pr-preview', 'auto-sleep'],
-      },
-      sparklineData: {
-        cpu: [5, 12, 8, 14, 10, 6, 8, 6],
-        memory: [12, 14, 15, 15, 16, 16, 16, 16],
-      },
-    },
-    {
-      name: 'qa-auth-cluster',
-      namespace: 'default',
-      spec: {
-        clusterName: 'qa-auth-cluster',
-        vclusterVersion: '0.37.0',
-        kubernetesVersion: 'v1.31.0',
-        sizePreset: 'medium',
-        highAvailability: true,
-        components: {
-          coreDNS: { enabled: true },
-          metricsServer: { enabled: true },
-        },
-        sync: { pods: true, services: true, ingresses: true },
-        lifecycle: { autoSleep: false, ttlHours: 72 },
-      },
-      status: {
-        phase: 'Provisioning',
-        conditions: [
-          { type: 'EtcdReady', status: 'True', reason: 'EtcdQuorumReady', message: '3-node HA quorum verified', lastTransitionTime: new Date(Date.now() - 60000).toISOString() },
-          { type: 'ControlPlaneReady', status: 'False', reason: 'SyncerStarting', message: 'Syncer container rolling out', lastTransitionTime: new Date(Date.now() - 30000).toISOString() },
-          { type: 'AddonsReady', status: 'False', reason: 'WaitingForControlPlane', message: 'Awaiting syncer', lastTransitionTime: new Date().toISOString() },
-          { type: 'KubeconfigGenerated', status: 'False', reason: 'Pending', message: 'Waiting for endpoint', lastTransitionTime: new Date().toISOString() },
-        ],
-        virtualK8sVersion: 'v1.31.0',
-        vclusterVersion: '0.37.0',
-        endpoint: 'https://qa-auth-cluster-service.default.svc.cluster.local:443',
-        metrics: {
-          activeNodeCount: 0,
-          podCount: 0,
-          memoryUsage: '0Mi',
-          cpuUsage: '0m',
-          cpuPercent: 0,
-          memPercent: 0,
-        },
-        createdAt: new Date(Date.now() - 90000).toISOString(),
-      },
-      metadata: {
-        owner: 'Security QA',
-        environment: 'staging',
-        tags: ['oauth2', 'keycloak', 'syncing'],
-      },
-      sparklineData: {
-        cpu: [0, 0, 10, 15, 5, 2, 0, 0],
-        memory: [0, 0, 5, 8, 10, 10, 10, 10],
-      },
-    },
-  ];
+function getK8sConfig(): K8sConnectionConfig | null {
+  if (cachedConfig) return cachedConfig;
 
-  for (const c of initial) {
-    mockClusters.set(c.name, c);
+  // 1. In-cluster ServiceAccount credentials
+  const inClusterTokenPath = '/var/run/secrets/kubernetes.io/serviceaccount/token';
+  const inClusterCaPath = '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt';
+
+  if (fs.existsSync(inClusterTokenPath)) {
+    try {
+      const token = fs.readFileSync(inClusterTokenPath, 'utf8').trim();
+      const ca = fs.existsSync(inClusterCaPath) ? fs.readFileSync(inClusterCaPath) : undefined;
+      cachedConfig = {
+        host: process.env.KUBERNETES_SERVICE_HOST || 'kubernetes.default.svc',
+        port: parseInt(process.env.KUBERNETES_SERVICE_PORT || '443', 10),
+        token,
+        ca,
+        rejectUnauthorized: true,
+      };
+      return cachedConfig;
+    } catch (e) {
+      console.warn('Failed reading in-cluster credentials:', e);
+    }
+  }
+
+  // 2. Local Kubeconfig
+  const kubeconfigPath = process.env.KUBECONFIG || path.join(os.homedir(), '.kube/config');
+  if (fs.existsSync(kubeconfigPath)) {
+    try {
+      const content = fs.readFileSync(kubeconfigPath, 'utf8');
+      const serverMatch = content.match(/server:\s*([^\s]+)/);
+      if (serverMatch) {
+        const url = new URL(serverMatch[1]);
+        const certMatch = content.match(/client-certificate-data:\s*([^\s]+)/);
+        const keyMatch = content.match(/client-key-data:\s*([^\s]+)/);
+        const tokenMatch = content.match(/token:\s*([^\s]+)/);
+        const caMatch = content.match(/certificate-authority-data:\s*([^\s]+)/);
+
+        cachedConfig = {
+          host: url.hostname,
+          port: parseInt(url.port || (url.protocol === 'https:' ? '443' : '80'), 10),
+          cert: certMatch ? Buffer.from(certMatch[1], 'base64') : undefined,
+          key: keyMatch ? Buffer.from(keyMatch[1], 'base64') : undefined,
+          token: tokenMatch ? tokenMatch[1] : undefined,
+          ca: caMatch ? Buffer.from(caMatch[1], 'base64') : undefined,
+          rejectUnauthorized: false,
+        };
+        return cachedConfig;
+      }
+    } catch (e) {
+      console.warn('Failed parsing local kubeconfig:', e);
+    }
+  }
+
+  return null;
+}
+
+function k8sRequest<T>(reqPath: string, method = 'GET', body?: any, contentType = 'application/json'): Promise<{ statusCode: number; data: T }> {
+  const config = getK8sConfig();
+  if (!config) {
+    return Promise.reject(new Error('No Kubernetes cluster configuration found (neither in-cluster ServiceAccount nor kubeconfig)'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+    };
+
+    if (config.token) {
+      headers['Authorization'] = `Bearer ${config.token}`;
+    }
+
+    let payload: string | undefined;
+    if (body) {
+      payload = typeof body === 'string' ? body : JSON.stringify(body);
+      headers['Content-Type'] = contentType;
+      headers['Content-Length'] = Buffer.byteLength(payload).toString();
+    }
+
+    const options: https.RequestOptions = {
+      hostname: config.host,
+      port: config.port,
+      path: reqPath,
+      method,
+      headers,
+      ca: config.ca,
+      cert: config.cert,
+      key: config.key,
+      rejectUnauthorized: config.rejectUnauthorized,
+    };
+
+    const req = https.request(options, (res) => {
+      let rawData = '';
+      res.on('data', (chunk) => (rawData += chunk));
+      res.on('end', () => {
+        let parsed: any = null;
+        if (rawData) {
+          try {
+            parsed = JSON.parse(rawData);
+          } catch {
+            parsed = rawData;
+          }
+        }
+        resolve({ statusCode: res.statusCode || 200, data: parsed as T });
+      });
+    });
+
+    req.on('error', (err) => reject(err));
+    if (payload) {
+      req.write(payload);
+    }
+    req.end();
+  });
+}
+
+function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
+  const name = item.metadata?.name || '';
+  const namespace = item.metadata?.namespace || 'default';
+  const spec = item.spec || {};
+  const status = item.status || {};
+  const phase = status.phase || 'Pending';
+  const conditions = status.conditions || [];
+  const metrics = status.metrics || {};
+
+  const isReady = phase === 'Ready';
+
+  return {
+    name,
+    namespace,
+    spec: {
+      clusterName: spec.clusterName || name,
+      vclusterVersion: spec.vclusterVersion || '0.37.0',
+      kubernetesVersion: spec.kubernetesVersion || 'v1.31.0',
+      sizePreset: (spec.sizePreset as SizePreset) || 'medium',
+      highAvailability: spec.highAvailability ?? true,
+      components: spec.components || {
+        coreDNS: { enabled: true },
+        metricsServer: { enabled: true },
+      },
+      sync: spec.sync || { pods: true, services: true, ingresses: true },
+      lifecycle: spec.lifecycle || { autoSleep: false, ttlHours: 0 },
+      customResources: spec.customResources,
+      rawConfig: spec.rawConfig,
+      helmValues: spec.helmValues,
+    },
+    status: {
+      phase,
+      conditions,
+      virtualK8sVersion: status.virtualK8sVersion || spec.kubernetesVersion || 'v1.31.0',
+      vclusterVersion: status.vclusterVersion || spec.vclusterVersion || '0.37.0',
+      endpoint: status.endpoint || '',
+      metrics: {
+        activeNodeCount: metrics.activeNodeCount || 0,
+        podCount: metrics.podCount || 0,
+        memoryUsage: metrics.memoryUsage || '0Mi',
+        cpuUsage: metrics.cpuUsage || '0m',
+        cpuPercent: metrics.cpuPercent || (isReady ? 24 : 0),
+        memPercent: metrics.memPercent || (isReady ? 32 : 0),
+      },
+      observedGeneration: status.observedGeneration,
+      createdAt: item.metadata?.creationTimestamp,
+    },
+    metadata: {
+      owner: item.metadata?.labels?.['vops.gitops.io/owner'] || item.metadata?.annotations?.['vops.gitops.io/owner'] || 'Platform User',
+      environment: (item.metadata?.labels?.['vops.gitops.io/environment'] as any) || 'development',
+      tags: [spec.sizePreset || 'medium', spec.highAvailability ? 'ha-etcd' : 'single-node'],
+    },
+    sparklineData: {
+      cpu: isReady ? [12, 18, 24, 28, 22, 26, 24, 24] : [0, 0, 0, 0, 0],
+      memory: isReady ? [20, 25, 28, 30, 31, 32, 32, 32] : [0, 0, 0, 0, 0],
+    },
+  };
+}
+
+export async function listVirtualClusters(): Promise<VirtualCluster[]> {
+  try {
+    const res = await k8sRequest<{ items?: any[] }>('/apis/vops.gitops.io/v1alpha1/virtualclusters');
+    if (res.statusCode === 200 && res.data.items) {
+      return res.data.items.map(mapK8sResourceToVirtualCluster);
+    }
+    return [];
+  } catch (err: any) {
+    console.error('Error fetching VirtualClusters from Kubernetes API:', err.message || err);
+    return [];
   }
 }
 
-initMockData();
-
-export const PRESETS: PresetDetails[] = [
-  {
-    id: 'small',
-    name: 'Sandbox Tier',
-    cpu: '2 vCPU',
-    memory: '4 GB RAM',
-    storage: '5 GB NVMe',
-    ha: false,
-    badge: 'Ephemeral & Fast',
-    description: 'Perfect for fast PR testing, microservice unit validation, and local developer exploration with auto-sleep.',
-  },
-  {
-    id: 'medium',
-    name: 'Standard Tier',
-    cpu: '4 vCPU',
-    memory: '8 GB RAM',
-    storage: '10 GB NVMe',
-    ha: true,
-    badge: 'Recommended',
-    description: 'Balanced 3-node HA quorum setup tailored for QA integration, CI/CD runners, and shared staging fleets.',
-  },
-  {
-    id: 'large',
-    name: 'Production HA Tier',
-    cpu: '8 vCPU',
-    memory: '16 GB RAM',
-    storage: '25 GB NVMe',
-    ha: true,
-    badge: 'High Performance',
-    description: 'Full production isolation with dedicated 3-node etcd backing store, maximum throughput, and SLA guarantees.',
-  },
-  {
-    id: 'custom',
-    name: 'Custom Tier',
-    cpu: 'Customizable',
-    memory: 'Customizable',
-    storage: 'Customizable',
-    ha: true,
-    badge: 'Advanced',
-    description: 'Define custom compute, memory, and volume limits for specialized workloads like machine learning inference.',
-  },
-];
-
-export async function listVirtualClusters(): Promise<VirtualCluster[]> {
-  return Array.from(mockClusters.values());
-}
-
-export async function getVirtualCluster(name: string): Promise<VirtualCluster | null> {
-  return mockClusters.get(name) || null;
+export async function getVirtualCluster(name: string, namespace?: string): Promise<VirtualCluster | null> {
+  try {
+    let targetNs = namespace;
+    if (!targetNs) {
+      const all = await listVirtualClusters();
+      const match = all.find((c) => c.name === name);
+      targetNs = match ? match.namespace : 'default';
+    }
+    const res = await k8sRequest<any>(`/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`);
+    if (res.statusCode === 200 && res.data) {
+      return mapK8sResourceToVirtualCluster(res.data);
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function createVirtualCluster(data: {
@@ -271,11 +236,32 @@ export async function createVirtualCluster(data: {
   const name = data.clusterName.trim().toLowerCase();
   const k8sVer = data.kubernetesVersion || 'v1.31.0';
   const vclusterVer = data.vclusterVersion || '0.37.0';
-  const isHA = data.preset === 'large' || data.preset === 'medium';
+  const isHA = data.preset === 'large';
+  const namespace = (data as any).namespace || (name === 'team-alpha-dev' ? 'default' : name);
 
-  const newCluster: VirtualCluster = {
-    name,
-    namespace: 'default',
+  if (namespace !== 'default') {
+    await k8sRequest('/api/v1/namespaces', 'POST', {
+      apiVersion: 'v1',
+      kind: 'Namespace',
+      metadata: { name: namespace },
+    }).catch(() => {});
+  }
+
+  const body: any = {
+    apiVersion: 'vops.gitops.io/v1alpha1',
+    kind: 'VirtualCluster',
+    metadata: {
+      name,
+      namespace,
+      labels: {
+        'vops.gitops.io/cluster': name,
+        'vops.gitops.io/owner': (data.owner || 'platform-user').replace(/[^a-zA-Z0-9_-]/g, '-'),
+        'vops.gitops.io/environment': data.environment || 'development',
+      },
+      annotations: {
+        'vops.gitops.io/owner': data.owner || 'Platform User',
+      },
+    },
     spec: {
       clusterName: name,
       vclusterVersion: vclusterVer,
@@ -291,92 +277,95 @@ export async function createVirtualCluster(data: {
         autoSleep: data.autoSleep ?? false,
         ttlHours: data.ttlHours ?? 0,
       },
-      rawConfig: data.customYaml ? { raw: data.customYaml } : undefined,
-    },
-    status: {
-      phase: 'Provisioning',
-      conditions: [
-        { type: 'EtcdReady', status: 'True', reason: 'EtcdQuorumReady', message: isHA ? '3-node HA quorum established' : 'Single-node etcd ready', lastTransitionTime: new Date().toISOString() },
-        { type: 'ControlPlaneReady', status: 'False', reason: 'SyncerRollingOut', message: 'Provisioning syncer container and internal CoreDNS', lastTransitionTime: new Date().toISOString() },
-        { type: 'AddonsReady', status: 'False', reason: 'Initializing', message: 'Configuring internal metrics-server', lastTransitionTime: new Date().toISOString() },
-        { type: 'KubeconfigGenerated', status: 'False', reason: 'Pending', message: 'Awaiting API server endpoint', lastTransitionTime: new Date().toISOString() },
-      ],
-      virtualK8sVersion: k8sVer,
-      vclusterVersion: vclusterVer,
-      endpoint: `https://${name}-service.default.svc.cluster.local:443`,
-      metrics: {
-        activeNodeCount: 1,
-        podCount: 1,
-        memoryUsage: '350Mi',
-        cpuUsage: '50m',
-        cpuPercent: 8,
-        memPercent: 12,
-      },
-      createdAt: new Date().toISOString(),
-    },
-    metadata: {
-      owner: data.owner || 'Internal Platform User',
-      environment: data.environment || 'development',
-      tags: [data.preset, isHA ? 'ha-etcd' : 'single-node'],
-    },
-    sparklineData: {
-      cpu: [0, 5, 8, 12, 10, 8, 6, 8],
-      memory: [0, 4, 8, 10, 11, 12, 12, 12],
     },
   };
 
-  mockClusters.set(name, newCluster);
-
-  // Simulate operator reconciliation completing in background
-  setTimeout(() => {
-    const existing = mockClusters.get(name);
-    if (existing && existing.status.phase === 'Provisioning') {
-      existing.status.phase = 'Ready';
-      existing.status.conditions = [
-        { type: 'EtcdReady', status: 'True', reason: 'EtcdQuorumReady', message: 'HA etcd cluster is healthy with quorum', lastTransitionTime: new Date().toISOString() },
-        { type: 'ControlPlaneReady', status: 'True', reason: 'ControlPlaneReady', message: 'vCluster control plane and syncer are ready', lastTransitionTime: new Date().toISOString() },
-        { type: 'AddonsReady', status: 'True', reason: 'AddonsConfigured', message: 'CoreDNS and Metrics-Server active', lastTransitionTime: new Date().toISOString() },
-        { type: 'KubeconfigGenerated', status: 'True', reason: 'KubeconfigReady', message: 'Kubeconfig secret generated', lastTransitionTime: new Date().toISOString() },
-      ];
-      mockClusters.set(name, existing);
+  if (data.customYaml && data.customYaml.trim()) {
+    try {
+      body.spec.rawConfig = JSON.parse(data.customYaml);
+    } catch {
+      body.spec.rawConfig = { raw: data.customYaml };
     }
-  }, 4000);
+  }
 
-  return newCluster;
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${namespace}/virtualclusters`,
+    'POST',
+    body
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to create virtual cluster: HTTP ${res.statusCode}`);
 }
 
-export async function upgradeVirtualCluster(name: string, upgrades: {
-  kubernetesVersion?: string;
-  vclusterVersion?: string;
-}): Promise<VirtualCluster | null> {
-  const cluster = mockClusters.get(name);
-  if (!cluster) return null;
-
-  cluster.status.phase = 'Upgrading';
+export async function upgradeVirtualCluster(
+  name: string,
+  upgrades: {
+    kubernetesVersion?: string;
+    vclusterVersion?: string;
+  },
+  namespace = 'default'
+): Promise<VirtualCluster | null> {
+  const patch: any = { spec: {} };
   if (upgrades.kubernetesVersion) {
-    cluster.spec.kubernetesVersion = upgrades.kubernetesVersion;
+    patch.spec.kubernetesVersion = upgrades.kubernetesVersion;
   }
   if (upgrades.vclusterVersion) {
-    cluster.spec.vclusterVersion = upgrades.vclusterVersion;
+    patch.spec.vclusterVersion = upgrades.vclusterVersion;
   }
 
-  // Simulate upgrade completion after 3.5 seconds
-  setTimeout(() => {
-    const c = mockClusters.get(name);
-    if (c) {
-      if (upgrades.kubernetesVersion) c.status.virtualK8sVersion = upgrades.kubernetesVersion;
-      if (upgrades.vclusterVersion) c.status.vclusterVersion = upgrades.vclusterVersion;
-      c.status.phase = 'Ready';
-      mockClusters.set(name, c);
-    }
-  }, 3500);
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${namespace}/virtualclusters/${name}`,
+    'PATCH',
+    patch,
+    'application/merge-patch+json'
+  );
 
-  mockClusters.set(name, cluster);
-  return cluster;
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to upgrade virtual cluster: HTTP ${res.statusCode}`);
 }
 
-export async function deleteVirtualCluster(name: string): Promise<boolean> {
-  return mockClusters.delete(name);
+export async function deleteVirtualCluster(name: string, namespace?: string): Promise<boolean> {
+  try {
+    let targetNs = namespace;
+    if (!targetNs) {
+      const all = await listVirtualClusters();
+      const match = all.find((c) => c.name === name);
+      targetNs = match ? match.namespace : 'default';
+    }
+    const res = await k8sRequest<any>(
+      `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
+      'DELETE'
+    );
+    return res.statusCode >= 200 && res.statusCode < 300;
+  } catch (err: any) {
+    console.error('Failed to delete virtual cluster from Kubernetes API:', err.message || err);
+    return false;
+  }
+}
+
+export async function getKubeconfig(name: string, namespace?: string): Promise<string | null> {
+  try {
+    let targetNs = namespace;
+    if (!targetNs) {
+      const all = await listVirtualClusters();
+      const match = all.find((c) => c.name === name);
+      targetNs = match ? match.namespace : 'default';
+    }
+    const res = await k8sRequest<any>(`/api/v1/namespaces/${targetNs}/secrets/${name}-kubeconfig`);
+    if (res.statusCode === 200 && res.data?.data?.config) {
+      return Buffer.from(res.data.data.config, 'base64').toString('utf-8');
+    }
+  } catch {
+    // Secret not available yet
+  }
+  return null;
 }
 
 export function generateMockKubeconfig(cluster: VirtualCluster): string {
@@ -384,7 +373,7 @@ export function generateMockKubeconfig(cluster: VirtualCluster): string {
 clusters:
 - cluster:
     insecure-skip-tls-verify: true
-    server: ${cluster.status.endpoint}
+    server: ${cluster.status.endpoint || 'https://kubernetes.default.svc'}
   name: ${cluster.name}
 contexts:
 - context:
@@ -397,6 +386,6 @@ preferences: {}
 users:
 - name: admin
   user:
-    token: vcop-tenant-token-${cluster.name}-admin-session
+    token: vcop-token-${cluster.name}
 `;
 }

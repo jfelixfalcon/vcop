@@ -28,8 +28,16 @@ rules:
       - configmaps
       - pods
       - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
       - namespaces
     verbs:
+      - create
       - get
       - list
       - watch

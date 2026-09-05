@@ -70,13 +70,19 @@ func TestVirtualClusterReconciler_Reconcile(t *testing.T) {
 		},
 	}
 
-	// 1. First reconcile pass: adds finalizer & creates etcd/syncer/configmap/service
+	// 1. First reconcile pass: adds finalizer
+	_, err := reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile pass 1 returned error: %v", err)
+	}
+
+	// 2. Second reconcile pass: creates resources
 	res, err := reconciler.Reconcile(ctx, req)
 	if err != nil {
-		t.Fatalf("Reconcile returned error: %v", err)
+		t.Fatalf("Reconcile pass 2 returned error: %v", err)
 	}
 	if res.RequeueAfter == 0 && !res.Requeue {
-		t.Logf("Reconcile finished step 1")
+		t.Logf("Reconcile finished step 2")
 	}
 
 	// Verify ConfigMap exists
@@ -87,8 +93,8 @@ func TestVirtualClusterReconciler_Reconcile(t *testing.T) {
 
 	// Verify Service exists
 	svc := &corev1.Service{}
-	if err := client.Get(ctx, types.NamespacedName{Name: "test-vcluster-service", Namespace: "default"}, svc); err != nil {
-		t.Errorf("Expected service test-vcluster-service to be created: %v", err)
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-vcluster", Namespace: "default"}, svc); err != nil {
+		t.Errorf("Expected service test-vcluster to be created: %v", err)
 	}
 
 	// Verify Headless Service exists

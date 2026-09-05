@@ -13,7 +13,7 @@ spec:
     coreDNS:
       enabled: true
     metricsServer:
-      enabled: true
+      enabled: false
   sync:
     pods: true
     services: true

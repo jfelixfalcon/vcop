@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { getVirtualCluster, generateMockKubeconfig } from '../../../../lib/k8s-client';
+import { getVirtualCluster, getKubeconfig, generateMockKubeconfig } from '../../../../lib/k8s-client';
 
 export const GET: APIRoute = async ({ params, url }) => {
   const { name } = params;
@@ -18,7 +18,8 @@ export const GET: APIRoute = async ({ params, url }) => {
     });
   }
 
-  const kubeconfig = generateMockKubeconfig(cluster);
+  const realKubeconfig = await getKubeconfig(name);
+  const kubeconfig = realKubeconfig || generateMockKubeconfig(cluster);
   const download = url.searchParams.get('download') === 'true';
 
   if (download) {

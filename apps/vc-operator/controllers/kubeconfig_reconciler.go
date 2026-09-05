@@ -6,6 +6,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -49,6 +50,23 @@ users:
   user:
     token: vcluster-admin-token-%s
 `, endpoint, vc.Spec.ClusterName, vc.Spec.ClusterName, vc.Spec.ClusterName, vc.Spec.ClusterName, vc.Name)
+
+	certsSec := &corev1.Secret{}
+	certsName := fmt.Sprintf("%s-certs", vc.Name)
+	if err := r.Get(ctx, types.NamespacedName{Name: certsName, Namespace: vc.Namespace}, certsSec); err == nil {
+		if adminConf, ok := certsSec.Data["admin.conf"]; ok && len(adminConf) > 0 {
+			rawKubeconfig = string(adminConf)
+		}
+	}
+
+	// vCluster v0.37+ automatically generates secret "vc-<clusterName>" with "config" and "certificate-authority"
+	vcSec := &corev1.Secret{}
+	vcSecName := fmt.Sprintf("vc-%s", vc.Name)
+	if err := r.Get(ctx, types.NamespacedName{Name: vcSecName, Namespace: vc.Namespace}, vcSec); err == nil {
+		if cfg, ok := vcSec.Data["config"]; ok && len(cfg) > 0 {
+			rawKubeconfig = string(cfg)
+		}
+	}
 
 	sec := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{

@@ -15,7 +15,7 @@ import {
   Zap,
 } from 'lucide-react';
 import type { SizePreset } from '../lib/types';
-import { PRESETS } from '../lib/k8s-client';
+import { PRESETS } from '../lib/presets';
 
 export const ProvisioningWizard: React.FC = () => {
   const [step, setStep] = useState<number>(1);

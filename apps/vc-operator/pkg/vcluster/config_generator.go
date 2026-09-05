@@ -11,16 +11,27 @@ import (
 
 // VClusterConfig matches the official vCluster OSS v0.37 vcluster.yaml schema
 type VClusterConfig struct {
-	ControlPlane ControlPlaneConfig `yaml:"controlPlane" json:"controlPlane"`
-	Integrations IntegrationsConfig `yaml:"integrations" json:"integrations"`
-	Sync         SyncConfig         `yaml:"sync" json:"sync"`
-	Policies     *PoliciesConfig    `yaml:"policies,omitempty" json:"policies,omitempty"`
+	ControlPlane ControlPlaneConfig  `yaml:"controlPlane" json:"controlPlane"`
+	Integrations IntegrationsConfig  `yaml:"integrations" json:"integrations"`
+	Sync         SyncConfig          `yaml:"sync" json:"sync"`
+	PrivateNodes *PrivateNodesConfig `yaml:"privateNodes,omitempty" json:"privateNodes,omitempty"`
+	Policies     *PoliciesConfig     `yaml:"policies,omitempty" json:"policies,omitempty"`
+}
+
+type PrivateNodesConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
 }
 
 type ControlPlaneConfig struct {
 	Distro       DistroConfig       `yaml:"distro" json:"distro"`
 	BackingStore BackingStoreConfig `yaml:"backingStore" json:"backingStore"`
 	CoreDNS      CoreDNSConfig      `yaml:"coreDNS" json:"coreDNS"`
+	Proxy        *ProxyConfig       `yaml:"proxy,omitempty" json:"proxy,omitempty"`
+}
+
+type ProxyConfig struct {
+	BindAddress string `yaml:"bindAddress" json:"bindAddress"`
+	Port        int    `yaml:"port" json:"port"`
 }
 
 type DistroConfig struct {
@@ -28,14 +39,14 @@ type DistroConfig struct {
 }
 
 type K8sDistro struct {
-	Enabled           bool                   `yaml:"enabled" json:"enabled"`
-	Version           string                 `yaml:"version" json:"version"`
-	Image             string                 `yaml:"image,omitempty" json:"image,omitempty"`
-	ControllerManager K8sControllerManager   `yaml:"controllerManager" json:"controllerManager"`
+	Enabled           bool             `yaml:"enabled" json:"enabled"`
+	Version           string           `yaml:"version" json:"version"`
+	APIServer         *ComponentConfig `yaml:"apiServer,omitempty" json:"apiServer,omitempty"`
+	ControllerManager *ComponentConfig `yaml:"controllerManager,omitempty" json:"controllerManager,omitempty"`
 }
 
-type K8sControllerManager struct {
-	Image string `yaml:"image,omitempty" json:"image,omitempty"`
+type ComponentConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
 }
 
 type BackingStoreConfig struct {
@@ -96,9 +107,14 @@ type SyncConfig struct {
 }
 
 type SyncToHostConfig struct {
-	Pods      SyncResourceConfig `yaml:"pods" json:"pods"`
-	Services  SyncResourceConfig `yaml:"services" json:"services"`
-	Ingresses SyncResourceConfig `yaml:"ingresses" json:"ingresses"`
+	Pods                   SyncResourceConfig `yaml:"pods" json:"pods"`
+	Services               SyncResourceConfig `yaml:"services" json:"services"`
+	Endpoints              SyncResourceConfig `yaml:"endpoints" json:"endpoints"`
+	EndpointSlices         SyncResourceConfig `yaml:"endpointSlices" json:"endpointSlices"`
+	PersistentVolumeClaims SyncResourceConfig `yaml:"persistentVolumeClaims" json:"persistentVolumeClaims"`
+	ConfigMaps             SyncResourceConfig `yaml:"configMaps" json:"configMaps"`
+	Secrets                SyncResourceConfig `yaml:"secrets" json:"secrets"`
+	Ingresses              SyncResourceConfig `yaml:"ingresses" json:"ingresses"`
 }
 
 type SyncFromHostConfig struct {
@@ -137,9 +153,11 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 				K8s: K8sDistro{
 					Enabled: true,
 					Version: k8sVersion,
-					Image:   fmt.Sprintf("registry.k8s.io/kube-apiserver:%s", k8sVersion),
-					ControllerManager: K8sControllerManager{
-						Image: fmt.Sprintf("registry.k8s.io/kube-controller-manager:%s", k8sVersion),
+					APIServer: &ComponentConfig{
+						Enabled: true,
+					},
+					ControllerManager: &ComponentConfig{
+						Enabled: true,
 					},
 				},
 			},
@@ -172,11 +190,18 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 			CoreDNS: CoreDNSConfig{
 				Enabled: spec.Components.CoreDNS.Enabled,
 			},
+			Proxy: &ProxyConfig{
+				BindAddress: "0.0.0.0",
+				Port:        8443,
+			},
 		},
 		Integrations: IntegrationsConfig{
 			MetricsServer: MetricsServerConfig{
 				Enabled: spec.Components.MetricsServer.Enabled,
 			},
+		},
+		PrivateNodes: &PrivateNodesConfig{
+			Enabled: false,
 		},
 		Sync: SyncConfig{
 			ToHost: SyncToHostConfig{
@@ -186,19 +211,26 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 				Services: SyncResourceConfig{
 					Enabled: spec.Sync.Services,
 				},
+				Endpoints: SyncResourceConfig{
+					Enabled: true,
+				},
+				EndpointSlices: SyncResourceConfig{
+					Enabled: true,
+				},
+				PersistentVolumeClaims: SyncResourceConfig{
+					Enabled: true,
+				},
+				ConfigMaps: SyncResourceConfig{
+					Enabled: true,
+				},
+				Secrets: SyncResourceConfig{
+					Enabled: true,
+				},
 				Ingresses: SyncResourceConfig{
 					Enabled: spec.Sync.Ingresses,
 				},
 			},
 		},
-	}
-
-	if spec.Lifecycle.AutoSleep {
-		cfg.Policies = &PoliciesConfig{
-			AutoSleep: &AutoSleepConfig{
-				Enabled: true,
-			},
-		}
 	}
 
 	return cfg, nil
