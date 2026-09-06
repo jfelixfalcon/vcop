@@ -2,8 +2,8 @@ apiVersion: v2
 name: vcop
 description: Cloud-Native Virtual Cluster Operator & Operations Center (vCluster OSS v0.36)
 type: application
-version: 0.36.1
-appVersion: "v0.36.1"
+version: 1.0.0
+appVersion: "v1.0.0"
 icon: https://raw.githubusercontent.com/loft-sh/vcluster/main/docs/static/media/vcluster-logo.svg
 keywords:
   - vcluster

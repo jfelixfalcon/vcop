@@ -192,7 +192,7 @@ When crafting master prompts for complex agentic systems and cloud-native platfo
 │       │   └── pages/              # Astro pages & API endpoints (/api/vclusters/*)
 ├── charts/
 │   └── vcop/                       # Official Helm v3 Packaging
-│       ├── Chart.yaml              # Chart metadata (v0.36.1)
+│       ├── Chart.yaml              # Chart metadata (v1.0.0)
 │       ├── values.yaml             # Configurable values (operator, UI, metricsDb)
 │       └── templates/              # Kubernetes templates (operator, ui, metrics-db)
 ├── deploy/                         # Standalone raw manifests
