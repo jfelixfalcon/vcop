@@ -1,0 +1,83 @@
+name: Release & Publish Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Build & Publish Release Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Helm 3
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Prepare Release Artifacts Directory
+        run: |
+          mkdir -p dist
+
+      - name: Package Helm Chart
+        run: |
+          helm package charts/vcop --destination dist/
+          helm repo index dist/ --url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+
+      - name: Assemble All-In-One Kubernetes Manifests Bundle
+        run: |
+          # 1. Standalone CRDs bundle for GitOps (ArgoCD / Flux)
+          cp deploy/crds/vops.gitops.io_virtualclusters.yaml dist/crds.yaml
+
+          # 2. Comprehensive all-in-one installation bundle
+          cat deploy/crds/vops.gitops.io_virtualclusters.yaml > dist/vcop-install.yaml
+          echo "---" >> dist/vcop-install.yaml
+          cat deploy/rbac/service_account.yaml >> dist/vcop-install.yaml
+          echo "---" >> dist/vcop-install.yaml
+          cat deploy/rbac/role.yaml >> dist/vcop-install.yaml
+          echo "---" >> dist/vcop-install.yaml
+          cat deploy/rbac/role_binding.yaml >> dist/vcop-install.yaml
+          echo "---" >> dist/vcop-install.yaml
+          cat deploy/presets/dev-sandbox.yaml >> dist/vcop-install.yaml
+          echo "---" >> dist/vcop-install.yaml
+          cat deploy/presets/qa-staging.yaml >> dist/vcop-install.yaml
+          echo "---" >> dist/vcop-install.yaml
+          cat deploy/presets/gpu-isolated.yaml >> dist/vcop-install.yaml
+          echo "---" >> dist/vcop-install.yaml
+          cat deploy/metrics-db.yaml >> dist/vcop-install.yaml
+          echo "---" >> dist/vcop-install.yaml
+          cat deploy/operator.yaml >> dist/vcop-install.yaml
+          echo "---" >> dist/vcop-install.yaml
+          cat deploy/ui.yaml >> dist/vcop-install.yaml
+
+      - name: Generate Cryptographic SHA256 Checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Publish Official GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tgz
+            dist/index.yaml
+            dist/vcop-install.yaml
+            dist/crds.yaml
+            dist/checksums.txt
+          name: "Release ${{ github.ref_name }} - vCOp Platform & Operations Center"
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

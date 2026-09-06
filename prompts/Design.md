@@ -1,39 +1,51 @@
-# Project Master Prompt: Cloud-Native vCluster Operator & Operations Center
+# Project Master Prompt: Cloud-Native vCluster Operator & Operations Center (vCOp)
 
 ### Objective & Role
 
-You are a Principal DevSecOps and Cloud-Native Systems Architect specializing in Kubernetes operators, GitOps pipelines, and internal developer platforms (IDPs). Your task is to design, scaffold, and implement an end-to-end Virtual Cluster Management Platform called **vCluster Center of Operations (vCOp)**.
+You are a Principal DevSecOps and Cloud-Native Systems Architect specializing in Kubernetes operators, GitOps pipelines, enterprise multi-tenancy, and internal developer platforms (IDPs). Your task is to design, scaffold, and implement an enterprise-grade Virtual Cluster Management Platform called **vCluster Center of Operations (vCOp)**.
 
-The platform consists of two synchronized sub-systems:
+The platform consists of two tightly synchronized sub-systems backed by durable telemetry persistence:
 
-1. **vCluster Kubernetes Operator**: A Go-based operator (built with Kubebuilder / controller-runtime) managing the full lifecycle of tenant virtual clusters using **vCluster OSS v0.36**, high-availability etcd, CoreDNS, and native metrics-server.
-2. **Operations Center UI**: An ultra-responsive web dashboard built with **Astro (SSR + Interactive Islands)** that abstracts all Kubernetes complexity for non-technical users while remaining strictly Kubernetes-native under the hood.
+1. **vCluster Kubernetes Operator**: A Go-based operator (built with Kubebuilder / controller-runtime) managing the complete declarative lifecycle of tenant virtual clusters using **vCluster OSS v0.36**, simplified topology tiers (`normal` and `ha`), enterprise OIDC governance, custom private PKI / CA trust, and guest RBAC synchronization.
+2. **Operations Center UI**: An ultra-responsive, cybernetic web dashboard built with **Astro (SSR + Interactive React Islands)** that completely abstracts Kubernetes complexity for developers while delivering full day-2 observability (CPU/Memory performance curves, pod metrics, workloads, app store, quotas) with zero external Grafana dependency.
 
 ---
 
 ## 1. Core Architectural Requirements
 
-### 1.1 Virtual Cluster Topology (vCluster OSS v0.36)
+### 1.1 Virtual Cluster Topology & Engine (vCluster OSS v0.36)
 
-Each virtual cluster provisioned by the operator must form a production-grade, isolated core control plane with the following baseline specifications:
+Each virtual cluster provisioned by the operator forms an isolated tenant control plane:
 
 * **vCluster Engine:** `loft-sh/vcluster` OSS version `0.36.x` adhering to the unified `vcluster.yaml` schema.
-* **High Availability Backing Store:** A dedicated 3-node HA etcd cluster (`controlPlane.backingStore.etcd.deploy.statefulSet.highAvailability.replicas: 3`) running with quorum verification, persistent storage claims, and automated peer discovery.
-* **Core Internal Add-ons:**
-* **CoreDNS:** Enabled and configured inside the virtual control plane for independent intra-vcluster service discovery.
-* **Kubernetes Metrics:** Metrics-server integration enabled (`integrations.metricsServer.enabled: true`) inside the vcluster, allowing `kubectl top` and HPA controllers within the tenant cluster to function without host-level visibility.
+* **Simplified Topology Tiers:**
+  * **Normal Tier:** Streamlined single-replica footprint (1 control plane, 1 backing store, 1 CoreDNS). Ideal for dev/test sandboxes, QA previews, and lightweight microservices.
+  * **High-Availability (HA) Tier:** Fully redundant 3-replica control plane, 3-replica backing store with quorum verification, and 3-replica CoreDNS. Ideal for production and mission-critical tenants.
+* **Networking & Workload Syncer:** The vcluster syncer replicates guest pods, services, and ingresses into dedicated host namespaces while maintaining strict tenant network boundaries.
 
+### 1.2 Enterprise Security, Private PKI & Custom CA Trust
 
-* **Networking & Synchronization:** Syncer configured to replicate tenant workloads into dedicated host namespaces while maintaining strict boundary isolation (synced pods, services, and ingresses).
+In enterprise and internal on-prem environments, corporate endpoints (Keycloak, Dex, Gitlab, internal registries) frequently rely on private or self-signed Root Certificate Authorities:
 
-### 1.2 Native Kubernetes Primitives & GitOps Design
+* **Custom CA Root Injection:** Ability to inject corporate CA bundles (PEM certificates or Kubernetes TLS/CA Secrets) into the virtual cluster syncer and control plane pods (`--kube-ca` / `SSL_CERT_DIR`), enabling full TLS trust for internal endpoints.
+* **Modern OIDC Authentication & PKCE:**
+  * Support for OpenID Connect authentication with `--oidc-pkce-method=auto` (deprecating legacy boolean flags).
+  * Automated tenant RBAC reconciliation: Synchronizes host-defined allowed groups/emails into in-cluster `ClusterRoleBinding` and `RoleBinding` objects inside the virtual cluster.
+  * **Hierarchical OIDC Inheritance:** Multi-tier parameter resolution:
+    1. **Global Default:** Organization-wide IdP parameters.
+    2. **Cluster Group:** Team or environment-specific IdP settings (e.g. `data-engineering`, `dev-team`).
+    3. **Cluster Custom:** Per-cluster specific client credentials and scope overrides.
 
-The entire system must operate purely on native Kubernetes storage and configuration constructs:
+### 1.3 Built-in Observability & Durable Metrics Storage (No Grafana Required)
 
-* **No External Databases:** All state must live within the host cluster as Custom Resources, `ConfigMaps`, and `Secrets`.
-* **Kubeconfig Management:** Upon successful provisioning, the operator must extract the vcluster admin kubeconfig and store it in a designated host `Secret` (e.g., `<vcluster-name>-kubeconfig`) with standardized connection metadata.
-* **Template System:** Common vcluster presets (e.g., `dev-sandbox`, `qa-staging`, `gpu-isolated`) must be stored as host `ConfigMaps` containing default `vcluster.yaml` blocks.
-* **GitOps Interoperability:** All CRD mutations must be deterministic and declarative so that an external GitOps agent (Argo CD or Flux) can commit manifests or reconcile the CRDs directly without operator fighting or drift conflicts.
+Users must be able to inspect live and historical container metrics (CPU millicores, Memory working set, restarts, health status) directly inside vCOp:
+
+* **Dedicated PostgreSQL Backing Store:** Deployed in `vcop-system` with a `PersistentVolumeClaim` (5Gi+ on standard StorageClass) to store time-series telemetry samples (`pod_metrics_samples`).
+* **Continuous Background Telemetry Daemon:** Automated scraper polling virtual clusters every 30 seconds via `/apis/metrics.k8s.io/v1beta1/pods` and `/api/v1/pods`.
+* **Historical Continuity Across Pod Rollouts:**
+  * **The Problem:** Deployments and ReplicaSets generate random pod hashes upon updates (e.g., `nginx-7584b6f84c-xyz` replacing `nginx-8557b8b6df-abc`). Traditional pod-name indexing breaks history whenever a deployment rolls out.
+  * **The Solution:** Index and aggregate metrics by `(vcluster, namespace, workload_kind, workload_name)` (e.g., `Deployment: nginx-test`). Historical curves remain continuous, smooth, and uninterrupted across rolling restarts and scaling events.
+* **Interactive SVG Visualizations:** Smooth Bézier curve area charts with gradient fills, horizontal threshold gridlines, interactive hover crosshair scrubbing, and 5 selectable time horizons (`15m`, `1h`, `6h`, `24h`, `7d`).
 
 ---
 
@@ -43,107 +55,151 @@ The entire system must operate purely on native Kubernetes storage and configura
 
 * **Language:** Go 1.22+
 * **Framework:** Controller-Runtime / Kubebuilder v4
-* **Target vCluster Version:** 0.36.x
+* **Target vCluster Version:** `0.36.x`
 * **API Group / Version:** `vops.gitops.io/v1alpha1`
 * **Kind:** `VirtualCluster`
 
-### 2.2 Custom Resource Definition (CRD)
+### 2.2 Custom Resource Definition (`VirtualCluster`)
 
-Design the `VirtualCluster` CRD to provide both friendly high-level abstractions and full underlying passthrough to vCluster v0.36 configurations:
+```yaml
+apiVersion: vops.gitops.io/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: vc-dev
+  namespace: vc-dev
+  annotations:
+    vops.gitops.io/cluster-groups: "engineering,sandbox"
+    vops.gitops.io/owner: "dev-team@company.com"
+spec:
+  clusterName: vc-dev
+  vclusterVersion: "0.36.1"
+  kubernetesVersion: "v1.31.0"
+  topology: "normal" # enum: normal | ha
+  components:
+    coreDNS:
+      enabled: true
+    metricsServer:
+      enabled: true
+  security:
+    customCaSecret: "corp-root-ca"
+    oidc:
+      enabled: true
+      issuerUrl: "https://auth.company.com/realms/corp"
+      clientId: "vc-dev-client"
+      usernameClaim: "email"
+      groupsClaim: "groups"
+      pkceMethod: "auto"
+  policies:
+    resourceQuota:
+      enabled: true
+      requestsCPU: "4"
+      limitsCPU: "8"
+      requestsMemory: "8Gi"
+      limitsMemory: "16Gi"
+    limitRange:
+      enabled: true
+      defaultRequestCPU: "100m"
+      defaultRequestMemory: "128Mi"
+status:
+  phase: Ready # Pending | Provisioning | Ready | Upgrading | Degraded | Sleeping
+  conditions:
+    - type: ControlPlaneReady
+      status: "True"
+    - type: MetricsServerReady
+      status: "True"
+  metrics:
+    activeNodeCount: 1
+    podCount: 6
+    cpuUsage: "12m"
+    memoryUsage: "185Mi"
+```
 
-* **`spec.clusterName`** (string, required): Tenant-facing identifier.
-* **`spec.vclusterVersion`** (string, default: `0.36.0`): Target vcluster engine version.
-* **`spec.kubernetesVersion`** (string, default: `v1.31.0`): Virtual Kubernetes control plane version.
-* **`spec.sizePreset`** (enum: `small`, `medium`, `large`, `custom`): High-level preset driving CPU, memory requests, and etcd storage tiers.
-* **`spec.highAvailability`** (bool, default: `true`): Toggles 3-replica HA etcd and control-plane redundancy.
-* **`spec.components`**:
-* `coreDNS.enabled` (bool, default: `true`)
-* `metricsServer.enabled` (bool, default: `true`)
+### 2.3 Reconciliation Lifecycle & GitOps Guardrails
 
-
-* **`spec.helmValues` / `spec.rawConfig**` (`runtime.RawExtension`): Direct passthrough to the v0.36 `vcluster.yaml` configuration structure to ensure 100% feature parity with the official Helm chart/CLI values.
-* **`status`**:
-* `phase` (`Pending`, `Provisioning`, `Ready`, `Upgrading`, `Degraded`, `Terminating`)
-* `conditions` (Standard K8s conditions: `EtcdReady`, `ControlPlaneReady`, `AddonsReady`, `KubeconfigGenerated`)
-* `virtualK8sVersion` (Current detected API version)
-* `vclusterVersion` (Current engine version)
-* `endpoint` (Internal and external ingress access endpoints)
-* `metrics` (Active node count, pod count, memory usage summary)
-
-
-
-### 2.3 Reconciliation Logic & Best Practices
-
-* **Idempotent Reconciliation:** Ensure reconciliation accurately compares desired state vs live state (Helm release state, StatefulSet rollout, Service availability).
-* **Safe Upgrade Path:**
-* **vCluster Engine Upgrades:** When `spec.vclusterVersion` changes, reconcile via rolling replacement of the syncer/control plane container images, ensuring etcd schema compatibility checks pass first.
-* **Kubernetes Control Plane Upgrades:** When `spec.kubernetesVersion` is bumped, sequence the rollout: trigger etcd snapshot/backup -> upgrade API server & controller-manager -> monitor `Ready` status -> refresh in-cluster CoreDNS and add-on manifests.
-
-
-* **Finalizers & Safe Teardown:** Implement a custom finalizer (`vops.gitops.io/finalizer`) to gracefully drain virtual pods, remove host resources, detach persistent volume claims, and delete associated Secrets/ConfigMaps.
-* **Admission Webhooks:** Include a Validating Webhook to validate version jump safety (preventing unsupported downgrades or multi-minor version leaps) and schema-check the raw `vcluster.yaml` block.
-
----
-
-## 3. Operations Center UI Specification (Astro)
-
-### 3.1 Technology & Design Philosophy
-
-* **Framework:** Astro (SSR Mode via Node or Deno adapter).
-* **UI Components:** Interactive Islands using React or Svelte with Tailwind CSS and Lucide icons.
-* **Aesthetic (2026 Modern Minimalist):** Dark-mode first, glassmorphism surface panels, subtle cybernetic border glows, high-contrast monospace typography for status/endpoints, and sub-100ms micro-interactions. Zero lag or page-reload flashes.
-* **Target Persona:** Engineers and QA testers with **zero Kubernetes knowledge**. All raw YAML, pods, daemonsets, and CIDR blocks must be completely abstracted behind human terms.
-
-### 3.2 User Experience & Flows
-
-* **Dashboard / Cluster Fleet View:**
-* Clean grid/table displaying all virtual clusters with traffic-light status badges (`Active`, `Syncing`, `Needs Upgrade`, `Error`).
-* Instant filter by owner, status, or environment tag.
-* Live health sparklines (CPU, Memory utilization streamed from host metrics).
-
-
-* **One-Click Provisioning Wizard:**
-* 3-step simple wizard: (1) Cluster Name & Purpose, (2) Size Tier (`Sandbox - 2 vCPU / 4GB`, `Standard - 4 vCPU / 8GB`, `Production HA - 8 vCPU / 16GB`), (3) Lifecycle Policies (Auto-sleep, TTL deletion).
-* Checkbox: "Enable Monitoring & DNS" (pre-checked).
-* Advanced toggle (hidden by default): raw version selector and custom YAML override.
-
-
-* **Cluster Detail & Operations:**
-* Single-click **"Download Kubeconfig"** button and an on-screen **"Copy Token / Connect via CLI"** snippet.
-* Single-click **Upgrade Engine** and **Upgrade Kubernetes** dropdowns with clear pre-flight validation badges (e.g., `"v1.30 -> v1.31 (Compatible)"`).
-* One-click **Delete** modal requiring typing the cluster name to prevent accidental teardown.
-
-
-
-### 3.3 Backend API Integration
-
-* Build Astro API endpoints (`/api/vclusters/*`) running on the server side.
-* Authenticate against the Kubernetes cluster using native `in-cluster` ServiceAccount credentials or host `KUBECONFIG`.
-* Map UI CRUD actions to Kubernetes Custom Resource operations (`POST`, `GET`, `PATCH`, `DELETE` on the `VirtualCluster` CRD).
-* Expose a server-sent events (SSE) or polling endpoint fetching status updates and node/pod metric summaries directly from Kubernetes metrics APIs.
+* **Deterministic Synchronization:** The operator reconciles desired state against the live cluster without race conditions or fighting with external GitOps engines (Argo CD or Flux).
+* **Graceful Teardown & Finalizers:** Uses `vops.gitops.io/finalizer` to drain guest pods, remove host backing stores, and safely delete admin secrets.
+* **Safe Rolling Upgrades:** Validates Kubernetes version compatibility jumps and sequences control-plane image updates with zero downtime.
 
 ---
 
-## 4. Output Deliverables Expected
+## 3. Operations Center UI Specification (Astro + React Islands)
 
-Produce the implementation in structured, production-ready modules:
+### 3.1 Design Philosophy & Aesthetic (2026 Minimalist Cybernetic)
 
-1. **CRD Definitions:** The complete YAML definition for `VirtualCluster` (`CustomResourceDefinition`) with OpenAPI v3 validation schema and CEL (Common Expression Language) validation rules.
-2. **Operator Implementation:**
-* Go project layout (`main.go`, `api/v1alpha1/`, `controllers/virtualcluster_controller.go`).
-* Complete reconciliation loop handling HA etcd StatefulSets, vCluster Helm/manifest generation, CoreDNS, and Metrics Server provisioning.
-* Version upgrade logic for vCluster and Kubernetes versions.
+* **Framework:** Astro in Standalone Server-Side Rendering (SSR) mode with React 19 interactive islands and Tailwind CSS.
+* **Aesthetic:** Dark-mode first, glassmorphism surface panels (`bg-cyber-900/80`), subtle neon cyan/emerald/purple accents, high-contrast monospace indicators, and sub-100ms micro-interactions.
+* **State & Polling Stability (Critical Rule):**
+  * In components using background interval polling (e.g. 3-second telemetry refresh), **never place polled object references directly into modal `useEffect` dependency arrays**.
+  * Use `[isOpen]` dependencies guarded by `if (isOpen && cluster)` to prevent user input keystrokes from resetting in real time while typing.
+  * Pause background polling intervals while any modal is active (`activeModal !== null`).
 
+### 3.2 User Navigation & Workspaces
 
-3. **vCluster 0.36 Configuration Templates:** The reference Go template/ConfigMap converting `spec` inputs into the validated `vcluster.yaml` format.
-4. **Astro Operations Center UI:**
-* Project directory layout and configuration (`astro.config.mjs`, `package.json`, Tailwind config).
-* Key API route handlers (`/api/vclusters/index.ts`, `/api/vclusters/[name].ts`).
-* Main dashboard and create-cluster UI components.
+The cluster management interface is organized into 6 focused operational tabs:
 
+1. **Health & Telemetry:** Overall cluster status, control-plane conditions, phase badges, and quick resource sparklines.
+2. **Pods & Metrics (Observability):**
+   * Top KPI summary cards (CPU Utilization, Memory Working Set, Active Pods, Restarts).
+   * Dual interactive SVG historical curves with crosshair scrubbing.
+   * Multi-faceted filtering by Namespace, Workload Kind (`Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `Pod`), and Health Status.
+   * Grouped Workload View (expanding into underlying pod instances) and Flat Pod Table View.
+   * Deep-dive Container Inspector modal (CPU/RAM quotas, container images, conditions, restart counts).
+3. **Quotas & Policies:** Dual-scope ResourceQuota and LimitRange policy editor with instant presets (`Small`, `Medium`, `Large`).
+4. **Access & RBAC:** Multi-tenant ownership, allowed group bindings, and guest cluster role mappings.
+5. **Applications (App Store):** Curated catalog of cloud-native add-ons (Ingress controllers, Cert-Manager, Prometheus, Databases) deployed with 1 click via Helm or raw manifests.
+6. **Effective vcluster.yaml:** Read-only inspection of the fully compiled, reconciled configuration.
 
-5. **Deployment Manifests & RBAC:** Complete RBAC roles, ServiceAccounts, and deployment manifests required to run the operator and UI inside the host cluster.
+---
 
-## 5. Project specific locations
-* UI: apps/ui
-* Operator: apps/vc-operator/
+## 4. Prompt Engineering Lessons & Architecture Design Patterns (2026 Edition)
+
+When crafting master prompts for complex agentic systems and cloud-native platforms, observe the following prompt engineering principles:
+
+### 4.1 Specify Non-Happy-Path & Enterprise Constraints Early
+* *Anti-Pattern:* "Add OIDC authentication."
+* *Best Practice:* "Add OIDC authentication supporting private endpoints with self-signed CA root certificates, modern `--oidc-pkce-method=auto`, and multi-tier inheritance (Global -> Group -> Cluster)."
+
+### 4.2 Decouple High-Frequency Polling from Interactive Form State
+* *Anti-Pattern:* "Make the dashboard update every 3 seconds."
+* *Best Practice:* "Implement a 3-second background polling timer for live telemetry, but ensure editing modals suspend polling and decouple their input state initialization from polled object reference changes to prevent keystroke resets."
+
+### 4.3 Design for Workload Continuity, Not Ephemeral Pod Names
+* *Anti-Pattern:* "Store pod CPU and memory in a database."
+* *Best Practice:* "Store pod metrics indexed by owner workload (`Deployment`, `StatefulSet`) so historical performance curves remain unbroken when pods cycle names during rolling deployments."
+
+### 4.4 Separate Browser-Safe Code from Server-Only Subsystems
+* *Anti-Pattern:* Importing utility functions from modules that contain Node.js built-ins (`fs`, `child_process`, `pg`).
+* *Best Practice:* Isolate client-safe formatting and mathematical algorithms in dedicated files (`metrics-utils.ts`), keeping database pools and cluster executors in server-only modules (`metrics-db.ts`, `metrics-collector.ts`).
+
+---
+
+## 5. Directory Structure & File Map
+
+```
+/
+├── Makefile                        # Top-level build and orchestration targets
+├── README.md                       # Comprehensive platform documentation
+├── apps/
+│   ├── vc-operator/                # Go Kubernetes Operator (controller-runtime)
+│   │   ├── api/v1alpha1/           # VirtualCluster CRD Go types
+│   │   ├── controllers/            # Reconcilers (etcd, syncer, addons, metrics)
+│   │   └── main.go                 # Operator entrypoint
+│   └── ui/                         # Astro + React Operations Center
+│       ├── Dockerfile              # Multi-stage production container build
+│       ├── src/
+│       │   ├── components/         # React Islands (ClusterDetail, WorkloadMetricsView, Modals)
+│       │   ├── lib/                # Backend services (k8s-client, metrics-collector, metrics-db)
+│       │   └── pages/              # Astro pages & API endpoints (/api/vclusters/*)
+├── charts/
+│   └── vcop/                       # Official Helm v3 Packaging
+│       ├── Chart.yaml              # Chart metadata (v0.36.1)
+│       ├── values.yaml             # Configurable values (operator, UI, metricsDb)
+│       └── templates/              # Kubernetes templates (operator, ui, metrics-db)
+├── deploy/                         # Standalone raw manifests
+│   ├── crds/                       # CustomResourceDefinitions
+│   ├── metrics-db.yaml             # PostgreSQL deployment + 5Gi PVC
+│   ├── operator.yaml               # Operator deployment
+│   └── ui.yaml                     # UI deployment + service
+└── prompts/
+    └── Design.md                   # This Master Design Document
+```

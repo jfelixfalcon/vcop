@@ -2,8 +2,8 @@ apiVersion: v2
 name: vcop
 description: Cloud-Native Virtual Cluster Operator & Operations Center (vCluster OSS v0.36)
 type: application
-version: 0.1.0
-appVersion: "0.36.0"
+version: 0.36.1
+appVersion: "v0.36.1"
 icon: https://raw.githubusercontent.com/loft-sh/vcluster/main/docs/static/media/vcluster-logo.svg
 keywords:
   - vcluster
@@ -11,9 +11,10 @@ keywords:
   - kubernetes
   - multi-tenancy
   - devops
-home: https://github.com/vops/vc-operator
+  - observability
+home: https://github.com/jfelixfalcon/vcop
 sources:
-  - https://github.com/vops/vc-operator
+  - https://github.com/jfelixfalcon/vcop
 maintainers:
-  - name: vCOp Team
-    email: maintainers@vops.gitops.io
+  - name: Juan Felix-Falcon
+    email: jfelixfalcon@gmail.com
