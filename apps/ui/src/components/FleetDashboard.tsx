@@ -99,6 +99,14 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
   const sleepingClusters = clusters.filter((c) => c.status.phase === 'Sleeping').length;
   const upgradingClusters = clusters.filter((c) => c.status.phase === 'Upgrading').length;
   const totalPods = clusters.reduce((acc, c) => acc + (c.status.metrics?.podCount || 0), 0);
+  const distinctEngines = Array.from(
+    new Set(clusters.map((c) => c.status.vclusterVersion || c.spec.vclusterVersion).filter(Boolean))
+  );
+  const dominantEngine = distinctEngines.length === 1
+    ? `vCluster ${distinctEngines[0]}`
+    : distinctEngines.length > 1
+    ? `${distinctEngines.length} Engines`
+    : 'vCluster OSS';
 
   return (
     <div className="space-y-6">
@@ -167,15 +175,15 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
         <div className="relative overflow-hidden bg-cyber-900/90 border border-cyber-700/60 rounded-2xl p-5 shadow-lg backdrop-blur-sm">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Engine Version</p>
-              <h3 className="text-2xl font-bold font-mono text-cyber-accent mt-1.5">vCluster 0.36</h3>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Engine Fleet</p>
+              <h3 className="text-2xl font-bold font-mono text-cyber-accent mt-1.5">{dominantEngine}</h3>
             </div>
             <div className="p-3 bg-cyber-800 rounded-xl border border-cyber-700 text-purple-400">
               <Activity className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-3 text-xs font-mono text-slate-400">
-            <span>Unified schema + External Add-ons</span>
+            <span>Dynamic multi-version control</span>
           </div>
         </div>
       </div>
@@ -286,7 +294,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
           {filteredClusters.map((cluster) => {
             const isHA = cluster.spec.highAvailability;
             const size = cluster.spec.sizePreset || 'medium';
-            const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'v1.31.0';
+            const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'N/A';
 
             return (
               <div

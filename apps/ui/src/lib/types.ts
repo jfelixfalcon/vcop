@@ -198,3 +198,21 @@ export interface InstalledApp {
   manifests?: string;
   resourcesCreated?: Array<{ kind: string; name: string; namespace?: string }>;
 }
+
+export type VersionTag = 'default' | 'stable' | 'lts' | 'preview' | 'deprecated';
+
+export interface VersionItem {
+  version: string;
+  label?: string;
+  tag?: VersionTag;
+  isDefault?: boolean;
+  releaseDate?: string;
+  notes?: string;
+}
+
+export interface VersionRegistry {
+  kubernetesVersions: VersionItem[];
+  vclusterVersions: VersionItem[];
+  updatedAt: string;
+}
+

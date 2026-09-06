@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { ArrowUpCircle, CheckCircle2, AlertTriangle, X, RefreshCw } from 'lucide-react';
-import type { VirtualCluster } from '../lib/types';
+import React, { useState, useEffect } from 'react';
+import { ArrowUpCircle, CheckCircle2, AlertTriangle, X, RefreshCw, ExternalLink } from 'lucide-react';
+import type { VirtualCluster, VersionRegistry } from '../lib/types';
 
 interface Props {
   cluster: VirtualCluster | null;
@@ -10,25 +10,37 @@ interface Props {
 }
 
 export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgradeSuccess }) => {
-  const [selectedK8s, setSelectedK8s] = useState<string>('v1.31.0');
-  const [selectedVCluster, setSelectedVCluster] = useState<string>('0.36.0');
+  const currentK8s = cluster?.status?.virtualK8sVersion || cluster?.spec?.kubernetesVersion || '';
+  const currentEngine = cluster?.status?.vclusterVersion || cluster?.spec?.vclusterVersion || '';
+
+  const [selectedK8s, setSelectedK8s] = useState<string>(currentK8s);
+  const [selectedVCluster, setSelectedVCluster] = useState<string>(currentEngine);
   const [upgrading, setUpgrading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [registry, setRegistry] = useState<VersionRegistry | null>(null);
+  const [loadingVersions, setLoadingVersions] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      if (currentK8s) setSelectedK8s(currentK8s);
+      if (currentEngine) setSelectedVCluster(currentEngine);
+      setLoadingVersions(true);
+      fetch('/api/admin/versions')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.data) {
+            setRegistry(data.data);
+          }
+        })
+        .catch((e) => console.warn('Failed to load version registry in upgrade modal:', e))
+        .finally(() => setLoadingVersions(false));
+    }
+  }, [isOpen, cluster]);
 
   if (!isOpen || !cluster) return null;
 
-  const currentK8s = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'v1.30.0';
-  const currentEngine = cluster.status.vclusterVersion || cluster.spec.vclusterVersion || '0.36.0';
-
-  const k8sOptions = [
-    { version: 'v1.30.0', status: 'LTS' },
-    { version: 'v1.31.0', status: 'Recommended (Latest Stable)' },
-    { version: 'v1.32.0', status: 'Preview' },
-  ];
-
-  const engineOptions = [
-    { version: '0.36.0', note: 'vCluster OSS (Unified Schema)' },
-  ];
+  const k8sList = registry?.kubernetesVersions || [];
+  const engineList = registry?.vclusterVersions || [];
 
   const handleUpgrade = async () => {
     setUpgrading(true);
@@ -39,8 +51,8 @@ export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgr
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          kubernetesVersion: selectedK8s,
-          vclusterVersion: selectedVCluster,
+          kubernetesVersion: selectedK8s || currentK8s,
+          vclusterVersion: selectedVCluster || currentEngine,
         }),
       });
 
@@ -57,6 +69,10 @@ export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgr
       setUpgrading(false);
     }
   };
+
+  const isChangingK8s = selectedK8s !== currentK8s;
+  const isChangingEngine = selectedVCluster !== currentEngine;
+  const hasChanges = isChangingK8s || isChangingEngine;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
@@ -116,76 +132,131 @@ export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgr
         </div>
 
         {/* Upgrade Target 1: Virtual Kubernetes Version */}
-        <div className="space-y-4 mb-5">
+        <div className="space-y-4 mb-5 max-h-[420px] overflow-y-auto pr-1">
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Kubernetes Control Plane Version
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {k8sOptions.map(opt => (
-                <button
-                  key={opt.version}
-                  type="button"
-                  onClick={() => setSelectedK8s(opt.version)}
-                  className={`p-3 rounded-xl border text-left transition-all ${
-                    selectedK8s === opt.version
-                      ? 'bg-purple-500/10 border-purple-500/50 text-white shadow-sm'
-                      : 'bg-cyber-850 border-cyber-800 text-slate-400 hover:border-cyber-700'
-                  }`}
-                >
-                  <div className="font-mono text-sm font-semibold">{opt.version}</div>
-                  <div className="text-[10px] text-slate-400 mt-1">{opt.status}</div>
-                </button>
-              ))}
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Kubernetes Control Plane Version
+              </label>
+              <a
+                href="/admin/versions"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 font-mono"
+              >
+                <span>Version Registry</span>
+                <ExternalLink className="w-2.5 h-2.5" />
+              </a>
             </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {k8sList.map((opt) => {
+                const isSelected = selectedK8s === opt.version;
+                const isCurrent = currentK8s === opt.version;
+                return (
+                  <button
+                    key={opt.version}
+                    type="button"
+                    onClick={() => setSelectedK8s(opt.version)}
+                    className={`p-3 rounded-xl border text-left transition-all relative ${
+                      isSelected
+                        ? 'bg-purple-500/10 border-purple-500/50 text-white shadow-sm'
+                        : 'bg-cyber-850 border-cyber-800 text-slate-400 hover:border-cyber-700'
+                    }`}
+                  >
+                    <div className="font-mono text-xs font-bold flex items-center justify-between">
+                      <span>{opt.version}</span>
+                      {isCurrent && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyber-800 text-slate-300">
+                          Current
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-1 capitalize">
+                      {opt.tag || opt.label || 'Stable'}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
             <div className="mt-2 text-[11px] font-mono text-slate-400 flex items-center gap-1">
-              Transition: <span className="text-slate-300">{currentK8s}</span>
+              Transition: <span className="text-slate-300">{currentK8s || 'Current'}</span>
               <span className="text-purple-400">→</span>
-              <span className="text-purple-300 font-semibold">{selectedK8s}</span>
-              <span className="ml-2 text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded text-[10px]">
-                Compatible
-              </span>
+              <span className="text-purple-300 font-semibold">{selectedK8s || currentK8s}</span>
+              {isChangingK8s && (
+                <span className="ml-2 text-purple-400 font-semibold bg-purple-500/10 px-2 py-0.5 rounded text-[10px]">
+                  Target Upgrade
+                </span>
+              )}
             </div>
           </div>
 
           {/* Upgrade Target 2: vCluster Engine Version */}
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              vCluster Engine Version (Unified Schema)
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                vCluster Engine Version
+              </label>
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
-              {engineOptions.map(opt => (
-                <button
-                  key={opt.version}
-                  type="button"
-                  onClick={() => setSelectedVCluster(opt.version)}
-                  className={`p-3 rounded-xl border text-left transition-all ${
-                    selectedVCluster === opt.version
-                      ? 'bg-purple-500/10 border-purple-500/50 text-white shadow-sm'
-                      : 'bg-cyber-850 border-cyber-800 text-slate-400 hover:border-cyber-700'
-                  }`}
-                >
-                  <div className="font-mono text-sm font-semibold">vCluster OSS {opt.version}</div>
-                  <div className="text-[10px] text-slate-400 mt-1">{opt.note}</div>
-                </button>
-              ))}
+              {engineList.map((opt) => {
+                const isSelected = selectedVCluster === opt.version;
+                const isCurrent = currentEngine === opt.version;
+                return (
+                  <button
+                    key={opt.version}
+                    type="button"
+                    onClick={() => setSelectedVCluster(opt.version)}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      isSelected
+                        ? 'bg-purple-500/10 border-purple-500/50 text-white shadow-sm'
+                        : 'bg-cyber-850 border-cyber-800 text-slate-400 hover:border-cyber-700'
+                    }`}
+                  >
+                    <div className="font-mono text-xs font-bold flex items-center justify-between">
+                      <span>vCluster {opt.version}</span>
+                      {isCurrent && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyber-800 text-slate-300">
+                          Current
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-1 line-clamp-1">
+                      {opt.label || opt.notes || 'Engine release'}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-2 text-[11px] font-mono text-slate-400 flex items-center gap-1">
+              Transition: <span className="text-slate-300">{currentEngine || 'Current'}</span>
+              <span className="text-purple-400">→</span>
+              <span className="text-purple-300 font-semibold">{selectedVCluster || currentEngine}</span>
+              {isChangingEngine && (
+                <span className="ml-2 text-purple-400 font-semibold bg-purple-500/10 px-2 py-0.5 rounded text-[10px]">
+                  Target Upgrade
+                </span>
+              )}
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-3 pt-2">
+        <div className="flex justify-end gap-3 pt-3 border-t border-cyber-800">
           <button
             onClick={onClose}
             disabled={upgrading}
-            className="px-4 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-300 text-sm font-medium rounded-xl border border-cyber-700 transition-colors"
+            className="px-4 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-300 text-xs font-medium rounded-xl border border-cyber-700 transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleUpgrade}
-            disabled={upgrading}
-            className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium rounded-xl shadow-md flex items-center gap-2 transition-all disabled:opacity-50"
+            disabled={upgrading || !hasChanges}
+            className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-xl shadow-md flex items-center gap-2 transition-all disabled:opacity-50"
           >
             {upgrading ? (
               <>
@@ -195,7 +266,7 @@ export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgr
             ) : (
               <>
                 <ArrowUpCircle className="w-4 h-4" />
-                Apply Upgrade Sequence
+                {hasChanges ? 'Apply Upgrade Sequence' : 'Select Target Version'}
               </>
             )}
           </button>

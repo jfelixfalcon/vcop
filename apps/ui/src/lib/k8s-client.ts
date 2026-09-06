@@ -158,8 +158,8 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
     namespace,
     spec: {
       clusterName: spec.clusterName || name,
-      vclusterVersion: spec.vclusterVersion || '0.36.0',
-      kubernetesVersion: spec.kubernetesVersion || 'v1.31.0',
+      vclusterVersion: spec.vclusterVersion || '',
+      kubernetesVersion: spec.kubernetesVersion || '',
       sizePreset: (spec.sizePreset as SizePreset) || 'medium',
       highAvailability: spec.highAvailability ?? true,
       components: spec.components || {
@@ -181,8 +181,8 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
     status: {
       phase,
       conditions,
-      virtualK8sVersion: status.virtualK8sVersion || spec.kubernetesVersion || 'v1.31.0',
-      vclusterVersion: status.vclusterVersion || spec.vclusterVersion || '0.36.0',
+      virtualK8sVersion: status.virtualK8sVersion || spec.kubernetesVersion || '',
+      vclusterVersion: status.vclusterVersion || spec.vclusterVersion || '',
       endpoint: status.endpoint || '',
       metrics: {
         activeNodeCount: metrics.activeNodeCount || 0,
@@ -274,8 +274,19 @@ export async function createVirtualCluster(data: {
   installedApps?: Array<{ appId: string; customValues?: string }>;
 }): Promise<VirtualCluster> {
   const name = data.clusterName.trim().toLowerCase();
-  const k8sVer = data.kubernetesVersion || 'v1.31.0';
-  const vclusterVer = data.vclusterVersion || '0.36.0';
+  let k8sVer = data.kubernetesVersion;
+  let vclusterVer = data.vclusterVersion;
+  if (!k8sVer || !vclusterVer) {
+    try {
+      const { getDefaultVersions } = await import('./version-registry');
+      const defaults = await getDefaultVersions();
+      k8sVer = k8sVer || defaults.kubernetesVersion;
+      vclusterVer = vclusterVer || defaults.vclusterVersion;
+    } catch {
+      k8sVer = k8sVer || 'v1.31.0';
+      vclusterVer = vclusterVer || '0.36.0';
+    }
+  }
   const isHA = data.preset === 'large';
   const namespace = (data as any).namespace || (name === 'team-alpha-dev' ? 'default' : name);
 

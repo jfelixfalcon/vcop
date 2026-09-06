@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { getInstalledApps, installAppsToCluster } from '../../../../../lib/cluster-apps';
+import { getInstalledApps, installAppsToCluster, syncClusterApps } from '../../../../../lib/cluster-apps';
 import { getVirtualCluster } from '../../../../../lib/k8s-client';
 import { canUserViewCluster, canUserManageCluster } from '../../../../../lib/auth';
 
@@ -77,7 +77,22 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
   }
   try {
     const body = await request.json();
-    const { apps, namespace } = body;
+    const { apps, namespace, action } = body;
+
+    if (action === 'sync') {
+      const synced = await syncClusterApps(name, namespace);
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: `Successfully synchronized applications on ${name}`,
+          data: synced,
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
 
     if (!apps || !Array.isArray(apps) || apps.length === 0) {
       return new Response(

@@ -110,6 +110,7 @@ rules:
       - services
       - namespaces
     verbs:
+      - create
       - get
       - list
       - watch

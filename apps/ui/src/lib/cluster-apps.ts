@@ -1,8 +1,216 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { InstalledApp, VirtualCluster, UserSession, AppDefinition } from './types';
 import { getAppStoreCatalog } from './appstore';
-import { k8sRequest, getVirtualCluster } from './k8s-client';
+import { k8sRequest, getVirtualCluster, getKubeconfig } from './k8s-client';
+
+const execFileAsync = promisify(execFile);
 
 const INSTALLED_APPS_ANNOTATION = 'vops.gitops.io/installed-apps';
+
+const defaultEnv = {
+  ...process.env,
+  HELM_CACHE_HOME: '/tmp/helm/cache',
+  HELM_CONFIG_HOME: '/tmp/helm/config',
+  HELM_DATA_HOME: '/tmp/helm/data',
+};
+
+/**
+ * Prepares an internal in-cluster kubeconfig by setting insecure-skip-tls-verify: true
+ * to prevent TLS altname mismatch when connecting to internal cluster DNS services.
+ * Also explicitly sets context.namespace to avoid inheriting host pod namespace (e.g. vcop-system).
+ */
+function prepareInternalKubeconfig(raw: string, defaultNamespace = 'default'): string {
+  let processed = raw.replace(/\s*certificate-authority-data:\s*[A-Za-z0-9+/=]+/g, '\n    insecure-skip-tls-verify: true');
+  if (!processed.includes('insecure-skip-tls-verify: true')) {
+    processed = processed.replace(/(cluster:\s*\n)/g, '$1    insecure-skip-tls-verify: true\n');
+  }
+  // Explicitly inject namespace into context block so kubectl does not default to host pod namespace
+  processed = processed.replace(/(context:\s*\n)/g, `$1    namespace: ${defaultNamespace}\n`);
+  return processed;
+}
+
+/**
+ * Parses stdout from kubectl apply to record created/configured resources.
+ */
+function parseKubectlOutput(output: string): Array<{ kind: string; name: string }> {
+  const resources: Array<{ kind: string; name: string }> = [];
+  const lines = output.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const match = trimmed.match(/^([a-z0-9_.-]+(?:\.[a-z0-9_.-]+)?)\/([a-z0-9_.-]+)\s+(created|configured|unchanged)/i);
+    if (match) {
+      resources.push({
+        kind: match[1],
+        name: match[2],
+      });
+    }
+  }
+  return resources;
+}
+
+/**
+ * Executes direct application deployment to the guest virtual cluster via kubectl and helm.
+ */
+export async function executeAppDeployment(
+  rawKubeconfig: string,
+  app: InstalledApp
+): Promise<{
+  success: boolean;
+  error?: string;
+  resourcesCreated: Array<{ kind: string; name: string; namespace?: string }>;
+}> {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcop-app-'));
+  const kcPath = path.join(tempDir, 'kubeconfig.yaml');
+  const resourcesCreated: Array<{ kind: string; name: string; namespace?: string }> = [];
+  const guestNamespace = app.helm?.namespace || 'default';
+
+  try {
+    const internalKc = prepareInternalKubeconfig(rawKubeconfig, guestNamespace);
+    fs.writeFileSync(kcPath, internalKc, { mode: 0o600 });
+
+    // 1. Deploy manifests if defined
+    if (app.manifests && app.manifests.trim()) {
+      const manifestsPath = path.join(tempDir, 'manifests.yaml');
+      fs.writeFileSync(manifestsPath, app.manifests.trim(), 'utf8');
+
+      // Pre-create any non-default namespaces referenced in manifests
+      const nsMatches = Array.from(app.manifests.matchAll(/^\s*namespace:\s*([a-z0-9-]+)/gim)).map((m) => m[1]);
+      const uniqueNamespaces = Array.from(new Set(nsMatches)).filter((n) => n && n !== 'default' && n !== 'kube-system');
+      for (const ns of uniqueNamespaces) {
+        try {
+          await execFileAsync('kubectl', ['--kubeconfig', kcPath, 'create', 'namespace', ns], { env: defaultEnv, timeout: 15000 });
+        } catch {}
+      }
+
+      try {
+        const res = await execFileAsync('kubectl', ['--kubeconfig', kcPath, '--namespace', guestNamespace, 'apply', '-f', manifestsPath], {
+          env: defaultEnv,
+          timeout: 60000,
+        });
+        const parsed = parseKubectlOutput(res.stdout || '');
+        resourcesCreated.push(...parsed);
+      } catch (err: any) {
+        const errMsg = err.stderr || err.stdout || err.message || 'kubectl apply failed';
+        return {
+          success: false,
+          error: `Manifest deployment failed: ${errMsg.trim()}`,
+          resourcesCreated,
+        };
+      }
+    }
+
+    // 2. Deploy Helm chart if defined
+    if (app.helm && app.helm.name && app.helm.repo) {
+      const releaseName = app.helm.releaseName || app.name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      const targetNs = app.helm.namespace || 'default';
+      const helmArgs = [
+        'upgrade',
+        '--install',
+        releaseName,
+        app.helm.name,
+        '--repo',
+        app.helm.repo,
+        '--namespace',
+        targetNs,
+        '--create-namespace',
+        '--kubeconfig',
+        kcPath,
+        '--timeout',
+        '5m',
+      ];
+
+      if (app.helm.version) {
+        helmArgs.push('--version', app.helm.version);
+      }
+
+      const customValues = app.customValues !== undefined ? app.customValues : app.helm.values;
+      if (customValues && customValues.trim()) {
+        const valuesPath = path.join(tempDir, 'values.yaml');
+        fs.writeFileSync(valuesPath, customValues.trim(), 'utf8');
+        helmArgs.push('--values', valuesPath);
+      }
+
+      try {
+        await execFileAsync('helm', helmArgs, {
+          env: defaultEnv,
+          timeout: 300000,
+        });
+        resourcesCreated.push({
+          kind: 'HelmRelease',
+          name: releaseName,
+          namespace: targetNs,
+        });
+      } catch (err: any) {
+        const errMsg = err.stderr || err.stdout || err.message || 'helm install failed';
+        return {
+          success: false,
+          error: `Helm deployment failed: ${errMsg.trim()}`,
+          resourcesCreated,
+        };
+      }
+    }
+
+    return { success: true, resourcesCreated };
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
+/**
+ * Executes uninstallation of manifests and Helm releases from the guest virtual cluster.
+ */
+export async function executeAppUninstall(
+  rawKubeconfig: string,
+  app: InstalledApp
+): Promise<{ success: boolean; error?: string }> {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcop-uninst-'));
+  const kcPath = path.join(tempDir, 'kubeconfig.yaml');
+  const guestNamespace = app.helm?.namespace || 'default';
+
+  try {
+    const internalKc = prepareInternalKubeconfig(rawKubeconfig, guestNamespace);
+    fs.writeFileSync(kcPath, internalKc, { mode: 0o600 });
+
+    // 1. Delete manifests if present
+    if (app.manifests && app.manifests.trim()) {
+      const manifestsPath = path.join(tempDir, 'manifests.yaml');
+      fs.writeFileSync(manifestsPath, app.manifests.trim(), 'utf8');
+      try {
+        await execFileAsync('kubectl', ['--kubeconfig', kcPath, '--namespace', guestNamespace, 'delete', '-f', manifestsPath, '--ignore-not-found=true'], {
+          env: defaultEnv,
+          timeout: 60000,
+        });
+      } catch (err: any) {
+        console.warn(`Warning during manifest uninstall for ${app.name}:`, err.message);
+      }
+    }
+
+    // 2. Uninstall Helm release if present
+    if (app.helm && app.helm.releaseName) {
+      const targetNs = app.helm.namespace || 'default';
+      try {
+        await execFileAsync('helm', ['uninstall', app.helm.releaseName, '--namespace', targetNs, '--kubeconfig', kcPath, '--ignore-not-found'], {
+          env: defaultEnv,
+          timeout: 60000,
+        });
+      } catch (err: any) {
+        console.warn(`Warning during helm uninstall for ${app.name}:`, err.message);
+      }
+    }
+
+    return { success: true };
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  }
+}
 
 /**
  * Gets all installed applications on a specific virtual cluster.
@@ -15,7 +223,7 @@ export async function getInstalledApps(clusterName: string, namespace?: string):
 
 /**
  * Installs one or more applications/application packs to a virtual cluster.
- * Updates the Kubernetes VirtualCluster CR annotations and rawConfig experimental deployment specs.
+ * Connects directly to the guest cluster and executes deployment of Helm charts and manifests.
  */
 export async function installAppsToCluster(
   clusterName: string,
@@ -29,6 +237,15 @@ export async function installAppsToCluster(
     throw new Error(`Cluster ${clusterName} not found`);
   }
   targetNs = currentCluster.namespace;
+
+  if (currentCluster.status.phase === 'Sleeping' || currentCluster.spec.paused || currentCluster.spec.lifecycle?.sleep) {
+    throw new Error(`Cluster "${clusterName}" is currently sleeping. Please wake up the cluster first to deploy applications.`);
+  }
+
+  const rawKubeconfig = await getKubeconfig(clusterName, targetNs);
+  if (!rawKubeconfig) {
+    throw new Error(`Kubeconfig for virtual cluster "${clusterName}" is not ready yet. Please ensure cluster control plane is ready.`);
+  }
 
   const catalog = await getAppStoreCatalog();
   const existingApps = currentCluster.metadata?.installedApps || [];
@@ -57,18 +274,30 @@ export async function installAppsToCluster(
       category: catalogApp.category,
       installedAt: now,
       installedBy: installerName,
-      status: 'Installed',
+      status: 'Installing',
       customValues,
       helm: catalogApp.helm ? { ...catalogApp.helm, values: customValues } : undefined,
       manifests: catalogApp.manifests,
     };
+
+    // Execute actual deployment to the guest cluster
+    const deployResult = await executeAppDeployment(rawKubeconfig, installed);
+    if (deployResult.success) {
+      installed.status = 'Installed';
+      installed.error = undefined;
+      installed.resourcesCreated = deployResult.resourcesCreated;
+    } else {
+      installed.status = 'Failed';
+      installed.error = deployResult.error;
+      installed.resourcesCreated = deployResult.resourcesCreated;
+    }
 
     updatedAppsMap.set(catalogApp.id, installed);
   }
 
   const updatedAppsList = Array.from(updatedAppsMap.values());
 
-  // Fetch the full raw K8s custom resource to preserve spec & annotations
+  // Persist installed apps status to Kubernetes CR annotation
   const getRes = await k8sRequest<any>(
     `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${clusterName}`
   );
@@ -80,41 +309,9 @@ export async function installAppsToCluster(
   const annotations = cr.metadata?.annotations || {};
   annotations[INSTALLED_APPS_ANNOTATION] = JSON.stringify(updatedAppsList);
 
-  // Compile experimental.deploy.vcluster for rawConfig
-  const helmDeployments = updatedAppsList
-    .filter((a) => a.helm)
-    .map((a) => ({
-      chart: {
-        name: a.helm!.name,
-        repo: a.helm!.repo,
-        version: a.helm!.version || a.version,
-      },
-      release: {
-        name: a.helm!.releaseName,
-        namespace: a.helm!.namespace || 'default',
-      },
-      values: a.customValues !== undefined ? a.customValues : a.helm!.values,
-    }));
-
-  const manifestsDeployments = updatedAppsList
-    .filter((a) => a.manifests && a.manifests.trim())
-    .map((a) => a.manifests!.trim())
-    .join('\n---\n');
-
-  const rawConfig = cr.spec?.rawConfig || {};
-  rawConfig.experimental = rawConfig.experimental || {};
-  rawConfig.experimental.deploy = rawConfig.experimental.deploy || {};
-  rawConfig.experimental.deploy.vcluster = {
-    helm: helmDeployments,
-    manifests: manifestsDeployments,
-  };
-
   const patch = {
     metadata: {
       annotations,
-    },
-    spec: {
-      rawConfig,
     },
   };
 
@@ -150,7 +347,20 @@ export async function uninstallAppFromCluster(
   }
   targetNs = currentCluster.namespace;
 
+  if (currentCluster.status.phase === 'Sleeping' || currentCluster.spec.paused || currentCluster.spec.lifecycle?.sleep) {
+    throw new Error(`Cluster "${clusterName}" is currently sleeping. Please wake up the cluster first to modify applications.`);
+  }
+
   const existingApps = currentCluster.metadata?.installedApps || [];
+  const targetApp = existingApps.find((a) => a.appId === appId);
+
+  if (targetApp) {
+    const rawKubeconfig = await getKubeconfig(clusterName, targetNs);
+    if (rawKubeconfig) {
+      await executeAppUninstall(rawKubeconfig, targetApp);
+    }
+  }
+
   const updatedAppsList = existingApps.filter((a) => a.appId !== appId);
 
   const getRes = await k8sRequest<any>(
@@ -164,40 +374,9 @@ export async function uninstallAppFromCluster(
   const annotations = cr.metadata?.annotations || {};
   annotations[INSTALLED_APPS_ANNOTATION] = JSON.stringify(updatedAppsList);
 
-  const helmDeployments = updatedAppsList
-    .filter((a) => a.helm)
-    .map((a) => ({
-      chart: {
-        name: a.helm!.name,
-        repo: a.helm!.repo,
-        version: a.helm!.version || a.version,
-      },
-      release: {
-        name: a.helm!.releaseName,
-        namespace: a.helm!.namespace || 'default',
-      },
-      values: a.customValues !== undefined ? a.customValues : a.helm!.values,
-    }));
-
-  const manifestsDeployments = updatedAppsList
-    .filter((a) => a.manifests && a.manifests.trim())
-    .map((a) => a.manifests!.trim())
-    .join('\n---\n');
-
-  const rawConfig = cr.spec?.rawConfig || {};
-  rawConfig.experimental = rawConfig.experimental || {};
-  rawConfig.experimental.deploy = rawConfig.experimental.deploy || {};
-  rawConfig.experimental.deploy.vcluster = {
-    helm: helmDeployments,
-    manifests: manifestsDeployments,
-  };
-
   const patch = {
     metadata: {
       annotations,
-    },
-    spec: {
-      rawConfig,
     },
   };
 
@@ -216,4 +395,65 @@ export async function uninstallAppFromCluster(
   }
 
   return updatedAppsList;
+}
+
+/**
+ * Re-syncs / reconciles all installed applications on a virtual cluster.
+ */
+export async function syncClusterApps(
+  clusterName: string,
+  namespace?: string
+): Promise<InstalledApp[]> {
+  let targetNs = namespace;
+  const currentCluster = await getVirtualCluster(clusterName, targetNs);
+  if (!currentCluster) {
+    throw new Error(`Cluster ${clusterName} not found`);
+  }
+  targetNs = currentCluster.namespace;
+
+  if (currentCluster.status.phase === 'Sleeping' || currentCluster.spec.paused || currentCluster.spec.lifecycle?.sleep) {
+    throw new Error(`Cluster "${clusterName}" is currently sleeping. Please wake up the cluster first to sync applications.`);
+  }
+
+  const rawKubeconfig = await getKubeconfig(clusterName, targetNs);
+  if (!rawKubeconfig) {
+    throw new Error(`Kubeconfig for virtual cluster "${clusterName}" is not ready yet.`);
+  }
+
+  const existingApps = currentCluster.metadata?.installedApps || [];
+  if (existingApps.length === 0) {
+    return [];
+  }
+
+  const updatedApps: InstalledApp[] = [];
+
+  for (const app of existingApps) {
+    const deployResult = await executeAppDeployment(rawKubeconfig, app);
+    if (deployResult.success) {
+      app.status = 'Installed';
+      app.error = undefined;
+      app.resourcesCreated = deployResult.resourcesCreated;
+    } else {
+      app.status = 'Failed';
+      app.error = deployResult.error;
+    }
+    updatedApps.push(app);
+  }
+
+  const getRes = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${clusterName}`
+  );
+  if (getRes.statusCode === 200 && getRes.data) {
+    const cr = getRes.data;
+    const annotations = cr.metadata?.annotations || {};
+    annotations[INSTALLED_APPS_ANNOTATION] = JSON.stringify(updatedApps);
+    await k8sRequest(
+      `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${clusterName}`,
+      'PATCH',
+      { metadata: { annotations } },
+      'application/merge-patch+json'
+    );
+  }
+
+  return updatedApps;
 }

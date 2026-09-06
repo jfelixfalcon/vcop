@@ -91,6 +91,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [installAppTab, setInstallAppTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>('catalog');
   const [catalog, setCatalog] = useState<AppStoreCatalog | null>(null);
   const [inspectedApp, setInspectedApp] = useState<InstalledApp | null>(null);
+  const [syncingApps, setSyncingApps] = useState<boolean>(false);
 
   const fetchCluster = async () => {
     try {
@@ -165,8 +166,8 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
 
   const isHA = cluster.spec.highAvailability;
   const isSleeping = cluster.status.phase === 'Sleeping' || cluster.spec.paused || cluster.spec.lifecycle?.sleep;
-  const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'v1.31.0';
-  const vclusterVer = cluster.status.vclusterVersion || cluster.spec.vclusterVersion || '0.36.0';
+  const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'N/A';
+  const vclusterVer = cluster.status.vclusterVersion || cluster.spec.vclusterVersion || 'N/A';
 
   return (
     <div className="space-y-6">
@@ -963,6 +964,35 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   <Layers className="w-4 h-4" />
                   <span>+ Create App Group</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setSyncingApps(true);
+                    try {
+                      const res = await fetch(`/api/vclusters/${cluster.name}/apps`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'sync' }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok || !data.success) {
+                        alert(data.error || 'Failed to sync applications');
+                        return;
+                      }
+                      await fetchCluster();
+                    } catch (err: any) {
+                      alert(err.message || 'Error syncing applications');
+                    } finally {
+                      setSyncingApps(false);
+                    }
+                  }}
+                  disabled={syncingApps}
+                  className="px-3.5 py-2 bg-cyber-900 hover:bg-cyber-850 text-cyan-400 font-semibold text-xs rounded-xl border border-cyber-700 flex items-center gap-1.5 transition-all disabled:opacity-50"
+                  title="Reconcile and deploy all registered applications into the guest virtual cluster"
+                >
+                  <RefreshCw className={`w-4 h-4 ${syncingApps ? 'animate-spin' : ''}`} />
+                  <span>{syncingApps ? 'Syncing...' : 'Sync All Workloads'}</span>
+                </button>
               </div>
             </div>
 
@@ -1097,10 +1127,22 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                             {app.category}
                           </span>
                         )}
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>{app.status || 'Installed'}</span>
-                        </span>
+                        {app.status === 'Failed' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                            <AlertTriangle className="w-3 h-3" />
+                            <span>Failed</span>
+                          </span>
+                        ) : app.status === 'Installing' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span>Installing</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>{app.status || 'Installed'}</span>
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs font-mono text-slate-400">
@@ -1120,11 +1162,59 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                           </span>
                         )}
                       </div>
+
+                      {app.error && (
+                        <div className="mt-2.5 p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-[11px] font-mono text-rose-400 max-w-2xl">
+                          <div className="font-semibold flex items-center gap-1.5 mb-1 text-rose-300">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>Deployment Error:</span>
+                          </div>
+                          <p className="text-[10px] text-rose-300/90 whitespace-pre-wrap">{app.error}</p>
+                        </div>
+                      )}
+
+                      {app.resourcesCreated && app.resourcesCreated.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                          <span className="text-[10px] text-slate-500 font-mono">Live Resources:</span>
+                          {app.resourcesCreated.map((res, idx) => (
+                            <span key={idx} className="text-[10px] font-mono bg-cyber-950 text-cyan-300 px-2 py-0.5 rounded border border-cyber-800">
+                              {res.kind}/{res.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   {/* Actions */}
                   <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+                    <button
+                      onClick={async () => {
+                        try {
+                          const res = await fetch(`/api/vclusters/${cluster.name}/apps`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              apps: [{ appId: app.appId, customValues: app.customValues }],
+                            }),
+                          });
+                          const data = await res.json();
+                          if (!res.ok || !data.success) {
+                            alert(data.error || 'Failed to sync application');
+                            return;
+                          }
+                          await fetchCluster();
+                        } catch (err: any) {
+                          alert(err.message || 'Error syncing application');
+                        }
+                      }}
+                      className="px-2.5 py-1.5 bg-cyber-950 hover:bg-cyber-800 text-cyan-400 border border-cyber-800 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+                      title="Redeploy and materialize in guest cluster"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Sync</span>
+                    </button>
+
                     <button
                       onClick={() => setInspectedApp(app)}
                       className="px-3 py-1.5 bg-cyber-950 hover:bg-cyber-800 text-slate-200 border border-cyber-800 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
@@ -1402,7 +1492,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
       {activeTab === 'yaml' && (
         <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 font-mono text-xs animate-in fade-in duration-150">
           <div className="flex justify-between items-center mb-3">
-            <span className="text-slate-300 font-semibold">Compiled vcluster.yaml (v0.36 Unified Schema)</span>
+            <span className="text-slate-300 font-semibold">Compiled vcluster.yaml ({vclusterVer} Unified Schema)</span>
             <span className="text-slate-500 text-[10px]">Stored in host ConfigMap: {cluster.name}-config</span>
           </div>
           <pre className="bg-cyber-950 border border-cyber-800 rounded-xl p-4 text-slate-300 overflow-x-auto whitespace-pre leading-relaxed">

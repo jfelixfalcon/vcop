@@ -22,7 +22,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup } from '../lib/types';
+import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry } from '../lib/types';
 import { PRESETS } from '../lib/presets';
 
 export const ProvisioningWizard: React.FC = () => {
@@ -56,8 +56,9 @@ export const ProvisioningWizard: React.FC = () => {
 
   // Advanced Mode
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
-  const [kubernetesVersion, setKubernetesVersion] = useState<string>('v1.31.0');
-  const [vclusterVersion, setVclusterVersion] = useState<string>('0.36.0');
+  const [versionRegistry, setVersionRegistry] = useState<VersionRegistry | null>(null);
+  const [kubernetesVersion, setKubernetesVersion] = useState<string>('');
+  const [vclusterVersion, setVclusterVersion] = useState<string>('');
   const [customYaml, setCustomYaml] = useState<string>('');
 
   // App Store & Packs State
@@ -75,6 +76,20 @@ export const ProvisioningWizard: React.FC = () => {
         }
       })
       .catch((e) => console.warn('Failed loading catalog in wizard:', e));
+
+    fetch('/api/admin/versions')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.data) {
+          const reg: VersionRegistry = data.data;
+          setVersionRegistry(reg);
+          const defaultK8s = reg.kubernetesVersions.find((v) => v.isDefault)?.version || reg.kubernetesVersions[0]?.version || 'v1.31.0';
+          const defaultEngine = reg.vclusterVersions.find((v) => v.isDefault)?.version || reg.vclusterVersions[0]?.version || '0.36.0';
+          setKubernetesVersion((prev) => prev || defaultK8s);
+          setVclusterVersion((prev) => prev || defaultEngine);
+        }
+      })
+      .catch((e) => console.warn('Failed loading versions in wizard:', e));
   }, []);
 
   // Submission State
@@ -967,44 +982,61 @@ policies:
                 className="flex items-center gap-2 text-xs font-mono text-slate-400 hover:text-cyber-accent transition-colors"
               >
                 <Settings2 className="w-4 h-4" />
-                <span>{showAdvanced ? 'Hide Advanced Settings' : 'Show Advanced Configuration (v0.36 vcluster.yaml)'}</span>
+                <span>{showAdvanced ? 'Hide Advanced Settings' : 'Show Advanced Configuration (vcluster.yaml)'}</span>
               </button>
 
               {showAdvanced && (
                 <div className="mt-4 p-5 bg-cyber-950 border border-cyber-800 rounded-2xl space-y-4 animate-in fade-in duration-150">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-mono text-slate-300 mb-1">
-                        Kubernetes Control Plane Version:
+                      <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
+                        <span>Kubernetes Control Plane:</span>
+                        <a href="/admin/versions" className="text-[10px] text-cyan-400 hover:underline">Manage Registry</a>
                       </label>
                       <select
                         value={kubernetesVersion}
                         onChange={(e) => setKubernetesVersion(e.target.value)}
                         className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
                       >
-                        <option value="v1.31.0">v1.31.0 (Latest Default)</option>
-                        <option value="v1.30.0">v1.30.0 (LTS)</option>
-                        <option value="v1.32.0">v1.32.0 (Preview)</option>
+                        {versionRegistry?.kubernetesVersions.map((v) => (
+                          <option key={v.version} value={v.version}>
+                            {v.label || v.version} {v.isDefault ? '★ (Default)' : ''}
+                          </option>
+                        ))}
+                        {kubernetesVersion && !versionRegistry?.kubernetesVersions.some(v => v.version === kubernetesVersion) && (
+                          <option value={kubernetesVersion}>{kubernetesVersion}</option>
+                        )}
                       </select>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-mono text-slate-300 mb-1">
-                        vCluster Engine Version:
+                      <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
+                        <span>vCluster Engine Version:</span>
+                        <a href="/admin/versions" className="text-[10px] text-purple-400 hover:underline">Manage Registry</a>
                       </label>
-                      <input
-                        type="text"
-                        value={vclusterVersion}
-                        onChange={(e) => setVclusterVersion(e.target.value)}
-                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
-                      />
+                      <div className="flex gap-2">
+                        <select
+                          value={vclusterVersion}
+                          onChange={(e) => setVclusterVersion(e.target.value)}
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
+                        >
+                          {versionRegistry?.vclusterVersions.map((v) => (
+                            <option key={v.version} value={v.version}>
+                              {v.label || `vCluster ${v.version}`} {v.isDefault ? '★ (Default)' : ''}
+                            </option>
+                          ))}
+                          {vclusterVersion && !versionRegistry?.vclusterVersions.some(v => v.version === vclusterVersion) && (
+                            <option value={vclusterVersion}>{vclusterVersion}</option>
+                          )}
+                        </select>
+                      </div>
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
                       <span>Generated vcluster.yaml Preview:</span>
-                      <span className="text-[10px] text-cyber-accent">Adheres to v0.36 unified schema</span>
+                      <span className="text-[10px] text-cyber-accent">Dynamic Declarative Engine Spec</span>
                     </label>
                     <pre className="bg-cyber-900 border border-cyber-800 rounded-xl p-3 font-mono text-[11px] text-slate-300 max-h-48 overflow-y-auto">
                       {previewYaml}

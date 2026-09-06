@@ -1,0 +1,19 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { VersionRegistryManager } from '../../components/VersionRegistryManager';
+import { getVersionRegistry } from '../../lib/version-registry';
+
+const user = Astro.locals.user;
+if (user && user.role !== 'admin') {
+  return Astro.redirect('/?denied=admin_required');
+}
+
+const isAdmin = user?.role === 'admin';
+const registry = await getVersionRegistry();
+---
+
+<Layout title="Version & Upgrade Registry - vCluster Operations Center">
+  <div class="space-y-6">
+    <VersionRegistryManager client:load initialRegistry={registry} isAdmin={isAdmin} />
+  </div>
+</Layout>

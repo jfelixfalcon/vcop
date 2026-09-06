@@ -15,7 +15,7 @@ const isAdmin = user?.role === 'admin';
         </div>
         <div>
           <span class="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
-            vCOp <span class="text-[10px] font-mono text-cyan-400 font-semibold px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800">v0.36</span>
+            vCOp <span class="text-[10px] font-mono text-cyan-400 font-semibold px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800">Platform</span>
           </span>
           <p class="text-[10px] font-mono text-slate-400 -mt-0.5">Virtual Cluster Operations Center</p>
         </div>
@@ -29,6 +29,11 @@ const isAdmin = user?.role === 'admin';
         <a href="/apps" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
           App Store
         </a>
+        {isAdmin && (
+          <a href="/admin/versions" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
+            Version Registry
+          </a>
+        )}
         {isAdmin && (
           <a href="/new" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
             Provision
