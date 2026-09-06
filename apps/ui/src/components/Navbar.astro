@@ -35,6 +35,12 @@ const isAdmin = user?.role === 'admin';
           </a>
         )}
         {isAdmin && (
+          <a href="/admin/oidc" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium flex items-center gap-1">
+            <span>OIDC Policy</span>
+            <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30">PKCE</span>
+          </a>
+        )}
+        {isAdmin && (
           <a href="/new" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
             Provision
           </a>

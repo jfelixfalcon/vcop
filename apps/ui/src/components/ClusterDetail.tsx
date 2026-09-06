@@ -925,6 +925,15 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                         Disabled / Not Configured
                       </span>
                     )}
+                    {cluster.metadata?.oidc?.source === 'group' ? (
+                      <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 font-mono text-[10px]">
+                        Group: {cluster.metadata.oidc.inheritedFrom || 'assigned'}
+                      </span>
+                    ) : cluster.metadata?.oidc?.source === 'global' ? (
+                      <span className="px-2 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-300 font-mono text-[10px]">
+                        Global Policy
+                      </span>
+                    ) : null}
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
                     Secure developer access using OpenID Connect claims with PKCE. Tokens are validated by the API server against your Identity Provider.

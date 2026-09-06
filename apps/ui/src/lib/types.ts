@@ -76,6 +76,31 @@ export interface OidcConfig {
   groupsPrefix?: string;
   extraScopes?: string[];
   caFile?: string;
+  source?: 'global' | 'group' | 'custom';
+  inheritedFrom?: string;
+}
+
+export interface OidcProfile {
+  id: string; // 'global' or cluster group name
+  name: string;
+  scope: 'global' | 'group';
+  targetGroup?: string;
+  enabled: boolean;
+  issuerUrl: string;
+  clientId: string;
+  usernameClaim?: string;
+  usernamePrefix?: string;
+  groupsClaim?: string;
+  groupsPrefix?: string;
+  extraScopes?: string[];
+  caFile?: string;
+  updatedAt?: string;
+}
+
+export interface OidcRegistry {
+  updatedAt: string;
+  global: OidcProfile;
+  groups: Record<string, OidcProfile>;
 }
 
 export interface VirtualCluster {
@@ -135,6 +160,8 @@ export interface VirtualCluster {
     installedApps?: InstalledApp[];
     customEndpoint?: string;
     oidc?: OidcConfig;
+    oidcInheritance?: 'global' | 'group' | 'custom';
+    oidcInheritedFrom?: string;
   };
   sparklineData?: {
     cpu: number[];

@@ -246,6 +246,12 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
         }
       }
     }
+    const oidcSource = (item.metadata?.annotations?.['vops.gitops.io/oidc-source'] as any) || (oidc.source || (oidc.enabled ? 'custom' : 'global'));
+    const oidcInheritedFrom = item.metadata?.annotations?.['vops.gitops.io/oidc-inherited-from'] || oidc.inheritedFrom;
+    oidc.source = oidcSource;
+    if (oidcInheritedFrom) {
+      oidc.inheritedFrom = oidcInheritedFrom;
+    }
   } catch {
     // fallback
   }
@@ -325,6 +331,8 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       installedApps,
       customEndpoint,
       oidc,
+      oidcInheritance: oidc.source,
+      oidcInheritedFrom: oidc.inheritedFrom,
     },
     sparklineData: {
       cpu: cpuSparkline,
@@ -431,20 +439,36 @@ export async function createVirtualCluster(data: {
   if (data.customEndpoint) {
     annotations['vops.gitops.io/custom-endpoint'] = data.customEndpoint.trim();
   }
-  if (data.oidc) {
-    annotations['vops.gitops.io/oidc-config'] = JSON.stringify(data.oidc);
-    if (data.oidc.issuerUrl) annotations['vops.gitops.io/oidc-issuer-url'] = data.oidc.issuerUrl;
-    if (data.oidc.clientId) annotations['vops.gitops.io/oidc-client-id'] = data.oidc.clientId;
-    if (data.oidc.usernameClaim) annotations['vops.gitops.io/oidc-username-claim'] = data.oidc.usernameClaim;
-    if (data.oidc.groupsClaim) annotations['vops.gitops.io/oidc-groups-claim'] = data.oidc.groupsClaim;
-  }
-
   const groupsList = Array.isArray(data.clusterGroups) && data.clusterGroups.length > 0
     ? data.clusterGroups
     : (data.clusterGroup ? [data.clusterGroup] : []);
   if (groupsList.length > 0) {
     annotations['vops.gitops.io/cluster-groups'] = groupsList.join(',');
     annotations['vops.gitops.io/cluster-group'] = groupsList[0];
+  }
+
+  let effectiveOidc = data.oidc;
+  if (!effectiveOidc) {
+    try {
+      const { getOidcRegistry, resolveOidcForCluster } = await import('./oidc-registry');
+      const registry = await getOidcRegistry();
+      const resolved = resolveOidcForCluster({ name, metadata: { clusterGroups: groupsList } } as any, registry);
+      if (resolved && resolved.oidc && resolved.oidc.enabled) {
+        effectiveOidc = resolved.oidc;
+      }
+    } catch {
+      // Ignore resolution error during cluster creation
+    }
+  }
+
+  if (effectiveOidc) {
+    annotations['vops.gitops.io/oidc-config'] = JSON.stringify(effectiveOidc);
+    if (effectiveOidc.issuerUrl) annotations['vops.gitops.io/oidc-issuer-url'] = effectiveOidc.issuerUrl;
+    if (effectiveOidc.clientId) annotations['vops.gitops.io/oidc-client-id'] = effectiveOidc.clientId;
+    if (effectiveOidc.usernameClaim) annotations['vops.gitops.io/oidc-username-claim'] = effectiveOidc.usernameClaim;
+    if (effectiveOidc.groupsClaim) annotations['vops.gitops.io/oidc-groups-claim'] = effectiveOidc.groupsClaim;
+    if (effectiveOidc.source) annotations['vops.gitops.io/oidc-source'] = effectiveOidc.source;
+    if (effectiveOidc.inheritedFrom) annotations['vops.gitops.io/oidc-inherited-from'] = effectiveOidc.inheritedFrom;
   }
 
   const labels: Record<string, string> = {
@@ -953,20 +977,21 @@ export function generateOidcKubeconfig(
     ? oidc.extraScopes
     : ['email', 'profile', 'groups'];
 
-  let clusterBlock = `  name: ${clusterName}
-    cluster:
-      server: ${endpoint}\n`;
+  let clusterLines = `cluster:\n    server: ${endpoint}\n`;
   if (caData) {
-    clusterBlock += `      certificate-authority-data: ${caData}\n`;
+    clusterLines += `    certificate-authority-data: ${caData}\n`;
   } else {
-    clusterBlock += `      insecure-skip-tls-verify: true\n`;
+    clusterLines += `    insecure-skip-tls-verify: true\n`;
   }
+  clusterLines += `  name: ${clusterName}`;
 
   const scopeLines = extraScopes.map((s) => `      - --oidc-extra-scope=${s}`).join('\n');
 
   return `apiVersion: v1
+kind: Config
+preferences: {}
 clusters:
-- ${clusterBlock.trim()}
+- ${clusterLines.trim()}
 contexts:
 - context:
     cluster: ${clusterName}
@@ -1094,6 +1119,14 @@ export async function updateVirtualClusterEndpointAndOidc(
         updatedAnnotations['vops.gitops.io/oidc-ca-file'] = oidc.caFile;
       } else {
         delete updatedAnnotations['vops.gitops.io/oidc-ca-file'];
+      }
+      if (oidc.source) {
+        updatedAnnotations['vops.gitops.io/oidc-source'] = oidc.source;
+      }
+      if (oidc.inheritedFrom) {
+        updatedAnnotations['vops.gitops.io/oidc-inherited-from'] = oidc.inheritedFrom;
+      } else {
+        delete updatedAnnotations['vops.gitops.io/oidc-inherited-from'];
       }
 
       const currentArgs: string[] = Array.isArray(rawConfig.controlPlane.distro.k8s.apiServer.extraArgs)

@@ -412,6 +412,18 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
             </button>
           )}
 
+          {/* OIDC Policy Governance (Admin) */}
+          {isAdmin && (
+            <a
+              href="/admin/oidc"
+              className="px-3 py-2 bg-cyber-800 hover:bg-cyber-750 text-purple-300 border border-purple-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-sm shrink-0"
+              title="Global & Group OIDC Policy Governance"
+            >
+              <Lock className="w-3.5 h-3.5 text-purple-400" />
+              <span>OIDC Policy</span>
+            </a>
+          )}
+
           {/* Action button (Admins only) */}
           {isAdmin && (
             <a
@@ -456,19 +468,19 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
         </div>
       ) : viewMode === 'table' ? (
         <div className="overflow-x-auto bg-cyber-900/90 border border-cyber-700/70 rounded-2xl shadow-lg backdrop-blur-sm">
-          <table className="w-full text-left text-xs text-slate-300 font-mono">
+          <table className="w-full text-left text-xs text-slate-300 font-mono min-w-[1150px]">
             <thead className="bg-cyber-950/80 border-b border-cyber-800 text-[11px] uppercase tracking-wider text-slate-400">
               <tr>
-                <th className="py-3.5 px-4 font-medium">Cluster</th>
-                <th className="py-3.5 px-4 font-medium">Group</th>
-                <th className="py-3.5 px-4 font-medium">Status</th>
-                <th className="py-3.5 px-4 font-medium">Tier & Engine</th>
-                <th className="py-3.5 px-4 font-medium">HA Backing</th>
-                <th className="py-3.5 px-4 font-medium">Workloads</th>
-                <th className="py-3.5 px-4 font-medium">CPU Usage</th>
-                <th className="py-3.5 px-4 font-medium">Memory Usage</th>
-                <th className="py-3.5 px-4 font-medium">Apps</th>
-                <th className="py-3.5 px-4 font-medium text-right">Actions</th>
+                <th className="py-3.5 px-4 font-medium whitespace-nowrap">Cluster</th>
+                <th className="py-3.5 px-4 font-medium whitespace-nowrap">Group</th>
+                <th className="py-3.5 px-4 font-medium whitespace-nowrap">Status</th>
+                <th className="py-3.5 px-4 font-medium whitespace-nowrap">Tier & Engine</th>
+                <th className="py-3.5 px-4 font-medium whitespace-nowrap">HA Backing</th>
+                <th className="py-3.5 px-4 font-medium whitespace-nowrap">Workloads</th>
+                <th className="py-3.5 px-4 font-medium whitespace-nowrap">CPU Usage</th>
+                <th className="py-3.5 px-4 font-medium whitespace-nowrap">Memory Usage</th>
+                <th className="py-3.5 px-4 font-medium whitespace-nowrap">Apps</th>
+                <th className="py-3.5 px-4 font-medium text-right whitespace-nowrap min-w-[190px]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-cyber-800/60">
@@ -486,7 +498,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
 
                 return (
                   <tr key={cluster.name} className="hover:bg-cyber-850/50 transition-colors">
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <a href={`/clusters/${cluster.name}`} className="font-bold text-white hover:text-cyber-accent transition-colors">
                           {cluster.name}
@@ -501,15 +513,15 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         {cluster.metadata?.owner || 'Tenant Space'}
                       </div>
                     </td>
-                    <td className="py-3.5 px-4">
-                      <div className="flex flex-wrap gap-1 items-center">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
+                      <div className="flex items-center gap-1 flex-nowrap">
                         {clusterGroups.length > 0 ? (
                           clusterGroups.map((g) => (
                             <button
                               key={g}
                               type="button"
                               onClick={() => setGroupFilter(g)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] hover:bg-cyan-500/25 transition-colors"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] hover:bg-cyan-500/25 transition-colors shrink-0"
                               title={`Filter fleet by group ${g}`}
                             >
                               <Tag className="w-2.5 h-2.5" />
@@ -526,7 +538,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                               setGroupModalTargetCluster(cluster);
                               setIsGroupModalOpen(true);
                             }}
-                            className="p-1 text-slate-500 hover:text-cyan-400 rounded hover:bg-cyber-800 transition-colors"
+                            className="p-1 text-slate-500 hover:text-cyan-400 rounded hover:bg-cyber-800 transition-colors shrink-0"
                             title="Manage Cluster Groups"
                           >
                             <FolderGit2 className="w-3 h-3" />
@@ -534,14 +546,14 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         )}
                       </div>
                     </td>
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
                       <StatusBadge phase={cluster.status.phase} />
                     </td>
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
                       <div className="capitalize text-white font-semibold">{size}</div>
                       <div className="text-[10px] text-cyber-accent">{k8sVer}</div>
                     </td>
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
                       {isHA ? (
                         <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px]">
                           3-Node HA
@@ -552,32 +564,32 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         </span>
                       )}
                     </td>
-                    <td className="py-3.5 px-4 text-white font-bold">
+                    <td className="py-3.5 px-4 whitespace-nowrap text-white font-bold">
                       {cluster.status.metrics?.podCount || 0} pods
                     </td>
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
                       <div className="text-cyan-300 font-semibold">{cluster.status.metrics?.cpuUsage || '0m'}</div>
                       <div className="text-[10px] text-slate-500">{cluster.status.metrics?.cpuPercent ?? 0}% allocated</div>
                     </td>
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
                       <div className="text-purple-300 font-semibold">{cluster.status.metrics?.memoryUsage || '0Mi'}</div>
                       <div className="text-[10px] text-slate-500">{cluster.status.metrics?.memPercent ?? 0}% allocated</div>
                     </td>
-                    <td className="py-3.5 px-4">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyber-800 text-slate-300 border border-cyber-700 text-[10px]">
                         <Package className="w-3 h-3 text-emerald-400" />
                         {cluster.metadata?.installedApps?.length || 0}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
+                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1.5 flex-nowrap shrink-0">
                         <button
                           onClick={() => {
                             setSelectedCluster(cluster);
                             setActiveModal('kubeconfig');
                           }}
-                          className="p-1.5 bg-cyber-800 hover:bg-cyber-700 text-slate-200 rounded-lg border border-cyber-700 transition-colors"
-                          title="Connect via Kubeconfig"
+                          className="w-7 h-7 flex items-center justify-center shrink-0 bg-cyber-800 hover:bg-cyber-700 text-slate-200 rounded-lg border border-cyber-700 transition-colors"
+                          title="Connect via Kubeconfig & Access"
                         >
                           <Terminal className="w-3.5 h-3.5 text-cyber-accent" />
                         </button>
@@ -588,7 +600,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                                 setSelectedCluster(cluster);
                                 setActiveModal('upgrade');
                               }}
-                              className="p-1.5 bg-cyber-800 hover:bg-cyber-700 text-purple-300 rounded-lg border border-cyber-700 transition-colors"
+                              className="w-7 h-7 flex items-center justify-center shrink-0 bg-cyber-800 hover:bg-cyber-700 text-purple-300 rounded-lg border border-cyber-700 transition-colors"
                               title="Upgrade Engine / K8s Version"
                             >
                               <ArrowUpCircle className="w-3.5 h-3.5" />
@@ -598,7 +610,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                                 setSelectedCluster(cluster);
                                 setActiveModal('sleep');
                               }}
-                              className={`p-1.5 rounded-lg border transition-colors ${
+                              className={`w-7 h-7 flex items-center justify-center shrink-0 rounded-lg border transition-colors ${
                                 isSleeping
                                   ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
                                   : 'bg-cyber-800 hover:bg-cyber-700 text-indigo-300 border-cyber-700'
@@ -609,14 +621,14 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                             </button>
                           </>
                         ) : (
-                          <span className="px-1.5 py-0.5 text-[9px] font-mono text-slate-400 bg-cyber-950 rounded border border-cyber-800 flex items-center gap-0.5">
+                          <span className="px-1.5 py-0.5 text-[9px] font-mono text-slate-400 bg-cyber-950 rounded border border-cyber-800 flex items-center gap-0.5 shrink-0">
                             <Lock className="w-2.5 h-2.5 text-cyan-400" />
                             <span>Read Only</span>
                           </span>
                         )}
                         <a
                           href={`/clusters/${cluster.name}`}
-                          className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-cyber-800 transition-colors"
+                          className="w-7 h-7 flex items-center justify-center shrink-0 text-slate-400 hover:text-white rounded-lg hover:bg-cyber-800 transition-colors"
                           title="View Details"
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
@@ -627,7 +639,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                               setSelectedCluster(cluster);
                               setActiveModal('delete');
                             }}
-                            className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
+                            className="w-7 h-7 flex items-center justify-center shrink-0 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
                             title="Delete Cluster"
                           >
                             <Trash2 className="w-3.5 h-3.5" />

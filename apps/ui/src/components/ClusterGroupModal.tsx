@@ -11,6 +11,7 @@ import {
   Layers,
   Server,
   Edit2,
+  Lock,
 } from 'lucide-react';
 import type { VirtualCluster, ClusterGroupInfo } from '../lib/types';
 
@@ -479,6 +480,14 @@ export const ClusterGroupModal: React.FC<Props> = ({
                               <Edit2 className="w-3 h-3" />
                               Edit Members
                             </button>
+                            <a
+                              href="/admin/oidc"
+                              className="px-2 py-1 text-xs font-medium rounded-lg border border-purple-500/30 text-purple-300 bg-purple-950/30 hover:bg-purple-900/40 transition-colors flex items-center gap-1"
+                              title={`Configure OIDC policy for group ${g.name}`}
+                            >
+                              <Lock className="w-3 h-3 text-purple-400" />
+                              OIDC
+                            </a>
                             <button
                               type="button"
                               onClick={() => handleDeleteFleetGroup(g.name)}
