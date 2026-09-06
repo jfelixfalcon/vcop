@@ -186,7 +186,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       createdAt: item.metadata?.creationTimestamp,
     },
     metadata: {
-      owner: item.metadata?.labels?.['vops.gitops.io/owner'] || item.metadata?.annotations?.['vops.gitops.io/owner'] || 'Platform User',
+      owner: item.metadata?.annotations?.['vops.gitops.io/owner'] || item.metadata?.labels?.['vops.gitops.io/owner'] || 'Platform User',
       allowedGroups: (item.metadata?.annotations?.['vops.gitops.io/allowed-groups'] || '')
         .split(',')
         .map((s: string) => s.trim())
@@ -367,6 +367,84 @@ export async function updateVirtualClusterPolicies(
   }
 
   throw new Error((res.data as any)?.message || `Failed to update virtual cluster policies: HTTP ${res.statusCode}`);
+}
+
+export async function updateVirtualClusterRBAC(
+  name: string,
+  rbac: {
+    owner?: string;
+    allowedGroups?: string[];
+    allowedEmails?: string[];
+  },
+  namespace?: string
+): Promise<VirtualCluster | null> {
+  let targetNs = namespace;
+  if (!targetNs) {
+    const all = await listVirtualClusters();
+    const match = all.find((c) => c.name === name);
+    targetNs = match ? match.namespace : 'default';
+  }
+
+  // Get current resource to preserve existing labels and annotations
+  const getRes = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`
+  );
+  if (getRes.statusCode !== 200 || !getRes.data) {
+    throw new Error(`Cluster ${name} not found in namespace ${targetNs}`);
+  }
+
+  const existing = getRes.data;
+  const currentAnnotations = existing.metadata?.annotations || {};
+  const currentLabels = existing.metadata?.labels || {};
+
+  const updatedAnnotations = { ...currentAnnotations };
+  const updatedLabels = { ...currentLabels };
+
+  if (rbac.owner !== undefined) {
+    const trimmedOwner = rbac.owner.trim();
+    updatedAnnotations['vops.gitops.io/owner'] = trimmedOwner || 'Platform User';
+    updatedLabels['vops.gitops.io/owner'] = trimmedOwner
+      ? trimmedOwner.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 63)
+      : 'platform-user';
+  }
+
+  if (rbac.allowedGroups !== undefined) {
+    const groupsStr = rbac.allowedGroups.map((g) => g.trim()).filter(Boolean).join(',');
+    if (groupsStr) {
+      updatedAnnotations['vops.gitops.io/allowed-groups'] = groupsStr;
+    } else {
+      updatedAnnotations['vops.gitops.io/allowed-groups'] = null;
+    }
+  }
+
+  if (rbac.allowedEmails !== undefined) {
+    const emailsStr = rbac.allowedEmails.map((e) => e.trim()).filter(Boolean).join(',');
+    if (emailsStr) {
+      updatedAnnotations['vops.gitops.io/allowed-emails'] = emailsStr;
+    } else {
+      updatedAnnotations['vops.gitops.io/allowed-emails'] = null;
+    }
+  }
+
+  const patch = {
+    metadata: {
+      annotations: updatedAnnotations,
+      labels: updatedLabels,
+    },
+  };
+
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
+    'PATCH',
+    patch,
+    'application/merge-patch+json'
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to update virtual cluster RBAC: HTTP ${res.statusCode}`);
 }
 
 export async function setVirtualClusterSleep(

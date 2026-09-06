@@ -1,5 +1,11 @@
 import type { APIRoute } from 'astro';
-import { getVirtualCluster, deleteVirtualCluster, updateVirtualClusterPolicies, setVirtualClusterSleep } from '../../../../lib/k8s-client';
+import {
+  getVirtualCluster,
+  deleteVirtualCluster,
+  updateVirtualClusterPolicies,
+  setVirtualClusterSleep,
+  updateVirtualClusterRBAC,
+} from '../../../../lib/k8s-client';
 import { canUserViewCluster, canUserManageCluster } from '../../../../lib/auth';
 
 export const GET: APIRoute = async ({ params, locals }) => {
@@ -58,7 +64,7 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
 
   try {
     const body = await request.json();
-    const { policies, namespace, sleep, paused } = body;
+    const { policies, namespace, sleep, paused, rbac, owner, allowedGroups, allowedEmails } = body;
 
     let updated = null;
     if (sleep !== undefined || paused !== undefined) {
@@ -67,12 +73,22 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
     if (policies) {
       updated = await updateVirtualClusterPolicies(name, policies, namespace);
     }
+    if (rbac || owner !== undefined || allowedGroups !== undefined || allowedEmails !== undefined) {
+      const rbacData = rbac || { owner, allowedGroups, allowedEmails };
+      updated = await updateVirtualClusterRBAC(name, rbacData, namespace);
+    }
 
     if (!updated) {
-      return new Response(JSON.stringify({ success: false, error: 'No valid update parameters provided (policies, sleep, or paused)' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'No valid update parameters provided (policies, sleep, paused, or rbac/owner/groups)',
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     return new Response(JSON.stringify({ success: true, data: updated }), {
