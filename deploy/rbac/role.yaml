@@ -45,6 +45,21 @@ rules:
       - persistentvolumeclaims
       - pods
       - namespaces
+      - resourcequotas
+      - limitranges
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Leader Election Leases
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
     verbs:
       - create
       - delete

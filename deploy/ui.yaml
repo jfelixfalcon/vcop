@@ -19,7 +19,7 @@ spec:
       serviceAccountName: vcop-ui
       containers:
         - name: ui
-          image: vops/vc-operations-center:latest
+          image: vops/vc-operations-center:v0.36.0
           env:
             - name: HOST
               value: "0.0.0.0"
@@ -54,13 +54,13 @@ spec:
               memory: 128Mi
           livenessProbe:
             httpGet:
-              path: /api/metrics
+              path: /api/health
               port: 4321
             initialDelaySeconds: 10
             periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /
+              path: /api/health
               port: 4321
             initialDelaySeconds: 5
             periodSeconds: 10

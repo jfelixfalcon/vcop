@@ -48,7 +48,8 @@ type VirtualClusterReconciler struct {
 // +kubebuilder:rbac:groups=vops.gitops.io,resources=virtualclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=vops.gitops.io,resources=virtualclusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=statefulsets;deployments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=services;configmaps;secrets;persistentvolumeclaims;pods,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services;configmaps;secrets;persistentvolumeclaims;pods;resourcequotas;limitranges,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
 func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Log.WithValues("virtualcluster", req.NamespacedName)
@@ -225,6 +226,7 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// 8. Reconcile Guest RBAC Delegation (ClusterRoleBinding for owner, allowed-emails, and allowed-groups)
+	var rbacReady bool
 	if kubeconfigReady {
 		if err := r.RBACReconciler.ReconcileGuestRBAC(ctx, &vc); err != nil {
 			log.Error(err, "failed reconciling guest cluster RBAC")
@@ -239,7 +241,7 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// 9. Update Observed Versions & Final Phase
 	if isSleeping {
 		vc.Status.Phase = v1alpha1.PhaseSleeping
-	} else if etcdReady && syncerReady && addonsReady && quotaReady {
+	} else if etcdReady && syncerReady && addonsReady && quotaReady && rbacReady {
 		targetK8s := vc.Spec.KubernetesVersion
 		if targetK8s == "" {
 			targetK8s = "v1.31.0"
@@ -272,7 +274,12 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	requeueDuration := 30 * time.Second
+	if !isSleeping && (!addonsReady || !quotaReady || !rbacReady) {
+		requeueDuration = 10 * time.Second
+	}
+
+	return ctrl.Result{RequeueAfter: requeueDuration}, nil
 }
 
 func (r *VirtualClusterReconciler) handleDeletion(ctx context.Context, log logr.Logger, vc *v1alpha1.VirtualCluster) (ctrl.Result, error) {

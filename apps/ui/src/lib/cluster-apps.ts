@@ -172,14 +172,16 @@ export async function executeAppDeployment(
  */
 export async function executeAppUninstall(
   rawKubeconfig: string,
-  app: InstalledApp
+  app: InstalledApp,
+  clusterName?: string,
+  clusterNamespace?: string
 ): Promise<{ success: boolean; error?: string }> {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcop-uninst-'));
   const kcPath = path.join(tempDir, 'kubeconfig.yaml');
   const guestNamespace = app.helm?.namespace || 'default';
 
   try {
-    const internalKc = prepareInternalKubeconfig(rawKubeconfig, guestNamespace);
+    const internalKc = prepareInternalKubeconfig(rawKubeconfig, guestNamespace, clusterName, clusterNamespace);
     fs.writeFileSync(kcPath, internalKc, { mode: 0o600 });
 
     // 1. Delete manifests if present
@@ -362,7 +364,7 @@ export async function uninstallAppFromCluster(
   if (targetApp) {
     const rawKubeconfig = await getKubeconfig(clusterName, targetNs);
     if (rawKubeconfig) {
-      await executeAppUninstall(rawKubeconfig, targetApp);
+      await executeAppUninstall(rawKubeconfig, targetApp, clusterName, targetNs);
     }
   }
 

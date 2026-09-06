@@ -297,6 +297,14 @@ func (r *QuotaReconciler) syncInsideVCluster(ctx context.Context, vc *v1alpha1.V
 	}
 
 	if len(cfgBytes) == 0 {
+		vcSecName := fmt.Sprintf("vc-%s", vc.Name)
+		vcSec := &corev1.Secret{}
+		if err := r.client.Get(ctx, types.NamespacedName{Name: vcSecName, Namespace: vc.Namespace}, vcSec); err == nil {
+			cfgBytes = vcSec.Data["config"]
+		}
+	}
+
+	if len(cfgBytes) == 0 {
 		return nil
 	}
 

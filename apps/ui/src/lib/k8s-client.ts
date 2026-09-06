@@ -19,6 +19,23 @@ interface K8sConnectionConfig {
 }
 
 let cachedConfig: K8sConnectionConfig | null = null;
+let cachedHttpsAgent: https.Agent | null = null;
+
+function getHttpsAgent(config: K8sConnectionConfig): https.Agent {
+  if (!cachedHttpsAgent) {
+    cachedHttpsAgent = new https.Agent({
+      keepAlive: true,
+      maxSockets: 64,
+      maxFreeSockets: 16,
+      timeout: 30000,
+      ca: config.ca,
+      cert: config.cert,
+      key: config.key,
+      rejectUnauthorized: config.rejectUnauthorized,
+    });
+  }
+  return cachedHttpsAgent;
+}
 
 function getK8sConfig(): K8sConnectionConfig | null {
   if (cachedConfig) return cachedConfig;
@@ -104,6 +121,7 @@ function k8sRequest<T>(reqPath: string, method = 'GET', body?: any, contentType 
       path: reqPath,
       method,
       headers,
+      agent: getHttpsAgent(config),
       ca: config.ca,
       cert: config.cert,
       key: config.key,
