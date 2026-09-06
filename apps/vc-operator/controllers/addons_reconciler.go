@@ -32,7 +32,7 @@ func NewAddonsReconciler(client client.Client) *AddonsReconciler {
 	return &AddonsReconciler{client: client}
 }
 
-func (r *AddonsReconciler) getVirtualClusterClients(ctx context.Context, vc *v1alpha1.VirtualCluster) (client.Client, dynamic.Interface, error) {
+func (r *AddonsReconciler) GetVirtualClusterClients(ctx context.Context, vc *v1alpha1.VirtualCluster) (client.Client, dynamic.Interface, error) {
 	var cfgBytes []byte
 
 	// 1. Try reading the exported kubeconfig secret
@@ -69,7 +69,16 @@ func (r *AddonsReconciler) getVirtualClusterClients(ctx context.Context, vc *v1a
 	restConfig.Insecure = true
 	restConfig.CAData = nil
 	restConfig.CAFile = ""
-	restConfig.Timeout = 15 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > 0 {
+			restConfig.Timeout = remaining
+		} else {
+			restConfig.Timeout = 2 * time.Second
+		}
+	} else {
+		restConfig.Timeout = 10 * time.Second
+	}
 
 	vScheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(vScheme); err != nil {
@@ -96,7 +105,7 @@ func (r *AddonsReconciler) getVirtualClusterClients(ctx context.Context, vc *v1a
 }
 
 func (r *AddonsReconciler) ReconcileAddons(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
-	vClient, dynClient, err := r.getVirtualClusterClients(ctx, vc)
+	vClient, dynClient, err := r.GetVirtualClusterClients(ctx, vc)
 	if err != nil {
 		return err
 	}

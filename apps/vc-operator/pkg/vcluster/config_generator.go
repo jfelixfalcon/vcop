@@ -163,11 +163,21 @@ type SyncResourceConfig struct {
 }
 
 type PoliciesConfig struct {
-	AutoSleep *AutoSleepConfig `yaml:"autoSleep,omitempty" json:"autoSleep,omitempty"`
+	ResourceQuota *ResourceQuotaVCluster `yaml:"resourceQuota,omitempty" json:"resourceQuota,omitempty"`
+	LimitRange    *LimitRangeVCluster    `yaml:"limitRange,omitempty" json:"limitRange,omitempty"`
 }
 
-type AutoSleepConfig struct {
-	Enabled bool `yaml:"enabled" json:"enabled"`
+type ResourceQuotaVCluster struct {
+	Enabled bool              `yaml:"enabled" json:"enabled"`
+	Quota   map[string]string `yaml:"quota,omitempty" json:"quota,omitempty"`
+}
+
+type LimitRangeVCluster struct {
+	Enabled        bool              `yaml:"enabled" json:"enabled"`
+	Default        map[string]string `yaml:"default,omitempty" json:"default,omitempty"`
+	DefaultRequest map[string]string `yaml:"defaultRequest,omitempty" json:"defaultRequest,omitempty"`
+	Max            map[string]string `yaml:"max,omitempty" json:"max,omitempty"`
+	Min            map[string]string `yaml:"min,omitempty" json:"min,omitempty"`
 }
 
 // GenerateVClusterConfig builds the v0.36 vcluster.yaml structure from a VirtualCluster spec
@@ -315,6 +325,143 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 			},
 		},
 	}
+
+	// Populate Governance Policies (ResourceQuota, LimitRange)
+	policies := &PoliciesConfig{}
+
+	quotaMap := make(map[string]string)
+	if spec.Policies != nil && spec.Policies.ResourceQuota != nil && spec.Policies.ResourceQuota.Enabled {
+		rq := spec.Policies.ResourceQuota
+		if rq.RequestsCPU != "" {
+			quotaMap["requests.cpu"] = rq.RequestsCPU
+		}
+		if rq.RequestsMemory != "" {
+			quotaMap["requests.memory"] = rq.RequestsMemory
+		}
+		if rq.RequestsStorage != "" {
+			quotaMap["requests.storage"] = rq.RequestsStorage
+		}
+		if rq.LimitsCPU != "" {
+			quotaMap["limits.cpu"] = rq.LimitsCPU
+		}
+		if rq.LimitsMemory != "" {
+			quotaMap["limits.memory"] = rq.LimitsMemory
+		}
+		if rq.Pods != "" {
+			quotaMap["count/pods"] = rq.Pods
+		}
+		if rq.Services != "" {
+			quotaMap["services"] = rq.Services
+		}
+		if rq.ServicesNodePorts != "" {
+			quotaMap["services.nodeports"] = rq.ServicesNodePorts
+		}
+		if rq.ServicesLoadBalancers != "" {
+			quotaMap["services.loadbalancers"] = rq.ServicesLoadBalancers
+		}
+		if rq.ConfigMaps != "" {
+			quotaMap["configmaps"] = rq.ConfigMaps
+		}
+		if rq.Secrets != "" {
+			quotaMap["secrets"] = rq.Secrets
+		}
+		if rq.PersistentVolumeClaims != "" {
+			quotaMap["persistentvolumeclaims"] = rq.PersistentVolumeClaims
+		}
+	} else if spec.Policies == nil || spec.Policies.ResourceQuota == nil {
+		switch spec.SizePreset {
+		case v1alpha1.PresetSmall:
+			quotaMap["requests.cpu"] = "1"
+			quotaMap["requests.memory"] = "2Gi"
+			quotaMap["requests.storage"] = "10Gi"
+			quotaMap["limits.cpu"] = "2"
+			quotaMap["limits.memory"] = "4Gi"
+			quotaMap["count/pods"] = "10"
+			quotaMap["services"] = "10"
+			quotaMap["persistentvolumeclaims"] = "5"
+		case v1alpha1.PresetLarge:
+			quotaMap["requests.cpu"] = "8"
+			quotaMap["requests.memory"] = "16Gi"
+			quotaMap["requests.storage"] = "50Gi"
+			quotaMap["limits.cpu"] = "16"
+			quotaMap["limits.memory"] = "32Gi"
+			quotaMap["count/pods"] = "50"
+			quotaMap["services"] = "50"
+			quotaMap["persistentvolumeclaims"] = "25"
+		default:
+			quotaMap["requests.cpu"] = "4"
+			quotaMap["requests.memory"] = "8Gi"
+			quotaMap["requests.storage"] = "25Gi"
+			quotaMap["limits.cpu"] = "8"
+			quotaMap["limits.memory"] = "16Gi"
+			quotaMap["count/pods"] = "25"
+			quotaMap["services"] = "25"
+			quotaMap["persistentvolumeclaims"] = "10"
+		}
+	}
+
+	if len(quotaMap) > 0 {
+		policies.ResourceQuota = &ResourceQuotaVCluster{
+			Enabled: true,
+			Quota:   quotaMap,
+		}
+	}
+
+	if spec.Policies != nil && spec.Policies.LimitRange != nil && spec.Policies.LimitRange.Enabled {
+		lr := spec.Policies.LimitRange
+		lrConfig := &LimitRangeVCluster{Enabled: true}
+		if lr.DefaultCPU != "" || lr.DefaultMemory != "" {
+			lrConfig.Default = make(map[string]string)
+			if lr.DefaultCPU != "" {
+				lrConfig.Default["cpu"] = lr.DefaultCPU
+			}
+			if lr.DefaultMemory != "" {
+				lrConfig.Default["memory"] = lr.DefaultMemory
+			}
+		}
+		if lr.DefaultRequestCPU != "" || lr.DefaultRequestMemory != "" {
+			lrConfig.DefaultRequest = make(map[string]string)
+			if lr.DefaultRequestCPU != "" {
+				lrConfig.DefaultRequest["cpu"] = lr.DefaultRequestCPU
+			}
+			if lr.DefaultRequestMemory != "" {
+				lrConfig.DefaultRequest["memory"] = lr.DefaultRequestMemory
+			}
+		}
+		if lr.MaxCPU != "" || lr.MaxMemory != "" {
+			lrConfig.Max = make(map[string]string)
+			if lr.MaxCPU != "" {
+				lrConfig.Max["cpu"] = lr.MaxCPU
+			}
+			if lr.MaxMemory != "" {
+				lrConfig.Max["memory"] = lr.MaxMemory
+			}
+		}
+		if lr.MinCPU != "" || lr.MinMemory != "" {
+			lrConfig.Min = make(map[string]string)
+			if lr.MinCPU != "" {
+				lrConfig.Min["cpu"] = lr.MinCPU
+			}
+			if lr.MinMemory != "" {
+				lrConfig.Min["memory"] = lr.MinMemory
+			}
+		}
+		policies.LimitRange = lrConfig
+	} else if spec.Policies == nil || spec.Policies.LimitRange == nil {
+		policies.LimitRange = &LimitRangeVCluster{
+			Enabled: true,
+			Default: map[string]string{
+				"cpu":    "1",
+				"memory": "1Gi",
+			},
+			DefaultRequest: map[string]string{
+				"cpu":    "100m",
+				"memory": "128Mi",
+			},
+		}
+	}
+
+	cfg.Policies = policies
 
 	return cfg, nil
 }

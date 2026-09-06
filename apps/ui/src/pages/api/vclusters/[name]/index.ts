@@ -1,7 +1,8 @@
 import type { APIRoute } from 'astro';
-import { getVirtualCluster, deleteVirtualCluster } from '../../../../lib/k8s-client';
+import { getVirtualCluster, deleteVirtualCluster, updateVirtualClusterPolicies, setVirtualClusterSleep } from '../../../../lib/k8s-client';
+import { canUserViewCluster, canUserManageCluster } from '../../../../lib/auth';
 
-export const GET: APIRoute = async ({ params }) => {
+export const GET: APIRoute = async ({ params, locals }) => {
   const { name } = params;
   if (!name) {
     return new Response(JSON.stringify({ success: false, error: 'Cluster name required' }), {
@@ -18,13 +19,86 @@ export const GET: APIRoute = async ({ params }) => {
     });
   }
 
+  const user = locals.user;
+  if (user && !canUserViewCluster(user, cluster)) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Forbidden: You do not have access to view this cluster.' }),
+      {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
   return new Response(JSON.stringify({ success: true, data: cluster }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
 };
 
-export const DELETE: APIRoute = async ({ params }) => {
+export const PATCH: APIRoute = async ({ params, request, locals }) => {
+  const user = locals.user;
+  if (!user || !canUserManageCluster(user)) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Forbidden: Administrator privileges required to modify cluster resources.' }),
+      {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  const { name } = params;
+  if (!name) {
+    return new Response(JSON.stringify({ success: false, error: 'Cluster name required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
+    const body = await request.json();
+    const { policies, namespace, sleep, paused } = body;
+
+    let updated = null;
+    if (sleep !== undefined || paused !== undefined) {
+      updated = await setVirtualClusterSleep(name, Boolean(sleep ?? paused), namespace);
+    }
+    if (policies) {
+      updated = await updateVirtualClusterPolicies(name, policies, namespace);
+    }
+
+    if (!updated) {
+      return new Response(JSON.stringify({ success: false, error: 'No valid update parameters provided (policies, sleep, or paused)' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ success: true, data: updated }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err: any) {
+    return new Response(JSON.stringify({ success: false, error: err.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+};
+
+export const DELETE: APIRoute = async ({ params, locals }) => {
+  const user = locals.user;
+  if (!user || !canUserManageCluster(user)) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Forbidden: Administrator privileges required to teardown clusters.' }),
+      {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
   const { name } = params;
   if (!name) {
     return new Response(JSON.stringify({ success: false, error: 'Cluster name required' }), {
@@ -46,3 +120,4 @@ export const DELETE: APIRoute = async ({ params }) => {
     headers: { 'Content-Type': 'application/json' },
   });
 };
+

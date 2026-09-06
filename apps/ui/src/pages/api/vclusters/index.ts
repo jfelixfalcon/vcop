@@ -1,10 +1,19 @@
 import type { APIRoute } from 'astro';
 import { listVirtualClusters, createVirtualCluster } from '../../../lib/k8s-client';
+import { canUserViewCluster } from '../../../lib/auth';
 
-export const GET: APIRoute = async () => {
+export const GET: APIRoute = async ({ locals }) => {
   try {
     const clusters = await listVirtualClusters();
-    return new Response(JSON.stringify({ success: true, data: clusters }), {
+    const user = locals.user;
+
+    // RBAC Filtering: Viewers only see clusters they have access to
+    const visibleClusters =
+      user && user.role !== 'admin'
+        ? clusters.filter((c) => canUserViewCluster(user, c))
+        : clusters;
+
+    return new Response(JSON.stringify({ success: true, data: visibleClusters }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -16,7 +25,18 @@ export const GET: APIRoute = async () => {
   }
 };
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
+  const user = locals.user;
+  if (!user || user.role !== 'admin') {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Forbidden: Administrator privileges required to provision clusters.' }),
+      {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
   try {
     const body = await request.json();
     if (!body.clusterName) {
@@ -24,6 +44,11 @@ export const POST: APIRoute = async ({ request }) => {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+
+    // Default owner to creating user if not specified
+    if (!body.owner) {
+      body.owner = user.email || user.username;
     }
 
     const cluster = await createVirtualCluster(body);
@@ -38,3 +63,4 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 };
+

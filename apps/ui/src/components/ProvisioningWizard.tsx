@@ -13,6 +13,10 @@ import {
   AlertCircle,
   FileCode,
   Zap,
+  Sliders,
+  Cpu,
+  Database,
+  HardDrive,
 } from 'lucide-react';
 import type { SizePreset } from '../lib/types';
 import { PRESETS } from '../lib/presets';
@@ -23,11 +27,28 @@ export const ProvisioningWizard: React.FC = () => {
   // Form State
   const [clusterName, setClusterName] = useState<string>('');
   const [owner, setOwner] = useState<string>('');
+  const [allowedGroups, setAllowedGroups] = useState<string>('');
+  const [allowedEmails, setAllowedEmails] = useState<string>('');
   const [environment, setEnvironment] = useState<'development' | 'staging' | 'production'>('development');
   const [sizePreset, setSizePreset] = useState<SizePreset>('medium');
   const [enableMonitoringAndDNS, setEnableMonitoringAndDNS] = useState<boolean>(true);
   const [autoSleep, setAutoSleep] = useState<boolean>(false);
   const [ttlHours, setTtlHours] = useState<number>(72);
+
+  // Dynamic Resource Quotas & Policies
+  const [showQuotaOverrides, setShowQuotaOverrides] = useState<boolean>(false);
+  const [requestsCPU, setRequestsCPU] = useState<string>('4');
+  const [limitsCPU, setLimitsCPU] = useState<string>('8');
+  const [requestsMemory, setRequestsMemory] = useState<string>('8Gi');
+  const [limitsMemory, setLimitsMemory] = useState<string>('16Gi');
+  const [requestsStorage, setRequestsStorage] = useState<string>('25Gi');
+  const [pods, setPods] = useState<string>('25');
+  const [services, setServices] = useState<string>('25');
+  const [persistentVolumeClaims, setPersistentVolumeClaims] = useState<string>('10');
+  const [defaultRequestCPU, setDefaultRequestCPU] = useState<string>('100m');
+  const [defaultRequestMemory, setDefaultRequestMemory] = useState<string>('128Mi');
+  const [defaultCPU, setDefaultCPU] = useState<string>('500m');
+  const [defaultMemory, setDefaultMemory] = useState<string>('512Mi');
 
   // Advanced Mode
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
@@ -38,6 +59,54 @@ export const ProvisioningWizard: React.FC = () => {
   // Submission State
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleSelectPreset = (preset: SizePreset) => {
+    setSizePreset(preset);
+    switch (preset) {
+      case 'small':
+        setRequestsCPU('1');
+        setLimitsCPU('2');
+        setRequestsMemory('2Gi');
+        setLimitsMemory('4Gi');
+        setRequestsStorage('10Gi');
+        setPods('10');
+        setServices('10');
+        setPersistentVolumeClaims('5');
+        setDefaultRequestCPU('50m');
+        setDefaultRequestMemory('64Mi');
+        setDefaultCPU('250m');
+        setDefaultMemory('256Mi');
+        break;
+      case 'large':
+        setRequestsCPU('8');
+        setLimitsCPU('16');
+        setRequestsMemory('16Gi');
+        setLimitsMemory('32Gi');
+        setRequestsStorage('50Gi');
+        setPods('50');
+        setServices('50');
+        setPersistentVolumeClaims('25');
+        setDefaultRequestCPU('200m');
+        setDefaultRequestMemory('256Mi');
+        setDefaultCPU('1');
+        setDefaultMemory('1Gi');
+        break;
+      default:
+        setRequestsCPU('4');
+        setLimitsCPU('8');
+        setRequestsMemory('8Gi');
+        setLimitsMemory('16Gi');
+        setRequestsStorage('25Gi');
+        setPods('25');
+        setServices('25');
+        setPersistentVolumeClaims('10');
+        setDefaultRequestCPU('100m');
+        setDefaultRequestMemory('128Mi');
+        setDefaultCPU('500m');
+        setDefaultMemory('512Mi');
+        break;
+    }
+  };
 
   const selectedPresetDetails = PRESETS.find((p) => p.id === sizePreset) || PRESETS[1];
 
@@ -68,10 +137,12 @@ export const ProvisioningWizard: React.FC = () => {
     setError(null);
 
     try {
-      const payload = {
+      const payload: any = {
         clusterName: clusterName.trim().toLowerCase(),
         preset: sizePreset,
         owner: owner.trim() || 'Internal Developer Platform',
+        allowedGroups: allowedGroups.split(',').map((s) => s.trim()).filter(Boolean),
+        allowedEmails: allowedEmails.split(',').map((s) => s.trim()).filter(Boolean),
         environment,
         enableMonitoringAndDNS,
         autoSleep,
@@ -79,6 +150,26 @@ export const ProvisioningWizard: React.FC = () => {
         kubernetesVersion,
         vclusterVersion,
         customYaml: customYaml.trim() ? customYaml : undefined,
+        policies: {
+          resourceQuota: {
+            enabled: true,
+            requestsCPU: requestsCPU.trim(),
+            limitsCPU: limitsCPU.trim(),
+            requestsMemory: requestsMemory.trim(),
+            limitsMemory: limitsMemory.trim(),
+            requestsStorage: requestsStorage.trim(),
+            pods: pods.trim(),
+            services: services.trim(),
+            persistentVolumeClaims: persistentVolumeClaims.trim(),
+          },
+          limitRange: {
+            enabled: true,
+            defaultRequestCPU: defaultRequestCPU.trim(),
+            defaultRequestMemory: defaultRequestMemory.trim(),
+            defaultCPU: defaultCPU.trim(),
+            defaultMemory: defaultMemory.trim(),
+          },
+        },
       };
 
       const res = await fetch('/api/vclusters', {
@@ -132,7 +223,26 @@ sync:
   fromHost:
     nodes:
       enabled: true
-${autoSleep ? 'policies:\n  autoSleep:\n    enabled: true' : ''}`;
+policies:
+  resourceQuota:
+    enabled: true
+    quota:
+      requests.cpu: "${requestsCPU}"
+      limits.cpu: "${limitsCPU}"
+      requests.memory: "${requestsMemory}"
+      limits.memory: "${limitsMemory}"
+      requests.storage: "${requestsStorage}"
+      count/pods: "${pods}"
+      services: "${services}"
+      persistentvolumeclaims: "${persistentVolumeClaims}"
+  limitRange:
+    enabled: true
+    default:
+      cpu: "${defaultCPU}"
+      memory: "${defaultMemory}"
+    defaultRequest:
+      cpu: "${defaultRequestCPU}"
+      memory: "${defaultRequestMemory}"${autoSleep ? '\n  autoSleep:\n    enabled: true' : ''}`;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -264,6 +374,37 @@ ${autoSleep ? 'policies:\n  autoSleep:\n    enabled: true' : ''}`;
                   </div>
                 </div>
               </div>
+
+              {/* RBAC Access Delegation */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-cyber-850">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                    Authorized Groups (RBAC)
+                  </label>
+                  <input
+                    type="text"
+                    value={allowedGroups}
+                    onChange={(e) => setAllowedGroups(e.target.value)}
+                    placeholder="e.g. developers, data-platform"
+                    className="w-full bg-cyber-950/80 border border-cyber-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-cyber-accent font-mono transition-colors"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Comma-separated groups with read + kubeconfig access</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                    Authorized User Emails (RBAC)
+                  </label>
+                  <input
+                    type="text"
+                    value={allowedEmails}
+                    onChange={(e) => setAllowedEmails(e.target.value)}
+                    placeholder="e.g. dev@vops.local, user@company.com"
+                    className="w-full bg-cyber-950/80 border border-cyber-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-cyber-accent font-mono transition-colors"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">Comma-separated user emails with read + kubeconfig access</p>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -287,7 +428,7 @@ ${autoSleep ? 'policies:\n  autoSleep:\n    enabled: true' : ''}`;
                 return (
                   <div
                     key={preset.id}
-                    onClick={() => setSizePreset(preset.id)}
+                    onClick={() => handleSelectPreset(preset.id)}
                     className={`cursor-pointer relative flex flex-col justify-between p-5 rounded-2xl border transition-all duration-200 ${
                       isSelected
                         ? 'bg-cyber-800/80 border-cyber-accent shadow-glow-md'
@@ -334,6 +475,162 @@ ${autoSleep ? 'policies:\n  autoSleep:\n    enabled: true' : ''}`;
                   </div>
                 );
               })}
+            </div>
+
+            {/* Collapsible Quota & Policy Tuning */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setShowQuotaOverrides(!showQuotaOverrides)}
+                className="flex items-center gap-2 text-xs font-mono text-slate-400 hover:text-cyber-accent transition-colors"
+              >
+                <Sliders className="w-4 h-4 text-cyan-400" />
+                <span>
+                  {showQuotaOverrides
+                    ? 'Hide Dynamic Quota Customization'
+                    : 'Customize Resource Quotas & LimitRange (Optional)'}
+                </span>
+                <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-2 py-0.5 rounded border border-cyan-500/20 font-mono">
+                  {requestsCPU} CPU / {requestsMemory} RAM / {requestsStorage}
+                </span>
+              </button>
+
+              {showQuotaOverrides && (
+                <div className="mt-4 p-5 bg-cyber-950 border border-cyber-800 rounded-2xl space-y-5 animate-in fade-in duration-150">
+                  <div>
+                    <h4 className="text-xs font-bold text-white font-mono uppercase tracking-wider mb-1 flex items-center gap-2">
+                      <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+                      Tenant ResourceQuota Bounds
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Tailor the compute, memory, storage limits and max objects for this virtual cluster.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">Requests CPU:</label>
+                      <input
+                        type="text"
+                        value={requestsCPU}
+                        onChange={(e) => setRequestsCPU(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">Limits CPU:</label>
+                      <input
+                        type="text"
+                        value={limitsCPU}
+                        onChange={(e) => setLimitsCPU(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">Requests Storage:</label>
+                      <input
+                        type="text"
+                        value={requestsStorage}
+                        onChange={(e) => setRequestsStorage(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">Requests Memory:</label>
+                      <input
+                        type="text"
+                        value={requestsMemory}
+                        onChange={(e) => setRequestsMemory(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">Limits Memory:</label>
+                      <input
+                        type="text"
+                        value={limitsMemory}
+                        onChange={(e) => setLimitsMemory(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">Max Pods:</label>
+                      <input
+                        type="text"
+                        value={pods}
+                        onChange={(e) => setPods(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">Max Services:</label>
+                      <input
+                        type="text"
+                        value={services}
+                        onChange={(e) => setServices(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">Max PVCs:</label>
+                      <input
+                        type="text"
+                        value={persistentVolumeClaims}
+                        onChange={(e) => setPersistentVolumeClaims(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-cyber-800">
+                    <h4 className="text-xs font-bold text-white font-mono uppercase tracking-wider mb-1 flex items-center gap-2">
+                      <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                      Container LimitRange Defaults
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mb-3">
+                      Defaults injected into tenant containers that omit resources.
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
+                      <div>
+                        <label className="block text-slate-400 mb-1 text-[11px]">Default Req CPU:</label>
+                        <input
+                          type="text"
+                          value={defaultRequestCPU}
+                          onChange={(e) => setDefaultRequestCPU(e.target.value)}
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1 text-[11px]">Default Req Mem:</label>
+                        <input
+                          type="text"
+                          value={defaultRequestMemory}
+                          onChange={(e) => setDefaultRequestMemory(e.target.value)}
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1 text-[11px]">Default Limit CPU:</label>
+                        <input
+                          type="text"
+                          value={defaultCPU}
+                          onChange={(e) => setDefaultCPU(e.target.value)}
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1 text-[11px]">Default Limit Mem:</label>
+                        <input
+                          type="text"
+                          value={defaultMemory}
+                          onChange={(e) => setDefaultMemory(e.target.value)}
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -1,12 +1,12 @@
 import type { APIRoute } from 'astro';
-import { getVirtualCluster, upgradeVirtualCluster } from '../../../../lib/k8s-client';
+import { setVirtualClusterSleep } from '../../../../lib/k8s-client';
 import { canUserManageCluster } from '../../../../lib/auth';
 
 export const POST: APIRoute = async ({ params, request, locals }) => {
   const user = locals.user;
   if (!user || !canUserManageCluster(user)) {
     return new Response(
-      JSON.stringify({ success: false, error: 'Forbidden: Administrator privileges required to upgrade clusters.' }),
+      JSON.stringify({ success: false, error: 'Forbidden: Administrator privileges required to change sleep state.' }),
       {
         status: 403,
         headers: { 'Content-Type': 'application/json' },
@@ -22,29 +22,23 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
     });
   }
 
-  const cluster = await getVirtualCluster(name);
-  if (!cluster) {
-    return new Response(JSON.stringify({ success: false, error: 'Cluster not found' }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
   try {
     const body = await request.json();
-    const updated = await upgradeVirtualCluster(name, {
-      kubernetesVersion: body.kubernetesVersion,
-      vclusterVersion: body.vclusterVersion,
-    });
+    const sleep = body.sleep !== undefined ? Boolean(body.sleep) : (body.paused !== undefined ? Boolean(body.paused) : true);
+    const namespace = body.namespace;
 
-    return new Response(JSON.stringify({
-      success: true,
-      message: `Upgrade initiated for ${name}`,
-      data: updated,
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const updated = await setVirtualClusterSleep(name, sleep, namespace);
+    return new Response(
+      JSON.stringify({
+        success: true,
+        data: updated,
+        message: sleep ? `Cluster ${name} is now in sleep mode` : `Cluster ${name} has been awakened`,
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
   } catch (err: any) {
     return new Response(JSON.stringify({ success: false, error: err.message }), {
       status: 500,

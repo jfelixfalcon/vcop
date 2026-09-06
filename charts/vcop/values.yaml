@@ -83,6 +83,24 @@ ui:
     PORT: "4321"
     NODE_ENV: "production"
 
+  # Authentication & RBAC Governance
+  auth:
+    enabled: true
+    sessionSecret: "" # Set to custom HMAC secret; auto-generated if empty
+    breakglass:
+      adminUsername: "admin"
+      adminPassword: "vcop-breakglass-admin"
+    oidc:
+      enabled: false
+      issuerUrl: "" # e.g. https://accounts.google.com or https://auth.corp.com/realms/cloud
+      clientId: ""
+      clientSecret: ""
+      redirectUri: ""
+      scopes: "openid email profile groups"
+      providerName: "Single Sign-On (OIDC)"
+      adminGroups: "admins,vcluster-admins,platform-ops"
+      adminEmails: "admin@vops.local"
+
   service:
     type: ClusterIP
     port: 80

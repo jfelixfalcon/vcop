@@ -141,6 +141,10 @@ spec:
                     ingresses:
                       type: boolean
                       default: true
+                paused:
+                  type: boolean
+                  default: false
+                  description: Paused explicitly puts the virtual cluster to sleep, scaling down control plane workloads.
                 lifecycle:
                   type: object
                   description: Automated lifecycle policies (idle sleep and TTL cleanup).
@@ -148,10 +152,72 @@ spec:
                     autoSleep:
                       type: boolean
                       default: false
+                    sleep:
+                      type: boolean
+                      default: false
+                      description: Sleep explicitly puts the virtual cluster into sleep mode.
                     ttlHours:
                       type: integer
                       default: 0
                       minimum: 0
+                policies:
+                  type: object
+                  description: Governance policies including ResourceQuotas, LimitRanges, and lifecycle limits.
+                  properties:
+                    resourceQuota:
+                      type: object
+                      description: ResourceQuota limits and requests ceiling for tenant workloads.
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: true
+                        requestsCPU:
+                          type: string
+                        requestsMemory:
+                          type: string
+                        requestsStorage:
+                          type: string
+                        limitsCPU:
+                          type: string
+                        limitsMemory:
+                          type: string
+                        pods:
+                          type: string
+                        services:
+                          type: string
+                        servicesNodePorts:
+                          type: string
+                        servicesLoadBalancers:
+                          type: string
+                        configMaps:
+                          type: string
+                        secrets:
+                          type: string
+                        persistentVolumeClaims:
+                          type: string
+                    limitRange:
+                      type: object
+                      description: Container-level default and boundary guardrails.
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: true
+                        defaultCPU:
+                          type: string
+                        defaultMemory:
+                          type: string
+                        defaultRequestCPU:
+                          type: string
+                        defaultRequestMemory:
+                          type: string
+                        maxCPU:
+                          type: string
+                        maxMemory:
+                          type: string
+                        minCPU:
+                          type: string
+                        minMemory:
+                          type: string
                 rawConfig:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
@@ -174,6 +240,7 @@ spec:
                     - Upgrading
                     - Degraded
                     - Terminating
+                    - Sleeping
                 conditions:
                   type: array
                   description: Standard Kubernetes lifecycle conditions.
@@ -224,6 +291,16 @@ spec:
                       type: string
                     cpuUsage:
                       type: string
+                quota:
+                  type: object
+                  description: Observed active resource quota and usage statistics.
+                  properties:
+                    hard:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    used:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
                 observedGeneration:
                   type: integer
                   format: int64

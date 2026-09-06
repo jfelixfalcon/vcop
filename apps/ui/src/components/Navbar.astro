@@ -1,5 +1,8 @@
 ---
-import { ShieldCheck, Plus, Terminal, Activity } from 'lucide-react';
+import { ShieldCheck, Plus, Terminal, Activity, LogOut, UserCheck, Shield } from 'lucide-react';
+
+const user = Astro.locals.user;
+const isAdmin = user?.role === 'admin';
 ---
 
 <header class="sticky top-0 z-40 w-full border-b border-cyber-700/60 bg-cyber-950/80 backdrop-blur-md">
@@ -23,28 +26,76 @@ import { ShieldCheck, Plus, Terminal, Activity } from 'lucide-react';
         <a href="/" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
           Fleet Clusters
         </a>
-        <a href="/new" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
-          Provision
-        </a>
+        {isAdmin && (
+          <a href="/new" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
+            Provision
+          </a>
+        )}
       </nav>
     </div>
 
     <!-- Right Controls -->
     <div class="flex items-center gap-3">
       <!-- Operator Status Pill -->
-      <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyber-900/80 border border-cyber-700/60 text-xs font-mono text-slate-300">
+      <div class="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-cyber-900/80 border border-cyber-700/60 text-xs font-mono text-slate-300">
         <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-glow-emerald animate-pulse"></span>
         <span>Operator: <strong class="text-emerald-400 font-semibold">Active</strong></span>
       </div>
 
-      <!-- Quick Action -->
-      <a
-        href="/new"
-        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm transition-all"
-      >
-        <span class="font-bold">+</span>
-        <span>New Cluster</span>
-      </a>
+      {user ? (
+        <div class="flex items-center gap-3">
+          <!-- User Profile & Role Badge -->
+          <div class="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-cyber-900/90 border border-cyber-700/80 text-xs">
+            <div class="w-6 h-6 rounded-lg bg-cyber-800 border border-cyber-700 flex items-center justify-center text-[11px] font-mono font-bold text-cyber-accent uppercase">
+              {user.username.slice(0, 2)}
+            </div>
+            <div class="hidden sm:block text-left font-mono">
+              <div class="text-[11px] font-semibold text-slate-200 leading-none">
+                {user.email || user.username}
+              </div>
+              <div class="text-[9px] text-slate-400 capitalize mt-0.5">
+                {user.method === 'oidc' ? 'SSO Identity' : 'Breakglass Local'}
+              </div>
+            </div>
+            <span
+              class={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider ${
+                isAdmin
+                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-glow-sm'
+                  : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+              }`}
+            >
+              {user.role}
+            </span>
+          </div>
+
+          <!-- Provision Button (Admins only) -->
+          {isAdmin && (
+            <a
+              href="/new"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm transition-all"
+            >
+              <span class="font-bold">+</span>
+              <span class="hidden sm:inline">New Cluster</span>
+            </a>
+          )}
+
+          <!-- Logout Button -->
+          <a
+            href="/api/auth/logout"
+            title="Sign Out"
+            class="p-2 text-slate-400 hover:text-rose-400 bg-cyber-900 hover:bg-rose-500/10 border border-cyber-700/80 hover:border-rose-500/30 rounded-xl transition-all"
+          >
+            <LogOut class="w-4 h-4" />
+          </a>
+        </div>
+      ) : (
+        <a
+          href="/login"
+          class="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-cyber-800 hover:bg-cyber-700 text-slate-200 font-semibold text-xs rounded-xl border border-cyber-700 transition-all"
+        >
+          Sign In
+        </a>
+      )}
     </div>
   </div>
 </header>

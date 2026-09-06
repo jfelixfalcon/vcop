@@ -1,7 +1,8 @@
 import type { APIRoute } from 'astro';
 import { getVirtualCluster, getKubeconfig, generateMockKubeconfig } from '../../../../lib/k8s-client';
+import { canUserViewCluster } from '../../../../lib/auth';
 
-export const GET: APIRoute = async ({ params, url }) => {
+export const GET: APIRoute = async ({ params, url, locals }) => {
   const { name } = params;
   if (!name) {
     return new Response(JSON.stringify({ success: false, error: 'Cluster name required' }), {
@@ -16,6 +17,17 @@ export const GET: APIRoute = async ({ params, url }) => {
       status: 404,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  const user = locals.user;
+  if (user && !canUserViewCluster(user, cluster)) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Forbidden: You do not have permission to access kubeconfig for this cluster.' }),
+      {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
   }
 
   const realKubeconfig = await getKubeconfig(name);

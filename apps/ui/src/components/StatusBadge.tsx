@@ -43,6 +43,13 @@ export const StatusBadge: React.FC<Props> = ({ phase, className = '' }) => {
           Draining
         </span>
       );
+    case 'Sleeping':
+      return (
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 ${className}`}>
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+          Sleeping
+        </span>
+      );
     case 'Pending':
     default:
       return (

@@ -46,6 +46,9 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 	if replicas == 0 {
 		replicas = 3
 	}
+	if vc.IsSleeping() {
+		replicas = 0
+	}
 
 	labels := map[string]string{
 		"app.kubernetes.io/name":       "vcluster-etcd",
@@ -127,8 +130,12 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 		storageQuantity = resource.MustParse("10Gi")
 	}
 
-	initialCluster := make([]string, replicas)
-	for i := int32(0); i < replicas; i++ {
+	clusterMembers := preset.EtcdReplicas
+	if clusterMembers == 0 {
+		clusterMembers = 3
+	}
+	initialCluster := make([]string, clusterMembers)
+	for i := int32(0); i < clusterMembers; i++ {
 		memberPod := fmt.Sprintf("%s-etcd-%d", vc.Name, i)
 		initialCluster[i] = fmt.Sprintf("%s=https://%s.%s.%s:2380", memberPod, memberPod, headlessSvc.Name, vc.Namespace)
 	}
@@ -315,6 +322,10 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 		if err := r.Update(ctx, existingSts); err != nil && !errors.IsConflict(err) {
 			return false, fmt.Errorf("failed updating etcd statefulset: %w", err)
 		}
+	}
+
+	if replicas == 0 {
+		return false, nil
 	}
 
 	quorumThreshold := (replicas / 2) + 1

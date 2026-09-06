@@ -129,7 +129,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 		role.Rules = []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{""},
-				Resources: []string{"configmaps", "secrets", "services", "pods", "pods/attach", "pods/portforward", "pods/exec", "persistentvolumeclaims"},
+				Resources: []string{"configmaps", "secrets", "services", "pods", "pods/attach", "pods/portforward", "pods/exec", "persistentvolumeclaims", "resourcequotas", "limitranges"},
 				Verbs:     []string{"create", "delete", "patch", "update", "get", "list", "watch"},
 			},
 			{
@@ -300,7 +300,9 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 	_ = r.Delete(ctx, legacyDep)
 
 	replicas := int32(1)
-	if vc.Spec.HighAvailability || (preset.DefaultHA && vc.Spec.SizePreset != v1alpha1.PresetSmall) {
+	if vc.IsSleeping() {
+		replicas = 0
+	} else if vc.Spec.HighAvailability || (preset.DefaultHA && vc.Spec.SizePreset != v1alpha1.PresetSmall) {
 		replicas = preset.SyncerReplicas
 		if replicas == 0 {
 			replicas = 3
@@ -618,6 +620,10 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 			_ = r.Delete(ctx, existingSts)
 			return false, endpoint, nil
 		}
+	}
+
+	if replicas == 0 {
+		return false, endpoint, nil
 	}
 
 	quorumThreshold := int32(1)

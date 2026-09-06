@@ -2,7 +2,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { VirtualCluster, SizePreset } from './types';
+import type { VirtualCluster, SizePreset, PoliciesSpec } from './types';
 export { PRESETS } from './presets';
 
 interface K8sConnectionConfig {
@@ -156,7 +156,13 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
         metricsServer: { enabled: true },
       },
       sync: spec.sync || { pods: true, services: true, ingresses: true },
-      lifecycle: spec.lifecycle || { autoSleep: false, ttlHours: 0 },
+      paused: spec.paused ?? spec.lifecycle?.sleep ?? false,
+      lifecycle: {
+        autoSleep: spec.lifecycle?.autoSleep ?? false,
+        ttlHours: spec.lifecycle?.ttlHours ?? 0,
+        sleep: spec.lifecycle?.sleep ?? spec.paused ?? false,
+      },
+      policies: spec.policies,
       customResources: spec.customResources,
       rawConfig: spec.rawConfig,
       helmValues: spec.helmValues,
@@ -175,11 +181,20 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
         cpuPercent: metrics.cpuPercent || (isReady ? 24 : 0),
         memPercent: metrics.memPercent || (isReady ? 32 : 0),
       },
+      quota: status.quota,
       observedGeneration: status.observedGeneration,
       createdAt: item.metadata?.creationTimestamp,
     },
     metadata: {
       owner: item.metadata?.labels?.['vops.gitops.io/owner'] || item.metadata?.annotations?.['vops.gitops.io/owner'] || 'Platform User',
+      allowedGroups: (item.metadata?.annotations?.['vops.gitops.io/allowed-groups'] || '')
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean),
+      allowedEmails: (item.metadata?.annotations?.['vops.gitops.io/allowed-emails'] || '')
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean),
       environment: (item.metadata?.labels?.['vops.gitops.io/environment'] as any) || 'development',
       tags: [spec.sizePreset || 'medium', spec.highAvailability ? 'ha-etcd' : 'single-node'],
     },
@@ -234,12 +249,15 @@ export async function createVirtualCluster(data: {
   clusterName: string;
   preset: SizePreset;
   owner?: string;
+  allowedGroups?: string[];
+  allowedEmails?: string[];
   environment?: 'development' | 'staging' | 'production';
   enableMonitoringAndDNS?: boolean;
   autoSleep?: boolean;
   ttlHours?: number;
   kubernetesVersion?: string;
   vclusterVersion?: string;
+  policies?: PoliciesSpec;
   customYaml?: string;
 }): Promise<VirtualCluster> {
   const name = data.clusterName.trim().toLowerCase();
@@ -256,6 +274,16 @@ export async function createVirtualCluster(data: {
     }).catch(() => {});
   }
 
+  const annotations: Record<string, string> = {
+    'vops.gitops.io/owner': data.owner || 'Platform User',
+  };
+  if (data.allowedGroups && data.allowedGroups.length > 0) {
+    annotations['vops.gitops.io/allowed-groups'] = data.allowedGroups.join(',');
+  }
+  if (data.allowedEmails && data.allowedEmails.length > 0) {
+    annotations['vops.gitops.io/allowed-emails'] = data.allowedEmails.join(',');
+  }
+
   const body: any = {
     apiVersion: 'vops.gitops.io/v1alpha1',
     kind: 'VirtualCluster',
@@ -267,9 +295,7 @@ export async function createVirtualCluster(data: {
         'vops.gitops.io/owner': (data.owner || 'platform-user').replace(/[^a-zA-Z0-9_-]/g, '-'),
         'vops.gitops.io/environment': data.environment || 'development',
       },
-      annotations: {
-        'vops.gitops.io/owner': data.owner || 'Platform User',
-      },
+      annotations,
     },
     spec: {
       clusterName: name,
@@ -286,6 +312,7 @@ export async function createVirtualCluster(data: {
         autoSleep: data.autoSleep ?? false,
         ttlHours: data.ttlHours ?? 0,
       },
+      policies: data.policies,
     },
   };
 
@@ -308,6 +335,73 @@ export async function createVirtualCluster(data: {
   }
 
   throw new Error((res.data as any)?.message || `Failed to create virtual cluster: HTTP ${res.statusCode}`);
+}
+
+export async function updateVirtualClusterPolicies(
+  name: string,
+  policies: PoliciesSpec,
+  namespace?: string
+): Promise<VirtualCluster | null> {
+  let targetNs = namespace;
+  if (!targetNs) {
+    const all = await listVirtualClusters();
+    const match = all.find((c) => c.name === name);
+    targetNs = match ? match.namespace : 'default';
+  }
+
+  const patch: any = {
+    spec: {
+      policies,
+    },
+  };
+
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
+    'PATCH',
+    patch,
+    'application/merge-patch+json'
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to update virtual cluster policies: HTTP ${res.statusCode}`);
+}
+
+export async function setVirtualClusterSleep(
+  name: string,
+  sleep: boolean,
+  namespace?: string
+): Promise<VirtualCluster | null> {
+  let targetNs = namespace;
+  if (!targetNs) {
+    const all = await listVirtualClusters();
+    const match = all.find((c) => c.name === name);
+    targetNs = match ? match.namespace : 'default';
+  }
+
+  const patch = {
+    spec: {
+      paused: sleep,
+      lifecycle: {
+        sleep,
+      },
+    },
+  };
+
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
+    'PATCH',
+    patch,
+    'application/merge-patch+json'
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to set sleep state: HTTP ${res.statusCode}`);
 }
 
 export async function upgradeVirtualCluster(

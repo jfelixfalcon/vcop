@@ -6,7 +6,8 @@ export type ClusterPhase =
   | 'Ready'
   | 'Upgrading'
   | 'Degraded'
-  | 'Terminating';
+  | 'Terminating'
+  | 'Sleeping';
 
 export interface ClusterCondition {
   type: string;
@@ -23,6 +24,46 @@ export interface ClusterMetrics {
   cpuUsage: string;
   cpuPercent?: number;
   memPercent?: number;
+}
+
+export interface ResourceQuotaPolicy {
+  enabled: boolean;
+  requestsCPU?: string;
+  requestsMemory?: string;
+  requestsStorage?: string;
+  limitsCPU?: string;
+  limitsMemory?: string;
+  pods?: string;
+  services?: string;
+  servicesNodePorts?: string;
+  servicesLoadBalancers?: string;
+  configMaps?: string;
+  secrets?: string;
+  persistentVolumeClaims?: string;
+}
+
+export interface LimitRangePolicy {
+  enabled: boolean;
+  defaultCPU?: string;
+  defaultMemory?: string;
+  defaultRequestCPU?: string;
+  defaultRequestMemory?: string;
+  maxCPU?: string;
+  maxMemory?: string;
+  minCPU?: string;
+  minMemory?: string;
+}
+
+export interface PoliciesSpec {
+  resourceQuota?: ResourceQuotaPolicy;
+  limitRange?: LimitRangePolicy;
+  autoSleep?: boolean;
+  ttlHours?: number;
+}
+
+export interface QuotaStatus {
+  hard?: Record<string, string>;
+  used?: Record<string, string>;
 }
 
 export interface VirtualCluster {
@@ -43,10 +84,13 @@ export interface VirtualCluster {
       services: boolean;
       ingresses: boolean;
     };
+    paused?: boolean;
     lifecycle: {
       autoSleep: boolean;
       ttlHours: number;
+      sleep?: boolean;
     };
+    policies?: PoliciesSpec;
     customResources?: {
       cpu?: string;
       memory?: string;
@@ -62,11 +106,14 @@ export interface VirtualCluster {
     vclusterVersion: string;
     endpoint: string;
     metrics: ClusterMetrics;
+    quota?: QuotaStatus;
     observedGeneration?: number;
     createdAt?: string;
   };
   metadata?: {
     owner?: string;
+    allowedGroups?: string[];
+    allowedEmails?: string[];
     environment?: 'development' | 'staging' | 'production';
     tags?: string[];
   };
@@ -76,6 +123,8 @@ export interface VirtualCluster {
   };
   compiledConfig?: string;
 }
+
+export type { UserRole, UserSession } from './auth';
 
 export interface PresetDetails {
   id: SizePreset;

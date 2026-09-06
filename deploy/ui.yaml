@@ -27,6 +27,21 @@ spec:
               value: "4321"
             - name: NODE_ENV
               value: "production"
+            - name: ADMIN_USERNAME
+              value: "admin"
+            - name: ADMIN_PASSWORD
+              value: "vcop-breakglass-admin"
+            # Optional OIDC SSO Configuration:
+            # - name: OIDC_ENABLED
+            #   value: "true"
+            # - name: OIDC_ISSUER_URL
+            #   value: "https://auth.company.com/realms/corp"
+            # - name: OIDC_CLIENT_ID
+            #   value: "vcop-ui"
+            # - name: OIDC_CLIENT_SECRET
+            #   value: "..."
+            # - name: OIDC_ADMIN_GROUPS
+            #   value: "admins,vcluster-admins"
           ports:
             - name: http
               containerPort: 4321

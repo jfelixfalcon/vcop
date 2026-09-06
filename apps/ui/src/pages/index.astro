@@ -1,6 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import { FleetDashboard } from '../components/FleetDashboard';
+const user = Astro.locals.user;
 ---
 
 <Layout title="Fleet Overview - vCluster Operations Center">
@@ -18,6 +19,6 @@ import { FleetDashboard } from '../components/FleetDashboard';
     </div>
 
     <!-- Fleet Dashboard React Island -->
-    <FleetDashboard client:load />
+    <FleetDashboard client:load currentUser={user} />
   </div>
 </Layout>

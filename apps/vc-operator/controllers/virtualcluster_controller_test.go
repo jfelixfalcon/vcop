@@ -205,3 +205,165 @@ func TestVirtualClusterReconciler_NonHA(t *testing.T) {
 		t.Errorf("Expected no etcd sts for non-HA, but found one")
 	}
 }
+
+func TestVirtualClusterReconciler_SleepAndWake(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-sleep-cluster",
+			Namespace: "default",
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName:       "test-sleep-cluster",
+			KubernetesVersion: "v1.31.0",
+			VClusterVersion:   "0.36.0",
+			SizePreset:        v1alpha1.PresetMedium,
+			HighAvailability:  true,
+			Paused:            false,
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc).
+		WithStatusSubresource(vc).
+		Build()
+
+	logger := zap.New(zap.UseDevMode(true))
+
+	reconciler := &VirtualClusterReconciler{
+		Client:               client,
+		Log:                  logger,
+		Scheme:               scheme,
+		EtcdReconciler:       NewEtcdReconciler(client),
+		SyncerReconciler:     NewSyncerReconciler(client),
+		KubeconfigReconciler: NewKubeconfigReconciler(client),
+		AddonsReconciler:     NewAddonsReconciler(client),
+		UpgradeManager:       NewUpgradeManager(client),
+		QuotaReconciler:      NewQuotaReconciler(client),
+	}
+
+	ctx := context.Background()
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      vc.Name,
+			Namespace: vc.Namespace,
+		},
+	}
+
+	// 1. Initial creation
+	_, _ = reconciler.Reconcile(ctx, req)
+	_, _ = reconciler.Reconcile(ctx, req)
+
+	// Verify syncer replicas is 3
+	syncerSts := &appsv1.StatefulSet{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-sleep-cluster", Namespace: "default"}, syncerSts); err != nil {
+		t.Fatalf("Failed to fetch syncer sts: %v", err)
+	}
+	if syncerSts.Spec.Replicas == nil || *syncerSts.Spec.Replicas != 3 {
+		t.Fatalf("Expected 3 replicas initially for HA syncer, got %v", syncerSts.Spec.Replicas)
+	}
+
+	// Verify etcd replicas is 3
+	etcdSts := &appsv1.StatefulSet{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-sleep-cluster-etcd", Namespace: "default"}, etcdSts); err != nil {
+		t.Fatalf("Failed to fetch etcd sts: %v", err)
+	}
+	if etcdSts.Spec.Replicas == nil || *etcdSts.Spec.Replicas != 3 {
+		t.Fatalf("Expected 3 replicas initially for HA etcd, got %v", etcdSts.Spec.Replicas)
+	}
+
+	// Add a synced host pod to verify it gets cleaned up during sleep
+	syncedPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nginx-test-pod",
+			Namespace: "default",
+			Labels: map[string]string{
+				"vcluster.loft.sh/managed-by": vc.Name,
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "nginx", Image: "nginx:alpine"},
+			},
+		},
+	}
+	if err := client.Create(ctx, syncedPod); err != nil {
+		t.Fatalf("Failed creating test synced pod: %v", err)
+	}
+
+	// 2. Put to Sleep
+	_ = client.Get(ctx, req.NamespacedName, vc)
+	vc.Spec.Paused = true
+	_ = client.Update(ctx, vc)
+
+	_, err := reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile while sleeping failed: %v", err)
+	}
+
+	// Verify syncer StatefulSet scaled to 0
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-sleep-cluster", Namespace: "default"}, syncerSts); err != nil {
+		t.Fatalf("Failed to fetch syncer sts after sleep: %v", err)
+	}
+	if syncerSts.Spec.Replicas == nil || *syncerSts.Spec.Replicas != 0 {
+		t.Fatalf("Expected 0 replicas when sleeping for syncer, got %v", syncerSts.Spec.Replicas)
+	}
+
+	// Verify etcd StatefulSet scaled to 0
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-sleep-cluster-etcd", Namespace: "default"}, etcdSts); err != nil {
+		t.Fatalf("Failed to fetch etcd sts after sleep: %v", err)
+	}
+	if etcdSts.Spec.Replicas == nil || *etcdSts.Spec.Replicas != 0 {
+		t.Fatalf("Expected 0 replicas when sleeping for etcd, got %v", etcdSts.Spec.Replicas)
+	}
+
+	// Verify synced host pod was deleted
+	err = client.Get(ctx, types.NamespacedName{Name: "nginx-test-pod", Namespace: "default"}, syncedPod)
+	if err == nil {
+		t.Errorf("Expected synced pod to be deleted during sleep, but it was found")
+	}
+
+	// Verify status phase is Sleeping
+	_ = client.Get(ctx, req.NamespacedName, vc)
+	if vc.Status.Phase != v1alpha1.PhaseSleeping {
+		t.Errorf("Expected PhaseSleeping, got %v", vc.Status.Phase)
+	}
+
+	// 3. Wake Up
+	vc.Spec.Paused = false
+	_ = client.Update(ctx, vc)
+
+	_, err = reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile while waking up failed: %v", err)
+	}
+
+	// Verify etcd StatefulSet scaled back to 3
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-sleep-cluster-etcd", Namespace: "default"}, etcdSts); err != nil {
+		t.Fatalf("Failed to fetch etcd sts after wake: %v", err)
+	}
+	if etcdSts.Spec.Replicas == nil || *etcdSts.Spec.Replicas != 3 {
+		t.Errorf("Expected 3 replicas for etcd after waking up, got %v", etcdSts.Spec.Replicas)
+	}
+
+	// Simulate etcd ready replicas for syncer rollout in fake client
+	etcdSts.Status.ReadyReplicas = 3
+	_ = client.Status().Update(ctx, etcdSts)
+
+	_, err = reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile after etcd ready failed: %v", err)
+	}
+
+	// Verify syncer StatefulSet scaled back to 3
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-sleep-cluster", Namespace: "default"}, syncerSts); err != nil {
+		t.Fatalf("Failed to fetch syncer sts after wake: %v", err)
+	}
+	if syncerSts.Spec.Replicas == nil || *syncerSts.Spec.Replicas != 3 {
+		t.Errorf("Expected 3 replicas for syncer after waking up, got %v", syncerSts.Spec.Replicas)
+	}
+}

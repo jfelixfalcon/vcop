@@ -49,6 +49,8 @@ rules:
       - pods
       - namespaces
       - serviceaccounts
+      - resourcequotas
+      - limitranges
     verbs:
       - create
       - delete

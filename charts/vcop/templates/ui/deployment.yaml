@@ -28,6 +28,38 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- if .Values.ui.auth }}
+            {{- if .Values.ui.auth.sessionSecret }}
+            - name: SESSION_SECRET
+              value: {{ .Values.ui.auth.sessionSecret | quote }}
+            {{- end }}
+            {{- if .Values.ui.auth.breakglass }}
+            - name: ADMIN_USERNAME
+              value: {{ default "admin" .Values.ui.auth.breakglass.adminUsername | quote }}
+            - name: ADMIN_PASSWORD
+              value: {{ default "vcop-breakglass-admin" .Values.ui.auth.breakglass.adminPassword | quote }}
+            {{- end }}
+            {{- if and .Values.ui.auth.oidc .Values.ui.auth.oidc.enabled }}
+            - name: OIDC_ENABLED
+              value: "true"
+            - name: OIDC_ISSUER_URL
+              value: {{ .Values.ui.auth.oidc.issuerUrl | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .Values.ui.auth.oidc.clientId | quote }}
+            - name: OIDC_CLIENT_SECRET
+              value: {{ .Values.ui.auth.oidc.clientSecret | quote }}
+            - name: OIDC_REDIRECT_URI
+              value: {{ default "" .Values.ui.auth.oidc.redirectUri | quote }}
+            - name: OIDC_SCOPES
+              value: {{ default "openid email profile groups" .Values.ui.auth.oidc.scopes | quote }}
+            - name: OIDC_PROVIDER_NAME
+              value: {{ default "Single Sign-On (OIDC)" .Values.ui.auth.oidc.providerName | quote }}
+            - name: OIDC_ADMIN_GROUPS
+              value: {{ default "admins,vcluster-admins,platform-ops" .Values.ui.auth.oidc.adminGroups | quote }}
+            - name: OIDC_ADMIN_EMAILS
+              value: {{ default "admin@vops.local" .Values.ui.auth.oidc.adminEmails | quote }}
+            {{- end }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 4321

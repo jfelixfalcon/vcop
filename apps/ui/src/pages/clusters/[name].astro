@@ -7,8 +7,9 @@ const { name } = Astro.params;
 if (!name) {
   return Astro.redirect('/');
 }
+const user = Astro.locals.user;
 ---
 
 <Layout title={`${name} - Virtual Cluster Operations Center`}>
-  <ClusterDetail clusterName={name} client:load />
+  <ClusterDetail clusterName={name} currentUser={user} client:load />
 </Layout>

@@ -18,7 +18,7 @@ const (
 )
 
 // ClusterPhase defines the state lifecycle of the virtual cluster
-// +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Upgrading;Degraded;Terminating
+// +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Upgrading;Degraded;Terminating;Sleeping
 type ClusterPhase string
 
 const (
@@ -28,6 +28,7 @@ const (
 	PhaseUpgrading    ClusterPhase = "Upgrading"
 	PhaseDegraded     ClusterPhase = "Degraded"
 	PhaseTerminating  ClusterPhase = "Terminating"
+	PhaseSleeping     ClusterPhase = "Sleeping"
 )
 
 // Condition types for VirtualCluster
@@ -36,6 +37,8 @@ const (
 	ConditionControlPlaneReady   = "ControlPlaneReady"
 	ConditionAddonsReady         = "AddonsReady"
 	ConditionKubeconfigGenerated = "KubeconfigGenerated"
+	ConditionQuotaReady          = "QuotaReady"
+	ConditionSleeping            = "Sleeping"
 )
 
 // CoreDNSComponent configures CoreDNS add-on inside vCluster
@@ -83,6 +86,11 @@ type LifecyclePolicy struct {
 	// +optional
 	AutoSleep bool `json:"autoSleep,omitempty"`
 
+	// Sleep explicitly puts the virtual cluster into sleep mode
+	// +kubebuilder:default=false
+	// +optional
+	Sleep bool `json:"sleep,omitempty"`
+
 	// TTLHours defines automated deletion TTL in hours (0 = disabled)
 	// +kubebuilder:default=0
 	// +optional
@@ -102,6 +110,115 @@ type CustomResources struct {
 	// Storage size for backing etcd (e.g. "10Gi", "50Gi")
 	// +optional
 	Storage string `json:"storage,omitempty"`
+}
+
+// ResourceQuotaPolicy defines limits and requests ceiling for tenant workloads
+type ResourceQuotaPolicy struct {
+	// +kubebuilder:default=true
+	Enabled bool `json:"enabled"`
+
+	// RequestsCPU sets total CPU requests quota (e.g. "2", "4000m")
+	// +optional
+	RequestsCPU string `json:"requestsCPU,omitempty"`
+
+	// RequestsMemory sets total memory requests quota (e.g. "4Gi", "8Gi")
+	// +optional
+	RequestsMemory string `json:"requestsMemory,omitempty"`
+
+	// RequestsStorage sets total storage requests quota (e.g. "20Gi", "100Gi")
+	// +optional
+	RequestsStorage string `json:"requestsStorage,omitempty"`
+
+	// LimitsCPU sets total CPU limits quota (e.g. "4", "8000m")
+	// +optional
+	LimitsCPU string `json:"limitsCPU,omitempty"`
+
+	// LimitsMemory sets total memory limits quota (e.g. "8Gi", "16Gi")
+	// +optional
+	LimitsMemory string `json:"limitsMemory,omitempty"`
+
+	// Pods sets maximum allowed pod count (e.g. "20")
+	// +optional
+	Pods string `json:"pods,omitempty"`
+
+	// Services sets maximum allowed services count (e.g. "20")
+	// +optional
+	Services string `json:"services,omitempty"`
+
+	// ServicesNodePorts sets maximum allowed NodePort services (e.g. "0")
+	// +optional
+	ServicesNodePorts string `json:"servicesNodePorts,omitempty"`
+
+	// ServicesLoadBalancers sets maximum allowed LoadBalancer services (e.g. "2")
+	// +optional
+	ServicesLoadBalancers string `json:"servicesLoadBalancers,omitempty"`
+
+	// ConfigMaps sets maximum allowed ConfigMaps (e.g. "50")
+	// +optional
+	ConfigMaps string `json:"configMaps,omitempty"`
+
+	// Secrets sets maximum allowed Secrets (e.g. "50")
+	// +optional
+	Secrets string `json:"secrets,omitempty"`
+
+	// PersistentVolumeClaims sets maximum allowed PVCs (e.g. "10")
+	// +optional
+	PersistentVolumeClaims string `json:"persistentVolumeClaims,omitempty"`
+}
+
+// LimitRangePolicy defines container-level default and boundary guardrails
+type LimitRangePolicy struct {
+	// +kubebuilder:default=true
+	Enabled bool `json:"enabled"`
+
+	// DefaultCPU sets default container CPU limit (e.g. "1", "500m")
+	// +optional
+	DefaultCPU string `json:"defaultCPU,omitempty"`
+
+	// DefaultMemory sets default container memory limit (e.g. "512Mi", "1Gi")
+	// +optional
+	DefaultMemory string `json:"defaultMemory,omitempty"`
+
+	// DefaultRequestCPU sets default container CPU request (e.g. "100m")
+	// +optional
+	DefaultRequestCPU string `json:"defaultRequestCPU,omitempty"`
+
+	// DefaultRequestMemory sets default container memory request (e.g. "128Mi")
+	// +optional
+	DefaultRequestMemory string `json:"defaultRequestMemory,omitempty"`
+
+	// MaxCPU sets maximum allowed container CPU limit (e.g. "4")
+	// +optional
+	MaxCPU string `json:"maxCPU,omitempty"`
+
+	// MaxMemory sets maximum allowed container memory limit (e.g. "8Gi")
+	// +optional
+	MaxMemory string `json:"maxMemory,omitempty"`
+
+	// MinCPU sets minimum required container CPU request (e.g. "10m")
+	// +optional
+	MinCPU string `json:"minCPU,omitempty"`
+
+	// MinMemory sets minimum required container memory request (e.g. "32Mi")
+	// +optional
+	MinMemory string `json:"minMemory,omitempty"`
+}
+
+// PoliciesSpec defines governance policies including resource quotas and limits
+type PoliciesSpec struct {
+	// ResourceQuota governs aggregate resource consumption for the virtual cluster
+	// +optional
+	ResourceQuota *ResourceQuotaPolicy `json:"resourceQuota,omitempty"`
+
+	// LimitRange governs per-container resource defaults and limits
+	// +optional
+	LimitRange *LimitRangePolicy `json:"limitRange,omitempty"`
+}
+
+// QuotaStatus tracks observed hard limits and current resource usage
+type QuotaStatus struct {
+	Hard map[string]string `json:"hard,omitempty"`
+	Used map[string]string `json:"used,omitempty"`
 }
 
 // VirtualClusterSpec defines the desired state of VirtualCluster
@@ -137,6 +254,11 @@ type VirtualClusterSpec struct {
 	// +optional
 	HighAvailability bool `json:"highAvailability,omitempty"`
 
+	// Paused explicitly puts the virtual cluster to sleep, scaling down control plane workloads
+	// +kubebuilder:default=false
+	// +optional
+	Paused bool `json:"paused,omitempty"`
+
 	// Components controls internal add-ons (CoreDNS, Metrics Server)
 	// +optional
 	Components ComponentsSpec `json:"components,omitempty"`
@@ -148,6 +270,10 @@ type VirtualClusterSpec struct {
 	// Lifecycle configures idle sleep and TTL cleanup
 	// +optional
 	Lifecycle LifecyclePolicy `json:"lifecycle,omitempty"`
+
+	// Policies controls governance policies (ResourceQuota, LimitRange)
+	// +optional
+	Policies *PoliciesSpec `json:"policies,omitempty"`
 
 	// RawConfig provides direct passthrough overrides into the vCluster 0.36 vcluster.yaml schema
 	// +optional
@@ -208,6 +334,10 @@ type VirtualClusterStatus struct {
 	// +optional
 	Metrics ClusterMetrics `json:"metrics,omitempty"`
 
+	// Quota reflects active resource quota allocations and usage
+	// +optional
+	Quota *QuotaStatus `json:"quota,omitempty"`
+
 	// ObservedGeneration is the most recent generation observed by the controller
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -230,6 +360,11 @@ type VirtualCluster struct {
 
 	Spec   VirtualClusterSpec   `json:"spec,omitempty"`
 	Status VirtualClusterStatus `json:"status,omitempty"`
+}
+
+// IsSleeping returns true if the virtual cluster is paused or in sleep mode
+func (vc *VirtualCluster) IsSleeping() bool {
+	return vc.Spec.Paused || vc.Spec.Lifecycle.Sleep
 }
 
 // +kubebuilder:object:root=true

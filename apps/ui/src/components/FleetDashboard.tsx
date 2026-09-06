@@ -12,15 +12,24 @@ import {
   Shield,
   RefreshCw,
   CheckCircle2,
+  Moon,
+  Sun,
+  Lock,
 } from 'lucide-react';
-import type { VirtualCluster, ClusterPhase } from '../lib/types';
+import type { VirtualCluster, ClusterPhase, UserSession } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
 import { MetricSparkline } from './MetricSparkline';
 import { KubeconfigModal } from './KubeconfigModal';
 import { UpgradeModal } from './UpgradeModal';
 import { DeleteModal } from './DeleteModal';
+import { SleepModal } from './SleepModal';
 
-export const FleetDashboard: React.FC = () => {
+interface FleetDashboardProps {
+  currentUser?: UserSession | null;
+}
+
+export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) => {
+  const [user, setUser] = useState<UserSession | null>(currentUser || null);
   const [clusters, setClusters] = useState<VirtualCluster[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -30,7 +39,7 @@ export const FleetDashboard: React.FC = () => {
 
   // Modal states
   const [selectedCluster, setSelectedCluster] = useState<VirtualCluster | null>(null);
-  const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | null>(null);
+  const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'sleep' | null>(null);
 
   const fetchClusters = async () => {
     try {
@@ -47,10 +56,22 @@ export const FleetDashboard: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!user) {
+      fetch('/api/auth/me')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.authenticated && data.user) {
+            setUser(data.user);
+          }
+        })
+        .catch(() => {});
+    }
     fetchClusters();
     const interval = setInterval(fetchClusters, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  const isAdmin = !user || user.role === 'admin';
 
   const filteredClusters = clusters.filter((c) => {
     const matchesSearch =
@@ -61,6 +82,7 @@ export const FleetDashboard: React.FC = () => {
     const matchesStatus =
       statusFilter === 'all' ||
       (statusFilter === 'active' && c.status.phase === 'Ready') ||
+      (statusFilter === 'sleeping' && c.status.phase === 'Sleeping') ||
       (statusFilter === 'syncing' && c.status.phase === 'Provisioning') ||
       (statusFilter === 'upgrading' && c.status.phase === 'Upgrading') ||
       (statusFilter === 'degraded' && c.status.phase === 'Degraded');
@@ -74,6 +96,7 @@ export const FleetDashboard: React.FC = () => {
   // Calculate fleet stats
   const totalClusters = clusters.length;
   const readyClusters = clusters.filter((c) => c.status.phase === 'Ready').length;
+  const sleepingClusters = clusters.filter((c) => c.status.phase === 'Sleeping').length;
   const upgradingClusters = clusters.filter((c) => c.status.phase === 'Upgrading').length;
   const totalPods = clusters.reduce((acc, c) => acc + (c.status.metrics?.podCount || 0), 0);
 
@@ -94,6 +117,12 @@ export const FleetDashboard: React.FC = () => {
           </div>
           <div className="mt-3 flex items-center gap-2 text-xs font-mono">
             <span className="text-emerald-400 font-semibold">{readyClusters} Active</span>
+            {sleepingClusters > 0 && (
+              <>
+                <span className="text-slate-600">•</span>
+                <span className="text-indigo-400 font-semibold">{sleepingClusters} Sleeping</span>
+              </>
+            )}
             <span className="text-slate-600">•</span>
             <span className="text-purple-400 font-semibold">{upgradingClusters} Upgrading</span>
           </div>
@@ -151,6 +180,28 @@ export const FleetDashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* Viewer Access Mode Alert Banner */}
+      {!isAdmin && user && (
+        <div className="bg-cyan-950/30 border border-cyan-500/30 rounded-2xl p-4 flex items-center justify-between gap-3 text-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-cyan-500/20 text-cyan-400 rounded-xl shrink-0">
+              <Shield className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-white flex items-center gap-2">
+                Viewer Access Mode
+                <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800 uppercase font-semibold">
+                  Read-Only
+                </span>
+              </h4>
+              <p className="text-slate-300 mt-0.5">
+                Signed in as <strong className="text-white">{user.email || user.username}</strong>. Showing only virtual clusters assigned to you or your groups. You have full access to view clusters and download kubeconfig. Modifications require administrator privileges.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Control Toolbar */}
       <div className="flex flex-col md:flex-row gap-3 items-center justify-between bg-cyber-900/70 border border-cyber-700/60 rounded-2xl p-3 backdrop-blur-sm">
         {/* Search */}
@@ -170,6 +221,7 @@ export const FleetDashboard: React.FC = () => {
           {[
             { id: 'all', label: 'All' },
             { id: 'active', label: 'Active' },
+            { id: 'sleeping', label: 'Sleeping' },
             { id: 'syncing', label: 'Syncing' },
             { id: 'upgrading', label: 'Upgrading' },
             { id: 'degraded', label: 'Degraded' },
@@ -188,14 +240,16 @@ export const FleetDashboard: React.FC = () => {
           ))}
         </div>
 
-        {/* Action button */}
-        <a
-          href="/new"
-          className="w-full md:w-auto px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm flex items-center justify-center gap-1.5 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          Provision Virtual Cluster
-        </a>
+        {/* Action button (Admins only) */}
+        {isAdmin && (
+          <a
+            href="/new"
+            className="w-full md:w-auto px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm flex items-center justify-center gap-1.5 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            Provision Virtual Cluster
+          </a>
+        )}
       </div>
 
       {/* Cluster Fleet Grid */}
@@ -209,15 +263,23 @@ export const FleetDashboard: React.FC = () => {
           <Server className="w-10 h-10 text-slate-600 mx-auto mb-3" />
           <h4 className="text-base font-medium text-slate-300">No matching virtual clusters</h4>
           <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-            No virtual clusters match your current filter criteria or none have been provisioned yet.
+            {isAdmin
+              ? 'No virtual clusters match your current filter criteria or none have been provisioned yet.'
+              : 'No virtual clusters have been assigned to your account or groups.'}
           </p>
-          <a
-            href="/new"
-            className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-cyber-800 hover:bg-cyber-700 text-slate-200 text-xs rounded-xl border border-cyber-700 transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Create First Cluster
-          </a>
+          {isAdmin ? (
+            <a
+              href="/new"
+              className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-cyber-800 hover:bg-cyber-700 text-slate-200 text-xs rounded-xl border border-cyber-700 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Create First Cluster
+            </a>
+          ) : (
+            <p className="mt-3 text-xs text-slate-400 font-mono">
+              Contact your platform administrator to request access or cluster provisioning.
+            </p>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -317,17 +379,51 @@ export const FleetDashboard: React.FC = () => {
                       Connect
                     </button>
 
-                    <button
-                      onClick={() => {
-                        setSelectedCluster(cluster);
-                        setActiveModal('upgrade');
-                      }}
-                      className="px-2.5 py-1.5 bg-cyber-800 hover:bg-cyber-700 text-purple-300 text-xs font-medium rounded-lg border border-cyber-700 flex items-center gap-1.5 transition-colors"
-                      title="Upgrade Kubernetes or vCluster Engine"
-                    >
-                      <ArrowUpCircle className="w-3.5 h-3.5" />
-                      Upgrade
-                    </button>
+                    {isAdmin ? (
+                      <>
+                        <button
+                          onClick={() => {
+                            setSelectedCluster(cluster);
+                            setActiveModal('upgrade');
+                          }}
+                          className="px-2.5 py-1.5 bg-cyber-800 hover:bg-cyber-700 text-purple-300 text-xs font-medium rounded-lg border border-cyber-700 flex items-center gap-1.5 transition-colors"
+                          title="Upgrade Kubernetes or vCluster Engine"
+                        >
+                          <ArrowUpCircle className="w-3.5 h-3.5" />
+                          Upgrade
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setSelectedCluster(cluster);
+                            setActiveModal('sleep');
+                          }}
+                          className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-colors ${
+                            cluster.status.phase === 'Sleeping'
+                              ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
+                              : 'bg-cyber-800 hover:bg-cyber-750 text-indigo-300 border-cyber-700'
+                          }`}
+                          title={cluster.status.phase === 'Sleeping' ? 'Wake up virtual cluster' : 'Put virtual cluster to sleep'}
+                        >
+                          {cluster.status.phase === 'Sleeping' ? (
+                            <>
+                              <Sun className="w-3.5 h-3.5 text-amber-400" />
+                              Wake
+                            </>
+                          ) : (
+                            <>
+                              <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                              Sleep
+                            </>
+                          )}
+                        </button>
+                      </>
+                    ) : (
+                      <span className="px-2 py-1 text-[10px] font-mono text-slate-400 bg-cyber-950 rounded-lg border border-cyber-800 flex items-center gap-1">
+                        <Lock className="w-3 h-3 text-cyan-400" />
+                        <span>Read Only</span>
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1">
@@ -338,16 +434,18 @@ export const FleetDashboard: React.FC = () => {
                     >
                       <ExternalLink className="w-4 h-4" />
                     </a>
-                    <button
-                      onClick={() => {
-                        setSelectedCluster(cluster);
-                        setActiveModal('delete');
-                      }}
-                      className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
-                      title="Teardown Cluster"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => {
+                          setSelectedCluster(cluster);
+                          setActiveModal('delete');
+                        }}
+                        className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
+                        title="Teardown Cluster"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -361,6 +459,15 @@ export const FleetDashboard: React.FC = () => {
         cluster={selectedCluster}
         isOpen={activeModal === 'kubeconfig'}
         onClose={() => setActiveModal(null)}
+      />
+
+      <SleepModal
+        cluster={selectedCluster}
+        isOpen={activeModal === 'sleep'}
+        onClose={() => setActiveModal(null)}
+        onSuccess={(updated) => {
+          setClusters((prev) => prev.map((c) => (c.name === updated.name ? updated : c)));
+        }}
       />
 
       <UpgradeModal
