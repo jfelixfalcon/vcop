@@ -403,10 +403,16 @@ func (r *AddonsReconciler) reconcileCoreDNS(ctx context.Context, vc *v1alpha1.Vi
 	}
 
 	// 6. Deployment
-	// CoreDNS HA: 2 replicas if HA is enabled, otherwise 1 replica
+	// CoreDNS: 3 replicas for HA tier, 1 replica for Normal tier
+	isHA := vc.Spec.HighAvailability
+	if vc.Spec.SizePreset == v1alpha1.PresetNormal {
+		isHA = false
+	} else if vc.Spec.SizePreset == v1alpha1.PresetHA {
+		isHA = true
+	}
 	replicas := int32(1)
-	if vc.Spec.HighAvailability {
-		replicas = 2
+	if isHA {
+		replicas = 3
 	}
 
 	dep := &appsv1.Deployment{

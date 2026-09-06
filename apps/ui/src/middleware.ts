@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   '/api/auth/providers',
   '/api/metrics',
   '/api/health',
+  '/api/presets',
   '/healthz',
 ];
 

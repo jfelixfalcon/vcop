@@ -192,21 +192,28 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 		k8sVersion = "v1.31.0"
 	}
 
-	isHA := spec.HighAvailability || (preset.DefaultHA && spec.SizePreset != v1alpha1.PresetSmall)
+	isHA := spec.HighAvailability
+	if spec.SizePreset == v1alpha1.PresetNormal {
+		isHA = false
+	} else if spec.SizePreset == v1alpha1.PresetHA {
+		isHA = true
+	}
 	replicas := int32(1)
 	if isHA {
 		replicas = preset.SyncerReplicas
 		if replicas == 0 {
 			replicas = 3
 		}
+	} else if preset.SyncerReplicas > 0 {
+		replicas = preset.SyncerReplicas
 	}
 
 	var backingStore BackingStoreConfig
+	etcdReplicas := preset.EtcdReplicas
 	if isHA {
-		etcdReplicas := preset.EtcdReplicas
-		if etcdReplicas == 0 {
-			etcdReplicas = 3
-		}
+		etcdReplicas = 3
+	}
+	if etcdReplicas > 0 {
 		backingStore = BackingStoreConfig{
 			Etcd: &EtcdConfig{
 				Deploy: EtcdDeployConfig{
@@ -373,7 +380,7 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 		}
 	} else if spec.Policies == nil || spec.Policies.ResourceQuota == nil {
 		switch spec.SizePreset {
-		case v1alpha1.PresetSmall:
+		case v1alpha1.PresetNormal, v1alpha1.PresetSmall:
 			quotaMap["requests.cpu"] = "1"
 			quotaMap["requests.memory"] = "2Gi"
 			quotaMap["requests.storage"] = "10Gi"
@@ -382,7 +389,7 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 			quotaMap["count/pods"] = "10"
 			quotaMap["services"] = "10"
 			quotaMap["persistentvolumeclaims"] = "5"
-		case v1alpha1.PresetLarge:
+		case v1alpha1.PresetHA, v1alpha1.PresetLarge:
 			quotaMap["requests.cpu"] = "8"
 			quotaMap["requests.memory"] = "16Gi"
 			quotaMap["requests.storage"] = "50Gi"

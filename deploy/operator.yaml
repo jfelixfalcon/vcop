@@ -1,25 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vc-operator-controller-manager
+  name: vcop-operator
   namespace: vcop-system
   labels:
-    app.kubernetes.io/name: vc-operator
+    app.kubernetes.io/name: vcop-operator
     app.kubernetes.io/component: controller
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: vc-operator
+      app.kubernetes.io/name: vcop-operator
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: vc-operator
+        app.kubernetes.io/name: vcop-operator
     spec:
       serviceAccountName: vc-operator-controller-manager
       containers:
         - name: manager
-          image: vops/vc-operator:v0.36.0
+          image: vops/vc-operator:v0.36.1
           command:
             - /manager
           args:

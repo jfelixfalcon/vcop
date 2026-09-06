@@ -1,4 +1,4 @@
-export type SizePreset = 'small' | 'medium' | 'large' | 'custom';
+export type SizePreset = 'normal' | 'ha' | 'small' | 'medium' | 'large' | 'custom';
 
 export type ClusterPhase =
   | 'Pending'

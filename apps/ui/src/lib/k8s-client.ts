@@ -298,7 +298,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       clusterName: spec.clusterName || name,
       vclusterVersion: spec.vclusterVersion || '',
       kubernetesVersion: spec.kubernetesVersion || '',
-      sizePreset: (spec.sizePreset as SizePreset) || 'medium',
+      sizePreset: (spec.sizePreset as SizePreset) || 'normal',
       highAvailability: spec.highAvailability ?? true,
       components: spec.components || {
         coreDNS: { enabled: true },
@@ -362,7 +362,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
         .map((s: string) => s.trim())
         .filter(Boolean),
       environment: (item.metadata?.labels?.['vops.gitops.io/environment'] as any) || 'development',
-      tags: [spec.sizePreset || 'medium', spec.highAvailability ? 'ha-etcd' : 'single-node'],
+      tags: [spec.sizePreset || 'normal', spec.highAvailability ? 'ha-etcd' : 'single-node'],
       installedApps,
       customEndpoint,
       oidc,
@@ -456,7 +456,7 @@ export async function createVirtualCluster(data: {
       vclusterVer = vclusterVer || '0.36.0';
     }
   }
-  const isHA = data.preset === 'large';
+  const isHA = data.preset === 'ha' || data.preset === 'large' || data.preset === 'medium';
   const namespace = (data as any).namespace || (name === 'team-alpha-dev' ? 'default' : name);
 
   if (namespace !== 'default') {

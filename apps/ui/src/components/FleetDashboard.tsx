@@ -296,53 +296,132 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
       )}
 
       {/* Control Toolbar */}
-      <div className="flex flex-col md:flex-row gap-3 items-center justify-between bg-cyber-900/70 border border-cyber-700/60 rounded-2xl p-3 backdrop-blur-sm">
-        {/* Search */}
-        <div className="relative w-full md:w-72">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search cluster, group, owner..."
-            className="w-full bg-cyber-950/80 border border-cyber-700/70 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyber-accent font-sans transition-colors"
-          />
+      <div className="flex flex-col gap-3 bg-cyber-900/70 border border-cyber-700/60 rounded-2xl p-3.5 backdrop-blur-sm">
+        {/* Main Controls Row */}
+        <div className="flex flex-col xl:flex-row gap-3 xl:items-center justify-between">
+          {/* Left: Search & Group Filter */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            {/* Search */}
+            <div className="relative w-full sm:w-64 md:w-72">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search cluster, group, owner..."
+                className="w-full bg-cyber-950/80 border border-cyber-700/70 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyber-accent font-sans transition-colors"
+              />
+            </div>
+
+            {/* Group Filter Dropdown */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] font-mono text-slate-400 uppercase shrink-0 flex items-center gap-1">
+                <FolderGit2 className="w-3.5 h-3.5 text-cyan-400" />
+                Group:
+              </span>
+              <select
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value)}
+                className="bg-cyber-950/90 border border-cyber-700/80 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyber-accent font-mono transition-colors"
+                title="Filter by Cluster Group"
+              >
+                <option value="all">All Groups ({clusters.length})</option>
+                {availableGroups.map((g) => {
+                  const count = clusters.filter((c) => {
+                    const grps =
+                      c.metadata?.clusterGroups && c.metadata.clusterGroups.length > 0
+                        ? c.metadata.clusterGroups
+                        : c.metadata?.clusterGroup
+                        ? [c.metadata.clusterGroup]
+                        : [];
+                    return grps.includes(g);
+                  }).length;
+                  return (
+                    <option key={g} value={g}>
+                      {g} ({count})
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          </div>
+
+          {/* Right: Actions & View Switcher */}
+          <div className="flex flex-wrap items-center gap-2.5 justify-start sm:justify-end shrink-0">
+            {/* View Mode Toggle */}
+            <div className="flex items-center bg-cyber-950 p-1 rounded-xl border border-cyber-800 shrink-0">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  viewMode === 'grid'
+                    ? 'bg-cyber-800 text-cyber-accent shadow-sm'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+                title="Grid View"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  viewMode === 'table'
+                    ? 'bg-cyber-800 text-cyber-accent shadow-sm'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+                title="Table View"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Manage Groups Modal Trigger (Admin) */}
+            {isAdmin && (
+              <button
+                onClick={() => {
+                  setGroupModalTargetCluster(null);
+                  setIsGroupModalOpen(true);
+                }}
+                className="px-3 py-2 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-sm shrink-0"
+                title="Manage Fleet Cluster Groups"
+              >
+                <FolderGit2 className="w-3.5 h-3.5" />
+                <span>Groups</span>
+                {availableGroups.length > 0 && (
+                  <span className="px-1.5 py-0.2 bg-cyan-500/20 text-cyan-400 rounded-full text-[10px] font-mono font-bold">
+                    {availableGroups.length}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* OIDC Policy Governance (Admin) */}
+            {isAdmin && (
+              <a
+                href="/admin/oidc"
+                className="px-3 py-2 bg-cyber-800 hover:bg-cyber-750 text-purple-300 border border-purple-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-sm shrink-0"
+                title="Global & Group OIDC Policy Governance"
+              >
+                <Lock className="w-3.5 h-3.5 text-purple-400" />
+                <span>OIDC Policy</span>
+              </a>
+            )}
+
+            {/* Action button (Admins only) */}
+            {isAdmin && (
+              <a
+                href="/new"
+                className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm flex items-center justify-center gap-1.5 transition-all shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                Provision Virtual Cluster
+              </a>
+            )}
+          </div>
         </div>
 
-        {/* Group Filter Dropdown */}
-        <div className="flex items-center gap-1.5 w-full md:w-auto">
-          <span className="text-[11px] font-mono text-slate-400 uppercase shrink-0 flex items-center gap-1">
-            <FolderGit2 className="w-3.5 h-3.5 text-cyan-400" />
-            Group:
-          </span>
-          <select
-            value={groupFilter}
-            onChange={(e) => setGroupFilter(e.target.value)}
-            className="bg-cyber-950/90 border border-cyber-700/80 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyber-accent font-mono transition-colors"
-            title="Filter by Cluster Group"
-          >
-            <option value="all">All Groups ({clusters.length})</option>
-            {availableGroups.map((g) => {
-              const count = clusters.filter((c) => {
-                const grps =
-                  c.metadata?.clusterGroups && c.metadata.clusterGroups.length > 0
-                    ? c.metadata.clusterGroups
-                    : c.metadata?.clusterGroup
-                    ? [c.metadata.clusterGroup]
-                    : [];
-                return grps.includes(g);
-              }).length;
-              return (
-                <option key={g} value={g}>
-                  {g} ({count})
-                </option>
-              );
-            })}
-          </select>
-        </div>
-
-        {/* Status Filter Chips */}
-        <div className="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
+        {/* Status Filter Chips Row */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-cyber-800/60">
+          <span className="text-[11px] font-mono text-slate-400 uppercase mr-1">Status:</span>
           {[
             { id: 'all', label: 'All' },
             { id: 'active', label: 'Active' },
@@ -363,77 +442,6 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
               {item.label}
             </button>
           ))}
-        </div>
-
-        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-          {/* View Mode Toggle */}
-          <div className="flex items-center bg-cyber-950 p-1 rounded-xl border border-cyber-800 shrink-0">
-            <button
-              onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-lg transition-colors ${
-                viewMode === 'grid'
-                  ? 'bg-cyber-800 text-cyber-accent shadow-sm'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-              title="Grid View"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setViewMode('table')}
-              className={`p-1.5 rounded-lg transition-colors ${
-                viewMode === 'table'
-                  ? 'bg-cyber-800 text-cyber-accent shadow-sm'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-              title="Table View"
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Manage Groups Modal Trigger (Admin) */}
-          {isAdmin && (
-            <button
-              onClick={() => {
-                setGroupModalTargetCluster(null);
-                setIsGroupModalOpen(true);
-              }}
-              className="px-3 py-2 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-sm shrink-0"
-              title="Manage Fleet Cluster Groups"
-            >
-              <FolderGit2 className="w-3.5 h-3.5" />
-              <span>Groups</span>
-              {availableGroups.length > 0 && (
-                <span className="px-1.5 py-0.2 bg-cyan-500/20 text-cyan-400 rounded-full text-[10px] font-mono font-bold">
-                  {availableGroups.length}
-                </span>
-              )}
-            </button>
-          )}
-
-          {/* OIDC Policy Governance (Admin) */}
-          {isAdmin && (
-            <a
-              href="/admin/oidc"
-              className="px-3 py-2 bg-cyber-800 hover:bg-cyber-750 text-purple-300 border border-purple-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-sm shrink-0"
-              title="Global & Group OIDC Policy Governance"
-            >
-              <Lock className="w-3.5 h-3.5 text-purple-400" />
-              <span>OIDC Policy</span>
-            </a>
-          )}
-
-          {/* Action button (Admins only) */}
-          {isAdmin && (
-            <a
-              href="/new"
-              className="w-full md:w-auto px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm flex items-center justify-center gap-1.5 transition-all shrink-0"
-            >
-              <Plus className="w-4 h-4" />
-              Provision Virtual Cluster
-            </a>
-          )}
         </div>
       </div>
 

@@ -38,7 +38,7 @@ export const ProvisioningWizard: React.FC = () => {
   const [clusterGroup, setClusterGroup] = useState<string>('');
   const [fleetGroups, setFleetGroups] = useState<string[]>([]);
   const [environment, setEnvironment] = useState<'development' | 'staging' | 'production'>('development');
-  const [sizePreset, setSizePreset] = useState<SizePreset>('medium');
+  const [sizePreset, setSizePreset] = useState<SizePreset>('normal');
   const [enableMonitoringAndDNS, setEnableMonitoringAndDNS] = useState<boolean>(true);
   const [autoSleep, setAutoSleep] = useState<boolean>(false);
   const [ttlHours, setTtlHours] = useState<number>(72);
@@ -114,6 +114,7 @@ export const ProvisioningWizard: React.FC = () => {
   const handleSelectPreset = (preset: SizePreset) => {
     setSizePreset(preset);
     switch (preset) {
+      case 'normal':
       case 'small':
         setRequestsCPU('1');
         setLimitsCPU('2');
@@ -128,20 +129,9 @@ export const ProvisioningWizard: React.FC = () => {
         setDefaultCPU('250m');
         setDefaultMemory('256Mi');
         break;
+      case 'ha':
       case 'large':
-        setRequestsCPU('8');
-        setLimitsCPU('16');
-        setRequestsMemory('16Gi');
-        setLimitsMemory('32Gi');
-        setRequestsStorage('50Gi');
-        setPods('50');
-        setServices('50');
-        setPersistentVolumeClaims('25');
-        setDefaultRequestCPU('200m');
-        setDefaultRequestMemory('256Mi');
-        setDefaultCPU('1');
-        setDefaultMemory('1Gi');
-        break;
+      case 'medium':
       default:
         setRequestsCPU('4');
         setLimitsCPU('8');
@@ -159,7 +149,7 @@ export const ProvisioningWizard: React.FC = () => {
     }
   };
 
-  const selectedPresetDetails = PRESETS.find((p) => p.id === sizePreset) || PRESETS[1];
+  const selectedPresetDetails = PRESETS.find((p) => p.id === sizePreset) || PRESETS[0];
 
   const handleNext = () => {
     if (step === 1) {
@@ -262,7 +252,7 @@ export const ProvisioningWizard: React.FC = () => {
         enabled: true
         statefulSet:
           highAvailability:
-            replicas: ${sizePreset === 'small' ? 1 : 3}
+            replicas: ${sizePreset === 'normal' || sizePreset === 'small' ? 1 : 3}
           persistence:
             volumeClaim:
               size: "${selectedPresetDetails.storage.split(' ')[0]}Gi"
@@ -525,7 +515,7 @@ policies:
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {PRESETS.filter((p) => p.id !== 'custom').map((preset) => {
                 const isSelected = sizePreset === preset.id;
                 return (
@@ -569,9 +559,9 @@ policies:
                         <span className="font-semibold">{preset.storage}</span>
                       </div>
                       <div className="flex justify-between text-slate-300">
-                        <span className="text-slate-500">HA Quorum:</span>
-                        <span className={preset.ha ? 'text-emerald-400 font-semibold' : 'text-slate-400'}>
-                          {preset.ha ? '3-Node HA etcd' : 'Single Node'}
+                        <span className="text-slate-500">Topology:</span>
+                        <span className={preset.ha ? 'text-emerald-400 font-semibold' : 'text-slate-300'}>
+                          {preset.ha ? '3x etcd / 3x vcluster / 3x coredns' : '1x etcd / 1x vcluster / 1x coredns'}
                         </span>
                       </div>
                     </div>
@@ -940,25 +930,7 @@ policies:
             </div>
 
             <div className="space-y-4">
-              {/* Addons Box */}
-              <div className="p-4 bg-cyber-950/70 border border-cyber-800 rounded-2xl space-y-3">
-                <label className="flex items-start gap-3 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={enableMonitoringAndDNS}
-                    onChange={(e) => setEnableMonitoringAndDNS(e.target.checked)}
-                    className="mt-1 w-4 h-4 rounded text-cyber-accent bg-cyber-900 border-cyber-700 focus:ring-0 focus:ring-offset-0"
-                  />
-                  <div>
-                    <span className="text-sm font-semibold text-white flex items-center gap-2">
-                      Enable External CoreDNS & External Metrics-Server Add-ons (Recommended)
-                    </span>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Provisions external standalone CoreDNS for cluster service discovery and external standalone Metrics-Server so <code className="text-cyan-400 font-mono">kubectl top</code> and HPAs function automatically without proprietary/embedded features.
-                    </p>
-                  </div>
-                </label>
-              </div>
+
 
               {/* Auto Sleep Policy */}
               <div className="p-4 bg-cyber-950/70 border border-cyber-800 rounded-2xl space-y-3">

@@ -30,9 +30,8 @@ func NewEtcdReconciler(c client.Client) *EtcdReconciler {
 
 func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.VirtualCluster) (bool, error) {
 	preset := vcluster.GetPresetConfig(vc.Spec.SizePreset, vc.Spec.CustomResources)
-	isHA := vc.Spec.HighAvailability || (preset.DefaultHA && vc.Spec.SizePreset != v1alpha1.PresetSmall)
-	if !isHA {
-		// Clean up etcd resources if HA is disabled
+	if preset.EtcdReplicas == 0 && !vc.Spec.HighAvailability {
+		// Clean up etcd resources if etcd is disabled
 		sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-etcd", vc.Name), Namespace: vc.Namespace}}
 		_ = r.Delete(ctx, sts)
 		svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-etcd", vc.Name), Namespace: vc.Namespace}}
@@ -42,9 +41,18 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 		return true, nil
 	}
 
+	isHA := vc.Spec.HighAvailability
+	if vc.Spec.SizePreset == v1alpha1.PresetNormal {
+		isHA = false
+	} else if vc.Spec.SizePreset == v1alpha1.PresetHA {
+		isHA = true
+	}
+
 	replicas := preset.EtcdReplicas
-	if replicas == 0 {
+	if isHA {
 		replicas = 3
+	} else if replicas == 0 {
+		replicas = 1
 	}
 	if vc.IsSleeping() {
 		replicas = 0
@@ -131,8 +139,10 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 	}
 
 	clusterMembers := preset.EtcdReplicas
-	if clusterMembers == 0 {
+	if isHA {
 		clusterMembers = 3
+	} else if clusterMembers == 0 {
+		clusterMembers = 1
 	}
 	initialCluster := make([]string, clusterMembers)
 	for i := int32(0); i < clusterMembers; i++ {

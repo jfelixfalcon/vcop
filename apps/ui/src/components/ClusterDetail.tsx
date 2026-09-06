@@ -14,7 +14,6 @@ import {
   Clock,
   Layers,
   FileCode,
-  Network,
   RefreshCw,
   Gauge,
   Sliders,
@@ -92,7 +91,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [user, setUser] = useState<UserSession | null>(currentUser || null);
   const [cluster, setCluster] = useState<VirtualCluster | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'telemetry' | 'quota' | 'access' | 'apps' | 'etcd' | 'addons' | 'yaml'>('telemetry');
+  const [activeTab, setActiveTab] = useState<'telemetry' | 'quota' | 'access' | 'apps' | 'yaml'>('telemetry');
   const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'quota' | 'sleep' | 'rbac' | 'install-app' | 'group' | null>(null);
   const [kubeconfigInitialTab, setKubeconfigInitialTab] = useState<'admin' | 'oidc' | 'endpoint' | 'settings'>('admin');
   const [installAppTab, setInstallAppTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>('catalog');
@@ -440,8 +439,6 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
           { id: 'quota', label: 'Quotas & Policies', icon: Gauge },
           { id: 'access', label: 'Access & RBAC', icon: Users },
           { id: 'apps', label: 'Applications ', icon: Package },
-          { id: 'etcd', label: 'HA etcd Backing Store', icon: Shield },
-          { id: 'addons', label: 'CoreDNS & Metrics-Server', icon: Network },
           { id: 'yaml', label: 'Effective vcluster.yaml', icon: FileCode },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -1640,94 +1637,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         </div>
       )}
 
-      {/* TAB CONTENT: HA etcd */}
-      {activeTab === 'etcd' && (
-        <div className="space-y-6 animate-in fade-in duration-150">
-          <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6">
-            <div className="flex justify-between items-center mb-5">
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Shield className="w-5 h-5 text-emerald-400" />
-                  HA etcd StatefulSet Backing Topology
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Automated peer discovery on port 2380 and client listener on port 2379 with persistent volume storage.
-                </p>
-              </div>
-              <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-mono text-xs font-bold">
-                {isHA ? 'Quorum: 3/3 Healthy' : 'Single Node'}
-              </span>
-            </div>
 
-            {/* Member nodes grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {[0, 1, 2].slice(0, isHA ? 3 : 1).map((idx) => (
-                <div
-                  key={idx}
-                  className="bg-cyber-950 border border-cyber-800 rounded-xl p-4 font-mono text-xs space-y-2"
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-white">{cluster.name}-etcd-{idx}</span>
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-glow-emerald"></span>
-                  </div>
-                  <div className="text-[11px] text-slate-400 space-y-1">
-                    <div>Role: <span className="text-slate-200">{idx === 0 ? 'Leader' : 'Follower'}</span></div>
-                    <div>State: <span className="text-emerald-400">Synced (Quorum Member)</span></div>
-                    <div>PVC: <span className="text-slate-300">data-{cluster.name}-etcd-{idx}</span></div>
-                    <div>Peer: <span className="text-cyan-400">:2380</span></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB CONTENT: Add-ons & DNS */}
-      {/* TAB CONTENT: Add-ons & Components */}
-      {activeTab === 'addons' && (
-        <div className="space-y-6 animate-in fade-in duration-150">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {/* CoreDNS */}
-            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl">
-                  <CheckCircle2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">External CoreDNS Add-on</h4>
-                  <p className="text-xs text-slate-400">Independent intra-vcluster service discovery</p>
-                </div>
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed mb-3">
-                CoreDNS runs as a dedicated external workload deployed by the operator into the host namespace. Tenant workloads resolve local service names (e.g. <code className="text-cyber-accent">svc.default.cluster.local</code>) completely isolated from the host cluster DNS without embedding DNS in the vCluster syncer.
-              </p>
-              <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
-                Status: Serving Queries (External)
-              </span>
-            </div>
-
-            {/* Metrics Server */}
-            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl">
-                  <CheckCircle2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">External Metrics-Server Add-on</h4>
-                  <p className="text-xs text-slate-400">kubectl top & HPA controller enablement</p>
-                </div>
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed mb-3">
-                External metrics-server runs standalone in the host cluster namespace, collecting resource usage and populating Kubernetes APIService endpoints. Allows tenant horizontal pod autoscalers (HPAs) and <code className="text-cyber-accent">kubectl top</code> to function without relying on proprietary embedded integrations.
-              </p>
-              <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
-                Status: Active (External Add-on)
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* TAB CONTENT: Effective vCluster 0.36 YAML */}
       {activeTab === 'yaml' && (

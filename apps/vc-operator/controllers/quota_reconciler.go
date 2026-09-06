@@ -109,7 +109,7 @@ func (r *QuotaReconciler) buildHardLimits(vc *v1alpha1.VirtualCluster) corev1.Re
 	pvcs := "10"
 
 	switch vc.Spec.SizePreset {
-	case v1alpha1.PresetSmall:
+	case v1alpha1.PresetNormal, v1alpha1.PresetSmall:
 		reqCPU = "1"
 		reqMem = "2Gi"
 		reqStorage = "10Gi"
@@ -118,7 +118,7 @@ func (r *QuotaReconciler) buildHardLimits(vc *v1alpha1.VirtualCluster) corev1.Re
 		pods = "10"
 		services = "10"
 		pvcs = "5"
-	case v1alpha1.PresetLarge:
+	case v1alpha1.PresetHA, v1alpha1.PresetLarge:
 		reqCPU = "8"
 		reqMem = "16Gi"
 		reqStorage = "50Gi"

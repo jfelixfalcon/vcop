@@ -7,10 +7,12 @@ import (
 )
 
 // SizePreset defines resource sizing presets for virtual clusters
-// +kubebuilder:validation:Enum=small;medium;large;custom
+// +kubebuilder:validation:Enum=normal;ha;small;medium;large;custom
 type SizePreset string
 
 const (
+	PresetNormal SizePreset = "normal"
+	PresetHA     SizePreset = "ha"
 	PresetSmall  SizePreset = "small"
 	PresetMedium SizePreset = "medium"
 	PresetLarge  SizePreset = "large"

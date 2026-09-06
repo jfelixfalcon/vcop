@@ -89,8 +89,10 @@ spec:
                 sizePreset:
                   type: string
                   description: Sizing preset driving CPU, memory requests, and etcd storage tiers.
-                  default: "medium"
+                  default: "normal"
                   enum:
+                    - normal
+                    - ha
                     - small
                     - medium
                     - large
@@ -111,7 +113,7 @@ spec:
                 highAvailability:
                   type: boolean
                   description: Toggles 3-replica HA etcd and control-plane redundancy with automated quorum.
-                  default: true
+                  default: false
                 components:
                   type: object
                   description: Embedded internal add-ons.

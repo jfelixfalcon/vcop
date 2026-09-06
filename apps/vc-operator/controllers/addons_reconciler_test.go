@@ -43,13 +43,13 @@ func TestAddonsReconciler_CoreDNS_HA(t *testing.T) {
 		t.Fatalf("reconcileCoreDNS failed: %v", err)
 	}
 
-	// Verify CoreDNS Deployment has 2 replicas for HA
+	// Verify CoreDNS Deployment has 3 replicas for HA
 	dep := &appsv1.Deployment{}
 	if err := fakeVClient.Get(ctx, types.NamespacedName{Name: "coredns", Namespace: "kube-system"}, dep); err != nil {
 		t.Fatalf("Failed to fetch coredns deployment: %v", err)
 	}
-	if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 2 {
-		t.Errorf("Expected 2 replicas for HA CoreDNS, got %v", dep.Spec.Replicas)
+	if dep.Spec.Replicas == nil || *dep.Spec.Replicas != 3 {
+		t.Errorf("Expected 3 replicas for HA CoreDNS, got %v", dep.Spec.Replicas)
 	}
 
 	// Verify Service kube-dns

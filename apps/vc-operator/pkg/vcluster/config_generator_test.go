@@ -135,3 +135,49 @@ func TestGenerateYAMLWithAnnotations_CustomCA(t *testing.T) {
 		t.Errorf("Expected --oidc-issuer-url in yaml, got:\n%s", yamlStr)
 	}
 }
+
+func TestGenerateYAML_PresetNormal(t *testing.T) {
+	spec := &v1alpha1.VirtualClusterSpec{
+		ClusterName:       "tenant-normal",
+		KubernetesVersion: "v1.31.0",
+		SizePreset:        v1alpha1.PresetNormal,
+		HighAvailability:  false,
+	}
+
+	yamlBytes, err := GenerateYAML(spec)
+	if err != nil {
+		t.Fatalf("GenerateYAML failed: %v", err)
+	}
+
+	yamlStr := string(yamlBytes)
+	// Normal tier has 1 etcd replica and 1 syncer replica
+	if !strings.Contains(yamlStr, "replicas: 1") {
+		t.Errorf("Expected 1 replica for normal tier, got:\n%s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "deploy:") {
+		t.Errorf("Expected etcd deploy enabled for normal tier, got:\n%s", yamlStr)
+	}
+}
+
+func TestGenerateYAML_PresetHA(t *testing.T) {
+	spec := &v1alpha1.VirtualClusterSpec{
+		ClusterName:       "tenant-ha",
+		KubernetesVersion: "v1.31.0",
+		SizePreset:        v1alpha1.PresetHA,
+		HighAvailability:  true,
+	}
+
+	yamlBytes, err := GenerateYAML(spec)
+	if err != nil {
+		t.Fatalf("GenerateYAML failed: %v", err)
+	}
+
+	yamlStr := string(yamlBytes)
+	// HA tier has 3 etcd replicas and 3 syncer replicas
+	if !strings.Contains(yamlStr, "replicas: 3") {
+		t.Errorf("Expected 3 replicas for HA tier, got:\n%s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "deploy:") {
+		t.Errorf("Expected etcd deploy enabled for HA tier, got:\n%s", yamlStr)
+	}
+}

@@ -375,14 +375,20 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 	}
 	_ = r.Delete(ctx, legacyDep)
 
+	isHA := vc.Spec.HighAvailability
+	if vc.Spec.SizePreset == v1alpha1.PresetNormal {
+		isHA = false
+	} else if vc.Spec.SizePreset == v1alpha1.PresetHA {
+		isHA = true
+	}
+
 	replicas := int32(1)
 	if vc.IsSleeping() {
 		replicas = 0
-	} else if vc.Spec.HighAvailability || (preset.DefaultHA && vc.Spec.SizePreset != v1alpha1.PresetSmall) {
+	} else if isHA {
+		replicas = 3
+	} else if preset.SyncerReplicas > 0 {
 		replicas = preset.SyncerReplicas
-		if replicas == 0 {
-			replicas = 3
-		}
 	}
 
 	storageQuantity, err := resource.ParseQuantity(preset.StorageSize)
@@ -400,7 +406,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 		k8sVersion = "v1.31.0"
 	}
 
-	isExternalEtcd := vc.Spec.HighAvailability || (preset.DefaultHA && vc.Spec.SizePreset != v1alpha1.PresetSmall)
+	isExternalEtcd := vc.Spec.HighAvailability || preset.EtcdReplicas > 0
 
 	var volumeClaimTemplates []corev1.PersistentVolumeClaim
 	if !isExternalEtcd {

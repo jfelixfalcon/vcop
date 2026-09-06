@@ -19,7 +19,7 @@ spec:
       serviceAccountName: vcop-ui
       containers:
         - name: ui
-          image: vops/vc-operations-center:v0.36.0
+          image: vops/vc-operations-center:v0.36.1
           env:
             - name: HOST
               value: "0.0.0.0"
