@@ -77,3 +77,12 @@ UI ServiceAccount name
 {{- default "default" .Values.ui.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Metrics DB selector labels
+*/}}
+{{- define "vcop.metricsDb.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "vcop.name" . }}-metrics-db
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: metrics-db
+{{- end }}

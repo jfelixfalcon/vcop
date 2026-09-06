@@ -276,3 +276,98 @@ export interface VersionRegistry {
   updatedAt: string;
 }
 
+export type WorkloadKind = 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'Job' | 'CronJob' | 'Pod' | 'Other';
+
+export interface ContainerMetric {
+  name: string;
+  cpuUsage: string;
+  cpuMillis: number;
+  memoryUsage: string;
+  memoryBytes: number;
+  cpuRequest?: string;
+  cpuLimit?: string;
+  memoryRequest?: string;
+  memoryLimit?: string;
+  ready: boolean;
+  restartCount: number;
+  image: string;
+  state?: string;
+}
+
+export interface LivePodMetric {
+  name: string;
+  namespace: string;
+  phase: string;
+  ready: boolean;
+  restarts: number;
+  age: string;
+  startTime?: string;
+  nodeName?: string;
+  podIP?: string;
+  workloadKind: WorkloadKind;
+  workloadName: string;
+  cpuUsage: string;
+  cpuMillis: number;
+  cpuPercent?: number;
+  memoryUsage: string;
+  memoryBytes: number;
+  memoryPercent?: number;
+  cpuSparkline?: number[];
+  memSparkline?: number[];
+  containers: ContainerMetric[];
+  labels?: Record<string, string>;
+}
+
+export interface LiveWorkloadMetric {
+  kind: WorkloadKind;
+  name: string;
+  namespace: string;
+  podsCount: number;
+  readyPodsCount: number;
+  totalCpuMillis: number;
+  totalCpuUsage: string;
+  totalMemoryBytes: number;
+  totalMemoryUsage: string;
+  cpuPercent?: number;
+  memoryPercent?: number;
+  totalRestarts: number;
+  status: 'Healthy' | 'Degraded' | 'Critical';
+  pods: LivePodMetric[];
+}
+
+export interface MetricTimeBucket {
+  timestamp: string; // ISO string
+  totalCpuMillis: number;
+  avgCpuMillis: number;
+  maxCpuMillis: number;
+  totalMemoryBytes: number;
+  avgMemoryBytes: number;
+  maxMemoryBytes: number;
+  activePods: number;
+  workloadBreakdown?: Record<string, { cpuMillis: number; memoryBytes: number }>;
+}
+
+export interface ClusterMetricsResponse {
+  success: boolean;
+  cluster: string;
+  timestamp: string;
+  summary: {
+    totalCpuMillis: number;
+    totalCpuUsage: string;
+    totalMemoryBytes: number;
+    totalMemoryUsage: string;
+    cpuPercent?: number;
+    memPercent?: number;
+    totalPods: number;
+    runningPods: number;
+    pendingPods: number;
+    failedPods: number;
+    totalRestarts: number;
+    totalWorkloads: number;
+    namespaces: string[];
+  };
+  workloads: LiveWorkloadMetric[];
+  pods: LivePodMetric[];
+  historicalBuckets?: MetricTimeBucket[];
+}
+

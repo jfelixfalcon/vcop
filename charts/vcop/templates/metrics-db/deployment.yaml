@@ -1,0 +1,64 @@
+{{- if .Values.metricsDb.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vcop.fullname" . }}-metrics-db
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics-db
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "vcop.metricsDb.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vcop.metricsDb.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: "{{ .Values.metricsDb.image.repository }}:{{ .Values.metricsDb.image.tag }}"
+          imagePullPolicy: {{ .Values.metricsDb.image.pullPolicy }}
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vcop.fullname" . }}-metrics-db-secret
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vcop.fullname" . }}-metrics-db-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "vcop.fullname" . }}-metrics-db-secret
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          {{- if .Values.metricsDb.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "vcop.fullname" . }}-metrics-db-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

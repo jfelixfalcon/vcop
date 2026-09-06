@@ -70,3 +70,17 @@ export function getClusterCapacity(spec: any): { cpuMillis: number; memoryBytes:
   }
   return { cpuMillis: totalCpu, memoryBytes: totalMem };
 }
+
+export function formatMemoryBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}Ki`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}Mi`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)}Gi`;
+}
+
+export function formatCpuMillis(millis: number): string {
+  if (millis >= 1000) {
+    return `${(millis / 1000).toFixed(2)} cores`;
+  }
+  return `${millis}m`;
+}

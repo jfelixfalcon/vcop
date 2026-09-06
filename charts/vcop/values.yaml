@@ -145,3 +145,20 @@ presets:
     enabled: true
   gpuIsolated:
     enabled: true
+
+# Historical Telemetry & Workload Metrics Database (PostgreSQL)
+metricsDb:
+  enabled: true
+  image:
+    repository: docker.io/library/postgres
+    tag: 16-alpine
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    storageClass: "standard"
+    size: 5Gi
+  credentials:
+    dbName: "vcop_metrics"
+    user: "vcop"
+    password: "vcop-metrics-db-pass-2026"
+

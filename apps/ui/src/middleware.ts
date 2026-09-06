@@ -1,5 +1,9 @@
 import { defineMiddleware } from 'astro:middleware';
 import { SESSION_COOKIE_NAME, verifySessionToken } from './lib/auth';
+import { startMetricsDaemon } from './lib/metrics-collector';
+
+// Start continuous background telemetry & metrics collection to PostgreSQL
+startMetricsDaemon();
 
 const PUBLIC_PATHS = [
   '/login',

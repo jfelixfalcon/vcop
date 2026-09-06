@@ -51,6 +51,7 @@ import { SleepModal } from './SleepModal';
 import { RbacModal } from './RbacModal';
 import { InstallAppModal } from './InstallAppModal';
 import { ClusterGroupModal } from './ClusterGroupModal';
+import { WorkloadMetricsView } from './WorkloadMetricsView';
 
 function parseK8sQuantity(val?: string): number {
   if (!val) return 0;
@@ -91,7 +92,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [user, setUser] = useState<UserSession | null>(currentUser || null);
   const [cluster, setCluster] = useState<VirtualCluster | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'telemetry' | 'quota' | 'access' | 'apps' | 'yaml'>('telemetry');
+  const [activeTab, setActiveTab] = useState<'telemetry' | 'workloads' | 'quota' | 'access' | 'apps' | 'yaml'>('telemetry');
   const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'quota' | 'sleep' | 'rbac' | 'install-app' | 'group' | null>(null);
   const [kubeconfigInitialTab, setKubeconfigInitialTab] = useState<'admin' | 'oidc' | 'endpoint' | 'settings'>('admin');
   const [installAppTab, setInstallAppTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>('catalog');
@@ -445,6 +446,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
       <div className="flex border-b border-cyber-800 gap-6">
         {[
           { id: 'telemetry', label: 'Health & Telemetry', icon: Activity },
+          { id: 'workloads', label: 'Pods & Metrics', icon: Cpu },
           { id: 'quota', label: 'Quotas & Policies', icon: Gauge },
           { id: 'access', label: 'Access & RBAC', icon: Users },
           { id: 'apps', label: 'Applications ', icon: Package },
@@ -543,6 +545,11 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB CONTENT: Workloads & Pod Metrics (Grafana Replacement) */}
+      {activeTab === 'workloads' && (
+        <WorkloadMetricsView cluster={cluster} />
       )}
 
       {/* TAB CONTENT: Resource Quotas & Policies */}

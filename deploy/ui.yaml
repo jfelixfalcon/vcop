@@ -31,6 +31,16 @@ spec:
               value: "admin"
             - name: ADMIN_PASSWORD
               value: "vcop-breakglass-admin"
+            - name: METRICS_DB_HOST
+              value: "vcop-metrics-db.vcop-system.svc"
+            - name: METRICS_DB_PORT
+              value: "5432"
+            - name: METRICS_DB_NAME
+              value: "vcop_metrics"
+            - name: METRICS_DB_USER
+              value: "vcop"
+            - name: METRICS_DB_PASSWORD
+              value: "vcop-metrics-db-pass-2026"
             # Optional OIDC SSO Configuration:
             # - name: OIDC_ENABLED
             #   value: "true"

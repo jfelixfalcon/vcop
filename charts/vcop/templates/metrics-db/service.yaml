@@ -1,0 +1,17 @@
+{{- if .Values.metricsDb.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vcop.fullname" . }}-metrics-db
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics-db
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "vcop.metricsDb.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+{{- end }}

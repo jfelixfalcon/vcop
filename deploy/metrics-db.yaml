@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vcop-metrics-db-secret
+  namespace: vcop-system
+  labels:
+    app.kubernetes.io/name: vcop-metrics-db
+type: Opaque
+stringData:
+  POSTGRES_DB: "vcop_metrics"
+  POSTGRES_USER: "vcop"
+  POSTGRES_PASSWORD: "vcop-metrics-db-pass-2026"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vcop-metrics-db-data
+  namespace: vcop-system
+  labels:
+    app.kubernetes.io/name: vcop-metrics-db
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vcop-metrics-db
+  namespace: vcop-system
+  labels:
+    app.kubernetes.io/name: vcop-metrics-db
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vcop-metrics-db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vcop-metrics-db
+    spec:
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: vcop-metrics-db-secret
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: vcop-metrics-db-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vcop-metrics-db-secret
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: vcop-metrics-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vcop-metrics-db
+  namespace: vcop-system
+  labels:
+    app.kubernetes.io/name: vcop-metrics-db
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vcop-metrics-db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

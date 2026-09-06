@@ -1,0 +1,18 @@
+{{- if and .Values.metricsDb.enabled .Values.metricsDb.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "vcop.fullname" . }}-metrics-db-data
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics-db
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.metricsDb.persistence.storageClass }}
+  storageClassName: {{ .Values.metricsDb.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.metricsDb.persistence.size | quote }}
+{{- end }}
