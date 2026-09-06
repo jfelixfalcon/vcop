@@ -53,6 +53,7 @@ export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgr
         body: JSON.stringify({
           kubernetesVersion: selectedK8s || currentK8s,
           vclusterVersion: selectedVCluster || currentEngine,
+          namespace: cluster.namespace,
         }),
       });
 

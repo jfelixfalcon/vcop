@@ -20,6 +20,8 @@ import {
   Moon,
   Sun,
   Lock,
+  FolderGit2,
+  Tag,
 } from 'lucide-react';
 import type { VirtualCluster, ClusterPhase, UserSession } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
@@ -28,7 +30,8 @@ import { KubeconfigModal } from './KubeconfigModal';
 import { UpgradeModal } from './UpgradeModal';
 import { DeleteModal } from './DeleteModal';
 import { SleepModal } from './SleepModal';
-import { parseCpuMillis, parseMemoryBytes, getClusterCapacity } from '../lib/k8s-client';
+import { ClusterGroupModal } from './ClusterGroupModal';
+import { parseCpuMillis, parseMemoryBytes, getClusterCapacity } from '../lib/metrics-utils';
 
 interface FleetDashboardProps {
   currentUser?: UserSession | null;
@@ -41,11 +44,14 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [envFilter, setEnvFilter] = useState<string>('all');
+  const [groupFilter, setGroupFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
   // Modal states
   const [selectedCluster, setSelectedCluster] = useState<VirtualCluster | null>(null);
   const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'sleep' | null>(null);
+  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+  const [groupModalTargetCluster, setGroupModalTargetCluster] = useState<VirtualCluster | null>(null);
 
   const fetchClusters = async () => {
     try {
@@ -79,11 +85,34 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
 
   const isAdmin = !user || user.role === 'admin';
 
+  // Extract all distinct cluster groups across fleet
+  const availableGroups = Array.from(
+    new Set(
+      clusters.flatMap((c) => {
+        if (c.metadata?.clusterGroups && c.metadata.clusterGroups.length > 0) {
+          return c.metadata.clusterGroups;
+        }
+        if (c.metadata?.clusterGroup) {
+          return [c.metadata.clusterGroup];
+        }
+        return [];
+      })
+    )
+  ).filter(Boolean);
+
   const filteredClusters = clusters.filter((c) => {
+    const cGroups =
+      c.metadata?.clusterGroups && c.metadata.clusterGroups.length > 0
+        ? c.metadata.clusterGroups
+        : c.metadata?.clusterGroup
+        ? [c.metadata.clusterGroup]
+        : [];
+
     const matchesSearch =
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (c.metadata?.owner && c.metadata.owner.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (c.spec.sizePreset && c.spec.sizePreset.toLowerCase().includes(searchQuery.toLowerCase()));
+      (c.spec.sizePreset && c.spec.sizePreset.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      cGroups.some((g) => g.toLowerCase().includes(searchQuery.toLowerCase()));
 
     const matchesStatus =
       statusFilter === 'all' ||
@@ -96,7 +125,10 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
     const matchesEnv =
       envFilter === 'all' || (c.metadata?.environment && c.metadata.environment === envFilter);
 
-    return matchesSearch && matchesStatus && matchesEnv;
+    const matchesGroup =
+      groupFilter === 'all' || cGroups.includes(groupFilter);
+
+    return matchesSearch && matchesStatus && matchesEnv && matchesGroup;
   });
 
   // Calculate fleet stats
@@ -266,15 +298,47 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
       {/* Control Toolbar */}
       <div className="flex flex-col md:flex-row gap-3 items-center justify-between bg-cyber-900/70 border border-cyber-700/60 rounded-2xl p-3 backdrop-blur-sm">
         {/* Search */}
-        <div className="relative w-full md:w-80">
+        <div className="relative w-full md:w-72">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Filter clusters, owner, preset..."
+            placeholder="Search cluster, group, owner..."
             className="w-full bg-cyber-950/80 border border-cyber-700/70 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyber-accent font-sans transition-colors"
           />
+        </div>
+
+        {/* Group Filter Dropdown */}
+        <div className="flex items-center gap-1.5 w-full md:w-auto">
+          <span className="text-[11px] font-mono text-slate-400 uppercase shrink-0 flex items-center gap-1">
+            <FolderGit2 className="w-3.5 h-3.5 text-cyan-400" />
+            Group:
+          </span>
+          <select
+            value={groupFilter}
+            onChange={(e) => setGroupFilter(e.target.value)}
+            className="bg-cyber-950/90 border border-cyber-700/80 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-cyber-accent font-mono transition-colors"
+            title="Filter by Cluster Group"
+          >
+            <option value="all">All Groups ({clusters.length})</option>
+            {availableGroups.map((g) => {
+              const count = clusters.filter((c) => {
+                const grps =
+                  c.metadata?.clusterGroups && c.metadata.clusterGroups.length > 0
+                    ? c.metadata.clusterGroups
+                    : c.metadata?.clusterGroup
+                    ? [c.metadata.clusterGroup]
+                    : [];
+                return grps.includes(g);
+              }).length;
+              return (
+                <option key={g} value={g}>
+                  {g} ({count})
+                </option>
+              );
+            })}
+          </select>
         </div>
 
         {/* Status Filter Chips */}
@@ -301,7 +365,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
           ))}
         </div>
 
-        <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
+        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
           {/* View Mode Toggle */}
           <div className="flex items-center bg-cyber-950 p-1 rounded-xl border border-cyber-800 shrink-0">
             <button
@@ -328,11 +392,31 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
             </button>
           </div>
 
+          {/* Manage Groups Modal Trigger (Admin) */}
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setGroupModalTargetCluster(null);
+                setIsGroupModalOpen(true);
+              }}
+              className="px-3 py-2 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-sm shrink-0"
+              title="Manage Fleet Cluster Groups"
+            >
+              <FolderGit2 className="w-3.5 h-3.5" />
+              <span>Groups</span>
+              {availableGroups.length > 0 && (
+                <span className="px-1.5 py-0.2 bg-cyan-500/20 text-cyan-400 rounded-full text-[10px] font-mono font-bold">
+                  {availableGroups.length}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* Action button (Admins only) */}
           {isAdmin && (
             <a
               href="/new"
-              className="w-full md:w-auto px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm flex items-center justify-center gap-1.5 transition-all"
+              className="w-full md:w-auto px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm flex items-center justify-center gap-1.5 transition-all shrink-0"
             >
               <Plus className="w-4 h-4" />
               Provision Virtual Cluster
@@ -376,6 +460,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
             <thead className="bg-cyber-950/80 border-b border-cyber-800 text-[11px] uppercase tracking-wider text-slate-400">
               <tr>
                 <th className="py-3.5 px-4 font-medium">Cluster</th>
+                <th className="py-3.5 px-4 font-medium">Group</th>
                 <th className="py-3.5 px-4 font-medium">Status</th>
                 <th className="py-3.5 px-4 font-medium">Tier & Engine</th>
                 <th className="py-3.5 px-4 font-medium">HA Backing</th>
@@ -392,6 +477,12 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                 const size = cluster.spec.sizePreset || 'medium';
                 const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'N/A';
                 const isSleeping = cluster.status.phase === 'Sleeping';
+                const clusterGroups =
+                  cluster.metadata?.clusterGroups && cluster.metadata.clusterGroups.length > 0
+                    ? cluster.metadata.clusterGroups
+                    : cluster.metadata?.clusterGroup
+                    ? [cluster.metadata.clusterGroup]
+                    : [];
 
                 return (
                   <tr key={cluster.name} className="hover:bg-cyber-850/50 transition-colors">
@@ -408,6 +499,39 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                       </div>
                       <div className="text-[10px] text-slate-500 mt-0.5 font-sans">
                         {cluster.metadata?.owner || 'Tenant Space'}
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <div className="flex flex-wrap gap-1 items-center">
+                        {clusterGroups.length > 0 ? (
+                          clusterGroups.map((g) => (
+                            <button
+                              key={g}
+                              type="button"
+                              onClick={() => setGroupFilter(g)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] hover:bg-cyan-500/25 transition-colors"
+                              title={`Filter fleet by group ${g}`}
+                            >
+                              <Tag className="w-2.5 h-2.5" />
+                              {g}
+                            </button>
+                          ))
+                        ) : (
+                          <span className="text-[10px] text-slate-500 italic">—</span>
+                        )}
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setGroupModalTargetCluster(cluster);
+                              setIsGroupModalOpen(true);
+                            }}
+                            className="p-1 text-slate-500 hover:text-cyan-400 rounded hover:bg-cyber-800 transition-colors"
+                            title="Manage Cluster Groups"
+                          >
+                            <FolderGit2 className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
                     </td>
                     <td className="py-3.5 px-4">
@@ -523,6 +647,12 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
             const isHA = cluster.spec.highAvailability;
             const size = cluster.spec.sizePreset || 'medium';
             const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'N/A';
+            const clusterGroups =
+              cluster.metadata?.clusterGroups && cluster.metadata.clusterGroups.length > 0
+                ? cluster.metadata.clusterGroups
+                : cluster.metadata?.clusterGroup
+                ? [cluster.metadata.clusterGroup]
+                : [];
 
             return (
               <div
@@ -531,7 +661,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
               >
                 {/* Header */}
                 <div>
-                  <div className="flex justify-between items-start mb-3">
+                  <div className="flex justify-between items-start mb-2.5">
                     <div>
                       <div className="flex items-center gap-2">
                         <h4 className="font-mono text-base font-bold text-white group-hover:text-cyber-accent transition-colors">
@@ -548,6 +678,44 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                       </p>
                     </div>
                     <StatusBadge phase={cluster.status.phase} />
+                  </div>
+
+                  {/* Cluster Group Badges */}
+                  <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                    {clusterGroups.length > 0 ? (
+                      clusterGroups.map((g) => (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setGroupFilter(g);
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/25 text-[10px] font-mono hover:bg-cyan-500/25 transition-colors"
+                          title={`Filter fleet by group: ${g}`}
+                        >
+                          <Tag className="w-2.5 h-2.5" />
+                          {g}
+                        </button>
+                      ))
+                    ) : (
+                      <span className="text-[10px] font-mono text-slate-500 italic">No group</span>
+                    )}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setGroupModalTargetCluster(cluster);
+                          setIsGroupModalOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-slate-400 hover:text-cyan-400 hover:bg-cyber-850 border border-cyber-800 transition-colors"
+                        title="Manage Cluster Groups"
+                      >
+                        <FolderGit2 className="w-3 h-3" />
+                        <span>{clusterGroups.length === 0 ? '+ Group' : 'Edit'}</span>
+                      </button>
+                    )}
                   </div>
 
                   {/* Sizing & Spec Badges */}
@@ -735,6 +903,23 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
         onDeleteSuccess={(deletedName) => {
           setClusters((prev) => prev.filter((c) => c.name !== deletedName));
         }}
+      />
+
+      <ClusterGroupModal
+        cluster={groupModalTargetCluster}
+        isOpen={isGroupModalOpen}
+        onClose={() => {
+          setIsGroupModalOpen(false);
+          setGroupModalTargetCluster(null);
+        }}
+        onSuccess={(updated) => {
+          if (updated) {
+            setClusters((prev) => prev.map((c) => (c.name === updated.name ? updated : c)));
+          } else {
+            fetchClusters();
+          }
+        }}
+        allClusters={clusters}
       />
     </div>
   );

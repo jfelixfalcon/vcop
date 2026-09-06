@@ -5,6 +5,8 @@ import {
   updateVirtualClusterPolicies,
   setVirtualClusterSleep,
   updateVirtualClusterRBAC,
+  updateVirtualClusterGroups,
+  upgradeVirtualCluster,
 } from '../../../../lib/k8s-client';
 import { canUserViewCluster, canUserManageCluster } from '../../../../lib/auth';
 
@@ -64,7 +66,7 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
 
   try {
     const body = await request.json();
-    const { policies, namespace, sleep, paused, rbac, owner, allowedGroups, allowedEmails } = body;
+    const { policies, namespace, sleep, paused, rbac, owner, allowedGroups, allowedEmails, clusterGroups, clusterGroup } = body;
 
     let updated = null;
     if (sleep !== undefined || paused !== undefined) {
@@ -77,12 +79,22 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
       const rbacData = rbac || { owner, allowedGroups, allowedEmails };
       updated = await updateVirtualClusterRBAC(name, rbacData, namespace);
     }
+    if (clusterGroups !== undefined || clusterGroup !== undefined) {
+      const groupsToSet = clusterGroups !== undefined ? clusterGroups : clusterGroup;
+      updated = await updateVirtualClusterGroups(name, groupsToSet, namespace);
+    }
+    if (body.kubernetesVersion || body.vclusterVersion) {
+      updated = await upgradeVirtualCluster(name, {
+        kubernetesVersion: body.kubernetesVersion,
+        vclusterVersion: body.vclusterVersion,
+      }, namespace);
+    }
 
     if (!updated) {
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'No valid update parameters provided (policies, sleep, paused, or rbac/owner/groups)',
+          error: 'No valid update parameters provided (policies, sleep, paused, rbac, clusterGroups, or versions)',
         }),
         {
           status: 400,

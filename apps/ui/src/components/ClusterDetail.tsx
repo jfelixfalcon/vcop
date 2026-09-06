@@ -35,6 +35,8 @@ import {
   X,
   Plus,
   Sparkles,
+  FolderGit2,
+  Tag,
 } from 'lucide-react';
 import type { VirtualCluster, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
@@ -46,6 +48,7 @@ import { QuotaModal } from './QuotaModal';
 import { SleepModal } from './SleepModal';
 import { RbacModal } from './RbacModal';
 import { InstallAppModal } from './InstallAppModal';
+import { ClusterGroupModal } from './ClusterGroupModal';
 
 function parseK8sQuantity(val?: string): number {
   if (!val) return 0;
@@ -87,7 +90,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [cluster, setCluster] = useState<VirtualCluster | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'telemetry' | 'quota' | 'access' | 'apps' | 'etcd' | 'addons' | 'yaml'>('telemetry');
-  const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'quota' | 'sleep' | 'rbac' | 'install-app' | null>(null);
+  const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'quota' | 'sleep' | 'rbac' | 'install-app' | 'group' | null>(null);
   const [installAppTab, setInstallAppTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>('catalog');
   const [catalog, setCatalog] = useState<AppStoreCatalog | null>(null);
   const [inspectedApp, setInspectedApp] = useState<InstalledApp | null>(null);
@@ -168,6 +171,12 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const isSleeping = cluster.status.phase === 'Sleeping' || cluster.spec.paused || cluster.spec.lifecycle?.sleep;
   const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'N/A';
   const vclusterVer = cluster.status.vclusterVersion || cluster.spec.vclusterVersion || 'N/A';
+  const clusterGroups =
+    cluster.metadata?.clusterGroups && cluster.metadata.clusterGroups.length > 0
+      ? cluster.metadata.clusterGroups
+      : cluster.metadata?.clusterGroup
+      ? [cluster.metadata.clusterGroup]
+      : [];
 
   return (
     <div className="space-y-6">
@@ -181,9 +190,23 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             <ArrowLeft className="w-4 h-4" />
           </a>
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-2xl font-bold font-mono text-white tracking-wide">{cluster.name}</h1>
               <StatusBadge phase={cluster.status.phase} />
+              {cluster.metadata?.environment && (
+                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-cyber-800 text-slate-400 border border-cyber-700">
+                  {cluster.metadata.environment}
+                </span>
+              )}
+              {clusterGroups.map((g) => (
+                <span
+                  key={g}
+                  className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/30"
+                >
+                  <Tag className="w-3 h-3" />
+                  {g}
+                </span>
+              ))}
             </div>
             <p className="text-xs text-slate-400 font-mono mt-0.5">
               Namespace: <span className="text-slate-300">{cluster.namespace}</span> • Engine: <span className="text-cyber-accent">vCluster {vclusterVer}</span>
@@ -213,6 +236,15 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               >
                 {isSleeping ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
                 {isSleeping ? 'Wake Up' : 'Sleep'}
+              </button>
+
+              <button
+                onClick={() => setActiveModal('group')}
+                className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+                title="Manage Cluster Groups"
+              >
+                <FolderGit2 className="w-3.5 h-3.5" />
+                Groups
               </button>
 
               <button
@@ -268,11 +300,11 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <h4 className="font-bold text-white flex items-center gap-2">
                 Viewer Access Role
                 <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800 uppercase font-semibold">
-                  Read-Only
+                  Read Only
                 </span>
               </h4>
               <p className="text-slate-300 mt-0.5">
-                You are authorized to view this cluster and download its kubeconfig credentials. Lifecycle modifications, quota updates, upgrades, and teardowns are restricted to Platform Administrators.
+                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have read access to explore cluster topology, inspect installed apps, and export kubeconfig. Modifications require administrator authorization.
               </p>
             </div>
           </div>
@@ -281,9 +313,9 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
 
       {/* Sleeping Notification Banner */}
       {isSleeping && (
-        <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in duration-200">
+        <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in duration-200">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-500/20 text-indigo-300 rounded-xl">
+            <div className="p-2.5 bg-indigo-500/20 text-indigo-400 rounded-xl shrink-0">
               <Moon className="w-5 h-5" />
             </div>
             <div>
@@ -310,8 +342,8 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         </div>
       )}
 
-      {/* Cluster Meta & Endpoint Card */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Cluster Meta & Endpoint Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-4 backdrop-blur-sm">
           <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Internal Endpoint</span>
           <p className="font-mono text-xs text-slate-200 truncate mt-1 select-all" title={cluster.status.endpoint}>
@@ -337,6 +369,41 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
           </p>
           <span className="inline-block mt-1 text-[10px] text-slate-400 font-mono">
             {isHA ? 'HA 3-Node Quorum' : 'Single-replica'}
+          </span>
+        </div>
+
+        <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-4 backdrop-blur-sm flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Cluster Grouping</span>
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveModal('group')}
+                  className="text-[10px] font-mono text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1"
+                >
+                  <FolderGit2 className="w-3 h-3" />
+                  Edit
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {clusterGroups.length > 0 ? (
+                clusterGroups.map((g) => (
+                  <span
+                    key={g}
+                    className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/25"
+                  >
+                    <Tag className="w-2.5 h-2.5" />
+                    {g}
+                  </span>
+                ))
+              ) : (
+                <p className="font-mono text-xs text-slate-500 italic">No group assigned</p>
+              )}
+            </div>
+          </div>
+          <span className="mt-2 text-[10px] text-slate-400 font-mono">
+            {clusterGroups.length} active grouping{clusterGroups.length !== 1 ? 's' : ''}
           </span>
         </div>
       </div>
@@ -1543,6 +1610,19 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         isOpen={activeModal === 'rbac'}
         onClose={() => setActiveModal(null)}
         onSuccess={(updated) => setCluster(updated)}
+      />
+
+      <ClusterGroupModal
+        cluster={cluster}
+        isOpen={activeModal === 'group'}
+        onClose={() => setActiveModal(null)}
+        onSuccess={(updated) => {
+          if (updated) {
+            setCluster(updated);
+          } else {
+            fetchCluster();
+          }
+        }}
       />
 
       <InstallAppModal

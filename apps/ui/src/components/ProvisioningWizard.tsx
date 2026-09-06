@@ -21,6 +21,8 @@ import {
   Box,
   ChevronDown,
   ChevronUp,
+  FolderGit2,
+  Tag,
 } from 'lucide-react';
 import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry } from '../lib/types';
 import { PRESETS } from '../lib/presets';
@@ -33,6 +35,8 @@ export const ProvisioningWizard: React.FC = () => {
   const [owner, setOwner] = useState<string>('');
   const [allowedGroups, setAllowedGroups] = useState<string>('');
   const [allowedEmails, setAllowedEmails] = useState<string>('');
+  const [clusterGroup, setClusterGroup] = useState<string>('');
+  const [fleetGroups, setFleetGroups] = useState<string[]>([]);
   const [environment, setEnvironment] = useState<'development' | 'staging' | 'production'>('development');
   const [sizePreset, setSizePreset] = useState<SizePreset>('medium');
   const [enableMonitoringAndDNS, setEnableMonitoringAndDNS] = useState<boolean>(true);
@@ -76,6 +80,15 @@ export const ProvisioningWizard: React.FC = () => {
         }
       })
       .catch((e) => console.warn('Failed loading catalog in wizard:', e));
+
+    fetch('/api/vclusters/groups')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.data) {
+          setFleetGroups(data.data.map((g: any) => g.name));
+        }
+      })
+      .catch((e) => console.warn('Failed loading cluster groups in wizard:', e));
 
     fetch('/api/admin/versions')
       .then((res) => res.json())
@@ -179,6 +192,8 @@ export const ProvisioningWizard: React.FC = () => {
         owner: owner.trim() || 'Internal Developer Platform',
         allowedGroups: allowedGroups.split(',').map((s) => s.trim()).filter(Boolean),
         allowedEmails: allowedEmails.split(',').map((s) => s.trim()).filter(Boolean),
+        clusterGroup: clusterGroup.trim() || undefined,
+        clusterGroups: clusterGroup.trim() ? [clusterGroup.trim()] : undefined,
         environment,
         enableMonitoringAndDNS,
         autoSleep,
@@ -445,6 +460,49 @@ policies:
                   />
                   <p className="text-[10px] text-slate-500 mt-1">Comma-separated user emails with read + kubeconfig access</p>
                 </div>
+              </div>
+
+              {/* Cluster Grouping */}
+              <div className="pt-2 border-t border-cyber-850">
+                <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <FolderGit2 className="w-3.5 h-3.5 text-cyan-400" />
+                    Cluster Group (Fleet Organization)
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">Optional</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={clusterGroup}
+                    onChange={(e) => setClusterGroup(e.target.value)}
+                    placeholder="e.g. backend-services, fintech, ai-agents"
+                    className="w-full bg-cyber-950/80 border border-cyber-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-cyber-accent font-mono transition-colors"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Organize clusters into logical groupings for fleet management and search filtering.
+                </p>
+                {fleetGroups.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                    <span className="text-[10px] text-slate-400 font-mono">Existing groups:</span>
+                    {fleetGroups.map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => setClusterGroup(g)}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                          clusterGroup === g
+                            ? 'bg-cyan-500 text-slate-950 font-bold'
+                            : 'bg-cyber-800 text-cyan-400 hover:bg-cyber-750 border border-cyber-700'
+                        }`}
+                      >
+                        <Tag className="w-2.5 h-2.5" />
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

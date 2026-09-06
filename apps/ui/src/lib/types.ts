@@ -114,6 +114,8 @@ export interface VirtualCluster {
     owner?: string;
     allowedGroups?: string[];
     allowedEmails?: string[];
+    clusterGroup?: string;
+    clusterGroups?: string[];
     environment?: 'development' | 'staging' | 'production';
     tags?: string[];
     installedApps?: InstalledApp[];
@@ -123,6 +125,12 @@ export interface VirtualCluster {
     memory: number[];
   };
   compiledConfig?: string;
+}
+
+export interface ClusterGroupInfo {
+  name: string;
+  clusterCount: number;
+  clusters: string[];
 }
 
 export type { UserRole, UserSession } from './auth';

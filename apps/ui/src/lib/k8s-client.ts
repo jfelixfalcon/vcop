@@ -1,7 +1,7 @@
 import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
-import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp } from './types';
+import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo } from './types';
 import { getAppStoreCatalog } from './appstore';
 import { PRESETS } from './presets';
 export { PRESETS, k8sRequest };
@@ -132,78 +132,8 @@ function k8sRequest<T>(reqPath: string, method = 'GET', body?: any, contentType 
   });
 }
 
-export function parseCpuMillis(cpuStr?: string | number): number {
-  if (cpuStr === undefined || cpuStr === null || cpuStr === '') return 0;
-  if (typeof cpuStr === 'number') return Math.round(cpuStr * 1000);
-  const str = String(cpuStr).trim();
-  if (str.endsWith('n')) {
-    return Math.round(parseFloat(str.slice(0, -1)) / 1_000_000);
-  }
-  if (str.endsWith('u')) {
-    return Math.round(parseFloat(str.slice(0, -1)) / 1_000);
-  }
-  if (str.endsWith('m')) {
-    return Math.round(parseFloat(str.slice(0, -1)));
-  }
-  const val = parseFloat(str);
-  return isNaN(val) ? 0 : Math.round(val * 1000);
-}
-
-export function parseMemoryBytes(memStr?: string | number): number {
-  if (memStr === undefined || memStr === null || memStr === '') return 0;
-  if (typeof memStr === 'number') return memStr;
-  const str = String(memStr).trim();
-  const units: Record<string, number> = {
-    Ki: 1024,
-    Mi: 1024 * 1024,
-    Gi: 1024 * 1024 * 1024,
-    Ti: 1024 * 1024 * 1024 * 1024,
-    K: 1000,
-    M: 1000 * 1000,
-    G: 1000 * 1000 * 1000,
-    T: 1000 * 1000 * 1000 * 1000,
-  };
-  for (const [unit, mult] of Object.entries(units)) {
-    if (str.endsWith(unit)) {
-      const num = parseFloat(str.slice(0, -unit.length));
-      return isNaN(num) ? 0 : Math.round(num * mult);
-    }
-  }
-  const num = parseFloat(str);
-  return isNaN(num) ? 0 : num;
-}
-
-export function getClusterCapacity(spec: any): { cpuMillis: number; memoryBytes: number } {
-  const quotaLimitsCpu = spec?.policies?.resourceQuota?.limitsCPU || spec?.policies?.resourceQuota?.requestsCPU;
-  const quotaLimitsMem = spec?.policies?.resourceQuota?.limitsMemory || spec?.policies?.resourceQuota?.requestsMemory;
-
-  let totalCpu = parseCpuMillis(quotaLimitsCpu);
-  let totalMem = parseMemoryBytes(quotaLimitsMem);
-
-  if (!totalCpu || !totalMem) {
-    const preset = spec?.sizePreset || 'medium';
-    switch (preset) {
-      case 'small':
-        totalCpu = totalCpu || 2000;
-        totalMem = totalMem || 4 * 1024 * 1024 * 1024;
-        break;
-      case 'large':
-        totalCpu = totalCpu || 8000;
-        totalMem = totalMem || 16 * 1024 * 1024 * 1024;
-        break;
-      case 'custom':
-        totalCpu = totalCpu || (spec?.customResources?.cpu ? parseCpuMillis(spec.customResources.cpu) : 4000);
-        totalMem = totalMem || (spec?.customResources?.memory ? parseMemoryBytes(spec.customResources.memory) : 8 * 1024 * 1024 * 1024);
-        break;
-      case 'medium':
-      default:
-        totalCpu = totalCpu || 4000;
-        totalMem = totalMem || 8 * 1024 * 1024 * 1024;
-        break;
-    }
-  }
-  return { cpuMillis: totalCpu, memoryBytes: totalMem };
-}
+import { parseCpuMillis, parseMemoryBytes, getClusterCapacity } from './metrics-utils';
+export { parseCpuMillis, parseMemoryBytes, getClusterCapacity };
 
 function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
   const name = item.metadata?.name || '';
@@ -314,6 +244,21 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
         .split(',')
         .map((s: string) => s.trim())
         .filter(Boolean),
+      clusterGroup: (
+        item.metadata?.annotations?.['vops.gitops.io/cluster-group'] ||
+        item.metadata?.annotations?.['vops.gitops.io/cluster-groups']?.split(',')[0] ||
+        item.metadata?.labels?.['vops.gitops.io/cluster-group'] ||
+        ''
+      ).trim(),
+      clusterGroups: (
+        item.metadata?.annotations?.['vops.gitops.io/cluster-groups'] ||
+        item.metadata?.annotations?.['vops.gitops.io/cluster-group'] ||
+        item.metadata?.labels?.['vops.gitops.io/cluster-group'] ||
+        ''
+      )
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean),
       environment: (item.metadata?.labels?.['vops.gitops.io/environment'] as any) || 'development',
       tags: [spec.sizePreset || 'medium', spec.highAvailability ? 'ha-etcd' : 'single-node'],
       installedApps,
@@ -371,6 +316,8 @@ export async function createVirtualCluster(data: {
   owner?: string;
   allowedGroups?: string[];
   allowedEmails?: string[];
+  clusterGroup?: string;
+  clusterGroups?: string[];
   environment?: 'development' | 'staging' | 'production';
   enableMonitoringAndDNS?: boolean;
   autoSleep?: boolean;
@@ -416,17 +363,30 @@ export async function createVirtualCluster(data: {
     annotations['vops.gitops.io/allowed-emails'] = data.allowedEmails.join(',');
   }
 
+  const groupsList = Array.isArray(data.clusterGroups) && data.clusterGroups.length > 0
+    ? data.clusterGroups
+    : (data.clusterGroup ? [data.clusterGroup] : []);
+  if (groupsList.length > 0) {
+    annotations['vops.gitops.io/cluster-groups'] = groupsList.join(',');
+    annotations['vops.gitops.io/cluster-group'] = groupsList[0];
+  }
+
+  const labels: Record<string, string> = {
+    'vops.gitops.io/cluster': name,
+    'vops.gitops.io/owner': (data.owner || 'platform-user').replace(/[^a-zA-Z0-9_-]/g, '-'),
+    'vops.gitops.io/environment': data.environment || 'development',
+  };
+  if (groupsList.length > 0) {
+    labels['vops.gitops.io/cluster-group'] = groupsList[0].replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 63);
+  }
+
   const body: any = {
     apiVersion: 'vops.gitops.io/v1alpha1',
     kind: 'VirtualCluster',
     metadata: {
       name,
       namespace,
-      labels: {
-        'vops.gitops.io/cluster': name,
-        'vops.gitops.io/owner': (data.owner || 'platform-user').replace(/[^a-zA-Z0-9_-]/g, '-'),
-        'vops.gitops.io/environment': data.environment || 'development',
-      },
+      labels,
       annotations,
     },
     spec: {
@@ -640,6 +600,87 @@ export async function updateVirtualClusterRBAC(
   throw new Error((res.data as any)?.message || `Failed to update virtual cluster RBAC: HTTP ${res.statusCode}`);
 }
 
+export async function updateVirtualClusterGroups(
+  name: string,
+  groups: string[] | string,
+  namespace?: string
+): Promise<VirtualCluster | null> {
+  let targetNs = namespace;
+  if (!targetNs) {
+    const all = await listVirtualClusters();
+    const match = all.find((c) => c.name === name);
+    targetNs = match ? match.namespace : 'default';
+  }
+
+  const getRes = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`
+  );
+  if (getRes.statusCode !== 200 || !getRes.data) {
+    throw new Error(`Cluster ${name} not found in namespace ${targetNs}`);
+  }
+
+  const existing = getRes.data;
+  const updatedAnnotations = { ...(existing.metadata?.annotations || {}) };
+  const updatedLabels = { ...(existing.metadata?.labels || {}) };
+
+  const groupsList = Array.isArray(groups)
+    ? groups.map((g) => g.trim()).filter(Boolean)
+    : typeof groups === 'string'
+    ? groups.split(',').map((g) => g.trim()).filter(Boolean)
+    : [];
+
+  if (groupsList.length > 0) {
+    updatedAnnotations['vops.gitops.io/cluster-groups'] = groupsList.join(',');
+    updatedAnnotations['vops.gitops.io/cluster-group'] = groupsList[0];
+    updatedLabels['vops.gitops.io/cluster-group'] = groupsList[0].replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 63);
+  } else {
+    updatedAnnotations['vops.gitops.io/cluster-groups'] = null;
+    updatedAnnotations['vops.gitops.io/cluster-group'] = null;
+    updatedLabels['vops.gitops.io/cluster-group'] = null;
+  }
+
+  const patch = {
+    metadata: {
+      annotations: updatedAnnotations,
+      labels: updatedLabels,
+    },
+  };
+
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
+    'PATCH',
+    patch,
+    'application/merge-patch+json'
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to update virtual cluster groups: HTTP ${res.statusCode}`);
+}
+
+export async function getFleetClusterGroups(): Promise<ClusterGroupInfo[]> {
+  const clusters = await listVirtualClusters();
+  const groupMap: Record<string, string[]> = {};
+  for (const c of clusters) {
+    const groups = c.metadata?.clusterGroups || (c.metadata?.clusterGroup ? [c.metadata.clusterGroup] : []);
+    for (const g of groups) {
+      const trimmed = g.trim();
+      if (!trimmed) continue;
+      if (!groupMap[trimmed]) groupMap[trimmed] = [];
+      groupMap[trimmed].push(c.name);
+    }
+  }
+  return Object.entries(groupMap)
+    .map(([name, clusters]) => ({
+      name,
+      clusterCount: clusters.length,
+      clusters,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function setVirtualClusterSleep(
   name: string,
   sleep: boolean,
@@ -681,8 +722,15 @@ export async function upgradeVirtualCluster(
     kubernetesVersion?: string;
     vclusterVersion?: string;
   },
-  namespace = 'default'
+  namespace?: string
 ): Promise<VirtualCluster | null> {
+  let targetNs = namespace;
+  if (!targetNs) {
+    const all = await listVirtualClusters();
+    const match = all.find((c) => c.name === name);
+    targetNs = match ? match.namespace : 'default';
+  }
+
   const patch: any = { spec: {} };
   if (upgrades.kubernetesVersion) {
     patch.spec.kubernetesVersion = upgrades.kubernetesVersion;
@@ -692,7 +740,7 @@ export async function upgradeVirtualCluster(
   }
 
   const res = await k8sRequest<any>(
-    `/apis/vops.gitops.io/v1alpha1/namespaces/${namespace}/virtualclusters/${name}`,
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
     'PATCH',
     patch,
     'application/merge-patch+json'
