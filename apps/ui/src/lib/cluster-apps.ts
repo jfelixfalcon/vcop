@@ -23,10 +23,13 @@ const defaultEnv = {
  * to prevent TLS altname mismatch when connecting to internal cluster DNS services.
  * Also explicitly sets context.namespace to avoid inheriting host pod namespace (e.g. vcop-system).
  */
-function prepareInternalKubeconfig(raw: string, defaultNamespace = 'default'): string {
+function prepareInternalKubeconfig(raw: string, defaultNamespace = 'default', clusterName?: string, clusterNamespace?: string): string {
   let processed = raw.replace(/\s*certificate-authority-data:\s*[A-Za-z0-9+/=]+/g, '\n    insecure-skip-tls-verify: true');
   if (!processed.includes('insecure-skip-tls-verify: true')) {
     processed = processed.replace(/(cluster:\s*\n)/g, '$1    insecure-skip-tls-verify: true\n');
+  }
+  if (clusterName && clusterNamespace) {
+    processed = processed.replace(/server:\s*https?:\/\/[^\s]+/g, `server: https://${clusterName}.${clusterNamespace}.svc:443`);
   }
   // Explicitly inject namespace into context block so kubectl does not default to host pod namespace
   processed = processed.replace(/(context:\s*\n)/g, `$1    namespace: ${defaultNamespace}\n`);
@@ -57,7 +60,9 @@ function parseKubectlOutput(output: string): Array<{ kind: string; name: string 
  */
 export async function executeAppDeployment(
   rawKubeconfig: string,
-  app: InstalledApp
+  app: InstalledApp,
+  clusterName?: string,
+  clusterNamespace?: string
 ): Promise<{
   success: boolean;
   error?: string;
@@ -69,7 +74,7 @@ export async function executeAppDeployment(
   const guestNamespace = app.helm?.namespace || 'default';
 
   try {
-    const internalKc = prepareInternalKubeconfig(rawKubeconfig, guestNamespace);
+    const internalKc = prepareInternalKubeconfig(rawKubeconfig, guestNamespace, clusterName, clusterNamespace);
     fs.writeFileSync(kcPath, internalKc, { mode: 0o600 });
 
     // 1. Deploy manifests if defined
@@ -281,7 +286,7 @@ export async function installAppsToCluster(
     };
 
     // Execute actual deployment to the guest cluster
-    const deployResult = await executeAppDeployment(rawKubeconfig, installed);
+    const deployResult = await executeAppDeployment(rawKubeconfig, installed, clusterName, targetNs);
     if (deployResult.success) {
       installed.status = 'Installed';
       installed.error = undefined;
@@ -428,7 +433,7 @@ export async function syncClusterApps(
   const updatedApps: InstalledApp[] = [];
 
   for (const app of existingApps) {
-    const deployResult = await executeAppDeployment(rawKubeconfig, app);
+    const deployResult = await executeAppDeployment(rawKubeconfig, app, clusterName, targetNs);
     if (deployResult.success) {
       app.status = 'Installed';
       app.error = undefined;

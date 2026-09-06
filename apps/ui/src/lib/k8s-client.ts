@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig } from './types';
 import { getAppStoreCatalog } from './appstore';
 import { PRESETS } from './presets';
+import { syncGuestClusterRBAC } from './cluster-rbac';
 export { PRESETS, k8sRequest };
 
 interface K8sConnectionConfig {
@@ -757,6 +758,9 @@ export async function updateVirtualClusterRBAC(
     }
   }
 
+  // Trigger immediate reconcile
+  updatedAnnotations['vops.gitops.io/reconcile-trigger'] = Date.now().toString();
+
   const patch = {
     metadata: {
       annotations: updatedAnnotations,
@@ -772,6 +776,24 @@ export async function updateVirtualClusterRBAC(
   );
 
   if (res.statusCode >= 200 && res.statusCode < 300) {
+    // Fast-path guest RBAC sync
+    try {
+      const rawKc = await getKubeconfig(name, targetNs);
+      if (rawKc) {
+        const effectiveOwner = rbac.owner !== undefined ? rbac.owner : updatedAnnotations['vops.gitops.io/owner'];
+        const effectiveGroups = rbac.allowedGroups !== undefined
+          ? rbac.allowedGroups
+          : (updatedAnnotations['vops.gitops.io/allowed-groups'] || '').split(',').filter(Boolean);
+        const effectiveEmails = rbac.allowedEmails !== undefined
+          ? rbac.allowedEmails
+          : (updatedAnnotations['vops.gitops.io/allowed-emails'] || '').split(',').filter(Boolean);
+
+        await syncGuestClusterRBAC(rawKc, name, targetNs, effectiveOwner, effectiveGroups, effectiveEmails);
+      }
+    } catch (e: any) {
+      console.warn(`[updateVirtualClusterRBAC] Guest RBAC fast-path sync failed for ${name}:`, e.message);
+    }
+
     return mapK8sResourceToVirtualCluster(res.data);
   }
 

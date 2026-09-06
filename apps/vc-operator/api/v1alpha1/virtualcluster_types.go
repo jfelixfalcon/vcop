@@ -39,6 +39,7 @@ const (
 	ConditionKubeconfigGenerated = "KubeconfigGenerated"
 	ConditionQuotaReady          = "QuotaReady"
 	ConditionSleeping            = "Sleeping"
+	ConditionRBACReady           = "RBACReady"
 )
 
 // CoreDNSComponent configures CoreDNS add-on inside vCluster

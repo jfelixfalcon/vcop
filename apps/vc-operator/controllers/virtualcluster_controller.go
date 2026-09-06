@@ -41,6 +41,7 @@ type VirtualClusterReconciler struct {
 	AddonsReconciler     *AddonsReconciler
 	UpgradeManager       *UpgradeManager
 	QuotaReconciler      *QuotaReconciler
+	RBACReconciler       *RBACReconciler
 }
 
 // +kubebuilder:rbac:groups=vops.gitops.io,resources=virtualclusters,verbs=get;list;watch;create;update;patch;delete
@@ -78,6 +79,9 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	if r.QuotaReconciler == nil {
 		r.QuotaReconciler = NewQuotaReconciler(r.Client)
+	}
+	if r.RBACReconciler == nil {
+		r.RBACReconciler = NewRBACReconciler(r.Client)
 	}
 
 	// 1. Handle Finalizer & Deletion
@@ -220,7 +224,19 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		r.setCondition(&vc, v1alpha1.ConditionQuotaReady, metav1.ConditionTrue, "QuotaEnforced", "ResourceQuota and LimitRange governance policies are active")
 	}
 
-	// 8. Update Observed Versions & Final Phase
+	// 8. Reconcile Guest RBAC Delegation (ClusterRoleBinding for owner, allowed-emails, and allowed-groups)
+	if kubeconfigReady {
+		if err := r.RBACReconciler.ReconcileGuestRBAC(ctx, &vc); err != nil {
+			log.Error(err, "failed reconciling guest cluster RBAC")
+			r.setCondition(&vc, v1alpha1.ConditionRBACReady, metav1.ConditionFalse, "RBACReconcileFailed", err.Error())
+		} else {
+			r.setCondition(&vc, v1alpha1.ConditionRBACReady, metav1.ConditionTrue, "RBACConfigured", "Guest cluster RBAC role bindings successfully reconciled")
+		}
+	} else {
+		r.setCondition(&vc, v1alpha1.ConditionRBACReady, metav1.ConditionFalse, "WaitingForControlPlane", "RBAC delegation awaiting control plane and kubeconfig readiness")
+	}
+
+	// 9. Update Observed Versions & Final Phase
 	if isSleeping {
 		vc.Status.Phase = v1alpha1.PhaseSleeping
 	} else if etcdReady && syncerReady && addonsReady && quotaReady {
@@ -461,6 +477,7 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.AddonsReconciler = NewAddonsReconciler(mgr.GetClient())
 	r.UpgradeManager = NewUpgradeManager(mgr.GetClient())
 	r.QuotaReconciler = NewQuotaReconciler(mgr.GetClient())
+	r.RBACReconciler = NewRBACReconciler(mgr.GetClient())
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.VirtualCluster{}).
