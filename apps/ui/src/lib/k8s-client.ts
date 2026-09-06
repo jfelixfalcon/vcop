@@ -1206,6 +1206,10 @@ export async function updateVirtualClusterEndpointAndOidc(
       }
 
       let mergedArgs = [...currentArgs];
+      if (!oidc.caFile) {
+        mergedArgs = mergedArgs.filter((a) => !a.startsWith('--oidc-ca-file='));
+      }
+
       for (const flag of oidcFlags) {
         const prefix = flag.slice(0, flag.indexOf('=') + 1);
         const idx = mergedArgs.findIndex((a) => a.startsWith(prefix));
@@ -1292,12 +1296,33 @@ export async function updateVirtualClusterEndpointAndOidc(
     }
   }
 
+  const hasAnyCa = Boolean(
+    updatedAnnotations['vops.gitops.io/custom-ca-cert'] ||
+    updatedAnnotations['vops.gitops.io/oidc-ca-cert'] ||
+    updatedAnnotations['vops.gitops.io/custom-ca-secret'] ||
+    updatedAnnotations['vops.gitops.io/custom-ca-configmap']
+  );
+  if (!hasAnyCa) {
+    delete updatedAnnotations['vops.gitops.io/oidc-ca-file'];
+  }
+
   // Trigger operator reconciliation
   updatedAnnotations['vops.gitops.io/reconcile-trigger'] = Date.now().toString();
 
+  // Explicitly set removed annotations to null so RFC 7396 merge patch deletes them
+  const patchAnnotations: Record<string, string | null> = {};
+  for (const k of Object.keys(existing.metadata?.annotations || {})) {
+    if (!(k in updatedAnnotations)) {
+      patchAnnotations[k] = null;
+    }
+  }
+  for (const [k, v] of Object.entries(updatedAnnotations)) {
+    patchAnnotations[k] = v;
+  }
+
   const patch = {
     metadata: {
-      annotations: updatedAnnotations,
+      annotations: patchAnnotations,
     },
     spec: {
       rawConfig,

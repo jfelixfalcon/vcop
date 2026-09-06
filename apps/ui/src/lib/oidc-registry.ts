@@ -119,7 +119,7 @@ export async function saveEntireOidcRegistryToK8s(registry: OidcRegistry): Promi
 export async function saveGlobalOidcProfile(
   profile: Partial<OidcProfile>,
   applyToFleet = false
-): Promise<{ registry: OidcRegistry; appliedCount: number }> {
+): Promise<{ registry: OidcRegistry; appliedCount: number; errors?: string[] }> {
   const registry = await getOidcRegistry();
 
   registry.global = {
@@ -134,13 +134,15 @@ export async function saveGlobalOidcProfile(
   await saveEntireOidcRegistryToK8s(registry);
 
   let appliedCount = 0;
+  let errors: string[] = [];
   if (applyToFleet) {
     const clusters = await listVirtualClusters();
     const result = await applyOidcProfileToClusters(clusters, registry.global);
     appliedCount = result.updated;
+    errors = result.errors;
   }
 
-  return { registry, appliedCount };
+  return { registry, appliedCount, errors };
 }
 
 /**
@@ -150,7 +152,7 @@ export async function saveGroupOidcProfile(
   groupName: string,
   profile: Partial<OidcProfile>,
   applyToGroupClusters = false
-): Promise<{ registry: OidcRegistry; appliedCount: number }> {
+): Promise<{ registry: OidcRegistry; appliedCount: number; errors?: string[] }> {
   const trimmedGroup = groupName.trim();
   if (!trimmedGroup) {
     throw new Error('Group name cannot be empty');
@@ -187,6 +189,7 @@ export async function saveGroupOidcProfile(
   await saveEntireOidcRegistryToK8s(registry);
 
   let appliedCount = 0;
+  let errors: string[] = [];
   if (applyToGroupClusters) {
     const allClusters = await listVirtualClusters();
     const groupClusters = allClusters.filter((c) => {
@@ -201,9 +204,10 @@ export async function saveGroupOidcProfile(
 
     const result = await applyOidcProfileToClusters(groupClusters, registry.groups[trimmedGroup]);
     appliedCount = result.updated;
+    errors = result.errors;
   }
 
-  return { registry, appliedCount };
+  return { registry, appliedCount, errors };
 }
 
 /**
