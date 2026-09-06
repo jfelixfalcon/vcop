@@ -1085,7 +1085,7 @@ users:
       - --oidc-issuer-url=${issuerUrl}
       - --oidc-client-id=${clientId}
 ${scopeLines}
-${idpCaLine}      - --oidc-use-pkce
+${idpCaLine}      - --oidc-pkce-method=auto
 `;
 }
 
