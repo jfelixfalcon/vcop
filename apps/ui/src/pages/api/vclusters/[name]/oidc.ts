@@ -92,6 +92,9 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
     const groupsClaim = typeof body.groupsClaim === 'string' && body.groupsClaim.trim() ? body.groupsClaim.trim() : 'groups';
     const groupsPrefix = typeof body.groupsPrefix === 'string' ? body.groupsPrefix.trim() : '';
     const caFile = typeof body.caFile === 'string' ? body.caFile.trim() : undefined;
+    const caCertificate = typeof body.caCertificate === 'string' ? body.caCertificate.trim() : undefined;
+    const caSecretName = typeof body.caSecretName === 'string' ? body.caSecretName.trim() : undefined;
+    const caConfigMapName = typeof body.caConfigMapName === 'string' ? body.caConfigMapName.trim() : undefined;
     const customEndpoint = typeof body.customEndpoint === 'string' ? body.customEndpoint.trim() : undefined;
 
     let extraScopes: string[] = ['email', 'profile', 'groups'];
@@ -131,7 +134,11 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
       groupsClaim,
       groupsPrefix,
       extraScopes,
-      caFile,
+      caFile: caFile || (caCertificate ? '/etc/ssl/custom-ca/ca.crt' : undefined),
+      caCertificate,
+      caSecretName,
+      caConfigMapName,
+      source: body.source || 'custom',
     };
 
     const updated = await updateVirtualClusterEndpointAndOidc(
@@ -139,6 +146,9 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
       {
         oidc: oidcConfig,
         customEndpoint,
+        customCaCert: caCertificate,
+        customCaSecret: caSecretName,
+        customCaConfigMap: caConfigMapName,
       },
       cluster.namespace
     );

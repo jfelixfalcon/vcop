@@ -18,6 +18,10 @@ export const DEFAULT_OIDC_REGISTRY: OidcRegistry = {
     groupsClaim: 'groups',
     groupsPrefix: '',
     extraScopes: ['email', 'profile', 'groups'],
+    caFile: '',
+    caCertificate: '',
+    caSecretName: '',
+    caConfigMapName: '',
   },
   groups: {},
 };
@@ -263,7 +267,10 @@ export function resolveOidcForCluster(
           groupsClaim: groupProfile.groupsClaim || 'groups',
           groupsPrefix: groupProfile.groupsPrefix || '',
           extraScopes: groupProfile.extraScopes || ['email', 'profile', 'groups'],
-          caFile: groupProfile.caFile || '',
+          caFile: groupProfile.caFile || (groupProfile.caCertificate ? '/etc/ssl/custom-ca/ca.crt' : ''),
+          caCertificate: groupProfile.caCertificate || '',
+          caSecretName: groupProfile.caSecretName || '',
+          caConfigMapName: groupProfile.caConfigMapName || '',
           source: 'group',
           inheritedFrom: g,
         },
@@ -290,7 +297,10 @@ export function resolveOidcForCluster(
         groupsClaim: registry.global.groupsClaim || 'groups',
         groupsPrefix: registry.global.groupsPrefix || '',
         extraScopes: registry.global.extraScopes || ['email', 'profile', 'groups'],
-        caFile: registry.global.caFile || '',
+        caFile: registry.global.caFile || (registry.global.caCertificate ? '/etc/ssl/custom-ca/ca.crt' : ''),
+        caCertificate: registry.global.caCertificate || '',
+        caSecretName: registry.global.caSecretName || '',
+        caConfigMapName: registry.global.caConfigMapName || '',
         source: 'global',
         inheritedFrom: 'global',
       },
@@ -353,14 +363,22 @@ export async function applyOidcProfileToClusters(
         groupsClaim: profile.groupsClaim?.trim() || 'groups',
         groupsPrefix: profile.groupsPrefix?.trim() || '',
         extraScopes: profile.extraScopes || ['email', 'profile', 'groups'],
-        caFile: profile.caFile?.trim() || '',
+        caFile: profile.caFile?.trim() || (profile.caCertificate ? '/etc/ssl/custom-ca/ca.crt' : ''),
+        caCertificate: profile.caCertificate?.trim() || '',
+        caSecretName: profile.caSecretName?.trim() || '',
+        caConfigMapName: profile.caConfigMapName?.trim() || '',
         source: profile.scope,
         inheritedFrom: profile.scope === 'group' ? profile.targetGroup : 'global',
       };
 
       await updateVirtualClusterEndpointAndOidc(
         c.name,
-        { oidc: targetOidc },
+        {
+          oidc: targetOidc,
+          customCaCert: profile.caCertificate?.trim() || '',
+          customCaSecret: profile.caSecretName?.trim() || '',
+          customCaConfigMap: profile.caConfigMapName?.trim() || '',
+        },
         c.namespace
       );
       updated++;

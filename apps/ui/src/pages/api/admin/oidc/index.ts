@@ -48,6 +48,13 @@ export const GET: APIRoute = async () => {
           inheritedFrom,
           issuerUrl: oidc?.issuerUrl || '',
           clientId: oidc?.clientId || '',
+          hasCustomCa: Boolean(
+            c.metadata?.customCaCert ||
+            c.metadata?.customCaSecret ||
+            c.metadata?.oidc?.caCertificate ||
+            (source === 'global' && registry.global?.caCertificate) ||
+            (source === 'group' && inheritedFrom && registry.groups[inheritedFrom]?.caCertificate)
+          ),
         };
       }),
     };

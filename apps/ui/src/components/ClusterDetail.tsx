@@ -934,6 +934,12 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                         Global Policy
                       </span>
                     ) : null}
+                    {(cluster.metadata?.customCaCert || cluster.metadata?.oidc?.caCertificate || cluster.metadata?.customCaSecret || cluster.metadata?.oidc?.caSecretName) && (
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 font-mono text-[10px] flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3 text-cyan-400" />
+                        Custom CA Trusted
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
                     Secure developer access using OpenID Connect claims with PKCE. Tokens are validated by the API server against your Identity Provider.
@@ -966,7 +972,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               </div>
 
               {/* Endpoint & OIDC Spec Summary Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 text-xs font-mono">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mt-4 text-xs font-mono">
                 {/* Active Endpoint */}
                 <div className="bg-cyber-900/80 border border-cyber-800 p-3 rounded-lg">
                   <span className="text-[11px] text-slate-400 flex items-center gap-1 mb-1">
@@ -1021,6 +1027,31 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   <div className="text-[10px] text-slate-500 mt-1">
                     Matches Authorized Groups
                   </div>
+                </div>
+
+                {/* Custom CA Status */}
+                <div className="bg-cyber-900/80 border border-cyber-800 p-3 rounded-lg">
+                  <span className="text-[11px] text-slate-400 flex items-center gap-1 mb-1">
+                    <ShieldCheck className={`w-3 h-3 ${(cluster.metadata?.customCaCert || cluster.metadata?.oidc?.caCertificate || cluster.metadata?.customCaSecret || cluster.metadata?.oidc?.caSecretName) ? 'text-cyan-400' : 'text-slate-500'}`} />
+                    TLS CA Trust
+                  </span>
+                  {(cluster.metadata?.customCaCert || cluster.metadata?.oidc?.caCertificate || cluster.metadata?.customCaSecret || cluster.metadata?.oidc?.caSecretName) ? (
+                    <>
+                      <div className="text-cyan-300 font-bold truncate">
+                        {cluster.metadata?.customCaSecret || cluster.metadata?.oidc?.caSecretName || 'Custom CA'}
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-1 truncate">
+                        /etc/ssl/custom-ca
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-slate-400 font-bold">Standard</div>
+                      <div className="text-[10px] text-slate-500 mt-1">
+                        System Cert Pool
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

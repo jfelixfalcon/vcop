@@ -76,6 +76,9 @@ export interface OidcConfig {
   groupsPrefix?: string;
   extraScopes?: string[];
   caFile?: string;
+  caCertificate?: string;
+  caSecretName?: string;
+  caConfigMapName?: string;
   source?: 'global' | 'group' | 'custom';
   inheritedFrom?: string;
 }
@@ -94,6 +97,9 @@ export interface OidcProfile {
   groupsPrefix?: string;
   extraScopes?: string[];
   caFile?: string;
+  caCertificate?: string;
+  caSecretName?: string;
+  caConfigMapName?: string;
   updatedAt?: string;
 }
 
@@ -162,6 +168,9 @@ export interface VirtualCluster {
     oidc?: OidcConfig;
     oidcInheritance?: 'global' | 'group' | 'custom';
     oidcInheritedFrom?: string;
+    customCaCert?: string;
+    customCaSecret?: string;
+    customCaConfigMap?: string;
   };
   sparklineData?: {
     cpu: number[];

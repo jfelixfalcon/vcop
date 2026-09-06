@@ -615,14 +615,17 @@ func GenerateYAMLWithAnnotations(spec *v1alpha1.VirtualClusterSpec, annotations 
 
 	// 2. OIDC Configuration -> Add kube-apiserver extraArgs
 	type OIDCAnnotation struct {
-		Enabled        bool   `json:"enabled"`
-		IssuerURL      string `json:"issuerUrl"`
-		ClientID       string `json:"clientId"`
-		UsernameClaim  string `json:"usernameClaim"`
-		UsernamePrefix string `json:"usernamePrefix"`
-		GroupsClaim    string `json:"groupsClaim"`
-		GroupsPrefix   string `json:"groupsPrefix"`
-		CAFile         string `json:"caFile"`
+		Enabled         bool   `json:"enabled"`
+		IssuerURL       string `json:"issuerUrl"`
+		ClientID        string `json:"clientId"`
+		UsernameClaim   string `json:"usernameClaim"`
+		UsernamePrefix  string `json:"usernamePrefix"`
+		GroupsClaim     string `json:"groupsClaim"`
+		GroupsPrefix    string `json:"groupsPrefix"`
+		CAFile          string `json:"caFile"`
+		CACertificate   string `json:"caCertificate"`
+		CASecretName    string `json:"caSecretName"`
+		CAConfigMapName string `json:"caConfigMapName"`
 	}
 
 	var oidcCfg OIDCAnnotation
@@ -639,6 +642,14 @@ func GenerateYAMLWithAnnotations(spec *v1alpha1.VirtualClusterSpec, annotations 
 			GroupsPrefix:   annotations["vops.gitops.io/oidc-groups-prefix"],
 			CAFile:         annotations["vops.gitops.io/oidc-ca-file"],
 		}
+	}
+
+	// Auto-detect custom CA and default caFile if not explicitly configured
+	hasCustomCA := oidcCfg.CACertificate != "" || oidcCfg.CASecretName != "" || oidcCfg.CAConfigMapName != "" ||
+		annotations["vops.gitops.io/custom-ca-cert"] != "" || annotations["vops.gitops.io/oidc-ca-cert"] != "" ||
+		annotations["vops.gitops.io/custom-ca-secret"] != "" || annotations["vops.gitops.io/custom-ca-configmap"] != ""
+	if oidcCfg.CAFile == "" && hasCustomCA {
+		oidcCfg.CAFile = "/etc/ssl/custom-ca/ca.crt"
 	}
 
 	if oidcCfg.Enabled && oidcCfg.IssuerURL != "" && oidcCfg.ClientID != "" {

@@ -64,6 +64,8 @@ export const ProvisioningWizard: React.FC = () => {
   const [kubernetesVersion, setKubernetesVersion] = useState<string>('');
   const [vclusterVersion, setVclusterVersion] = useState<string>('');
   const [customYaml, setCustomYaml] = useState<string>('');
+  const [customCaCert, setCustomCaCert] = useState<string>('');
+  const [customCaSecret, setCustomCaSecret] = useState<string>('');
 
   // App Store  State
   const [catalog, setCatalog] = useState<AppStoreCatalog | null>(null);
@@ -201,6 +203,8 @@ export const ProvisioningWizard: React.FC = () => {
         kubernetesVersion,
         vclusterVersion,
         customYaml: customYaml.trim() ? customYaml : undefined,
+        customCaCert: customCaCert.trim() || undefined,
+        customCaSecret: customCaSecret.trim() || undefined,
         installedApps: selectedAppIds.map((id) => ({
           appId: id,
           customValues: customValuesMap[id],
@@ -1088,6 +1092,39 @@ policies:
                           )}
                         </select>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Custom CA / Internal PKI Certificates */}
+                  <div className="pt-3 border-t border-cyber-800">
+                    <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                        Custom CA Certificate (Self-Signed / Internal PKI):
+                      </span>
+                      <span className="text-[10px] text-slate-500">Optional</span>
+                    </label>
+                    <p className="text-[11px] text-slate-500 leading-relaxed mb-2">
+                      PEM certificate mounted into the vCluster pods at <code className="text-slate-400">/etc/ssl/custom-ca/ca.crt</code> and trusted by internal kube-apiserver for OIDC and webhook endpoints.
+                    </p>
+                    <textarea
+                      rows={3}
+                      value={customCaCert}
+                      onChange={(e) => setCustomCaCert(e.target.value)}
+                      placeholder="-----BEGIN CERTIFICATE-----&#10;MIID...&#10;-----END CERTIFICATE-----"
+                      className="w-full bg-cyber-900 border border-cyber-700 rounded-xl p-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-cyan-400 select-all"
+                    />
+                    <div className="mt-2">
+                      <label className="block text-[11px] font-mono text-slate-400 mb-1">
+                        Or Existing Kubernetes Secret Name:
+                      </label>
+                      <input
+                        type="text"
+                        value={customCaSecret}
+                        onChange={(e) => setCustomCaSecret(e.target.value)}
+                        placeholder="e.g. corporate-root-ca"
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-400"
+                      />
                     </div>
                   </div>
 

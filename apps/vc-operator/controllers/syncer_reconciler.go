@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"reflect"
 
@@ -86,6 +87,77 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 	})
 	if err != nil {
 		return false, "", fmt.Errorf("failed reconciling vcluster secret: %w", err)
+	}
+
+	// Reconcile Custom CA Secret if custom CA is provided
+	customCaCert := vc.Annotations["vops.gitops.io/custom-ca-cert"]
+	if customCaCert == "" {
+		customCaCert = vc.Annotations["vops.gitops.io/oidc-ca-cert"]
+	}
+	if customCaCert == "" && vc.Annotations["vops.gitops.io/oidc-config"] != "" {
+		var oidcMap map[string]interface{}
+		if err := json.Unmarshal([]byte(vc.Annotations["vops.gitops.io/oidc-config"]), &oidcMap); err == nil {
+			if caStr, ok := oidcMap["caCertificate"].(string); ok && caStr != "" {
+				customCaCert = caStr
+			}
+		}
+	}
+	customCaSecret := vc.Annotations["vops.gitops.io/custom-ca-secret"]
+	customCaConfigMap := vc.Annotations["vops.gitops.io/custom-ca-configmap"]
+
+	hasCustomCA := false
+	var customCaVolumeSource corev1.VolumeSource
+
+	if customCaCert != "" {
+		customCaSec := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("vc-custom-ca-%s", vc.Name),
+				Namespace: vc.Namespace,
+			},
+		}
+		_, err = controllerutil.CreateOrUpdate(ctx, r.Client, customCaSec, func() error {
+			customCaSec.Labels = labels
+			customCaSec.Type = corev1.SecretTypeOpaque
+			customCaSec.Data = map[string][]byte{
+				"ca.crt":        []byte(customCaCert),
+				"ca-bundle.crt": []byte(customCaCert),
+			}
+			return controllerutil.SetControllerReference(vc, customCaSec, r.Scheme())
+		})
+		if err != nil {
+			return false, "", fmt.Errorf("failed reconciling custom-ca secret: %w", err)
+		}
+		hasCustomCA = true
+		customCaVolumeSource = corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: customCaSec.Name,
+			},
+		}
+	} else if customCaSecret != "" {
+		hasCustomCA = true
+		customCaVolumeSource = corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: customCaSecret,
+			},
+		}
+	} else if customCaConfigMap != "" {
+		hasCustomCA = true
+		customCaVolumeSource = corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: customCaConfigMap,
+				},
+			},
+		}
+	} else {
+		// Clean up any stale custom-ca secret if CA was removed
+		staleSec := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("vc-custom-ca-%s", vc.Name),
+				Namespace: vc.Namespace,
+			},
+		}
+		_ = r.Delete(ctx, staleSec)
 	}
 
 	// Reconcile ServiceAccount for syncer
@@ -369,9 +441,17 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: selectorLabels,
-					Annotations: map[string]string{
-						"vops.gitops.io/config-hash": fmt.Sprintf("%x", sha256.Sum256(yamlBytes)),
-					},
+					Annotations: func() map[string]string {
+						hInput := append([]byte{}, yamlBytes...)
+						if hasCustomCA {
+							hInput = append(hInput, []byte(customCaCert)...)
+							hInput = append(hInput, []byte(customCaSecret)...)
+							hInput = append(hInput, []byte(customCaConfigMap)...)
+						}
+						return map[string]string{
+							"vops.gitops.io/config-hash": fmt.Sprintf("%x", sha256.Sum256(hInput)),
+						}
+					}(),
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            sa.Name,
@@ -400,48 +480,63 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 								"/vcluster",
 								"start",
 							},
-							Env: []corev1.EnvVar{
-								{
-									Name:  "VCLUSTER_NAME",
-									Value: vc.Name,
-								},
-								{
-									Name:  "LOFT_LOG_ENCODING",
-									Value: "console",
-								},
-								{
-									Name: "POD_NAME",
-									ValueFrom: &corev1.EnvVarSource{
-										FieldRef: &corev1.ObjectFieldSelector{
-											FieldPath: "metadata.name",
+							Env: func() []corev1.EnvVar {
+								envs := []corev1.EnvVar{
+									{
+										Name:  "VCLUSTER_NAME",
+										Value: vc.Name,
+									},
+									{
+										Name:  "LOFT_LOG_ENCODING",
+										Value: "console",
+									},
+									{
+										Name: "POD_NAME",
+										ValueFrom: &corev1.EnvVarSource{
+											FieldRef: &corev1.ObjectFieldSelector{
+												FieldPath: "metadata.name",
+											},
 										},
 									},
-								},
-								{
-									Name: "POD_IP",
-									ValueFrom: &corev1.EnvVarSource{
-										FieldRef: &corev1.ObjectFieldSelector{
-											FieldPath: "status.podIP",
+									{
+										Name: "POD_IP",
+										ValueFrom: &corev1.EnvVarSource{
+											FieldRef: &corev1.ObjectFieldSelector{
+												FieldPath: "status.podIP",
+											},
 										},
 									},
-								},
-								{
-									Name: "NODE_NAME",
-									ValueFrom: &corev1.EnvVarSource{
-										FieldRef: &corev1.ObjectFieldSelector{
-											FieldPath: "spec.nodeName",
+									{
+										Name: "NODE_NAME",
+										ValueFrom: &corev1.EnvVarSource{
+											FieldRef: &corev1.ObjectFieldSelector{
+												FieldPath: "spec.nodeName",
+											},
 										},
 									},
-								},
-								{
-									Name: "NODE_IP",
-									ValueFrom: &corev1.EnvVarSource{
-										FieldRef: &corev1.ObjectFieldSelector{
-											FieldPath: "status.hostIP",
+									{
+										Name: "NODE_IP",
+										ValueFrom: &corev1.EnvVarSource{
+											FieldRef: &corev1.ObjectFieldSelector{
+												FieldPath: "status.hostIP",
+											},
 										},
 									},
-								},
-							},
+								}
+								if hasCustomCA {
+									envs = append(envs,
+										corev1.EnvVar{
+											Name:  "SSL_CERT_DIR",
+											Value: "/etc/ssl/certs:/etc/ssl/custom-ca",
+										},
+										corev1.EnvVar{
+											Name:  "NODE_EXTRA_CA_CERTS",
+											Value: "/etc/ssl/custom-ca/ca.crt",
+										},
+									)
+								}
+								return envs
+							}(),
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "https",
@@ -459,32 +554,50 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 									corev1.ResourceMemory: memLim,
 								},
 							},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "data",
-									MountPath: "/data",
-								},
-								{
-									Name:      "binaries",
-									MountPath: "/binaries",
-								},
-								{
-									Name:      "certs",
-									MountPath: "/pki",
-								},
-								{
-									Name:      "helm-cache",
-									MountPath: "/.cache/helm",
-								},
-								{
-									Name:      "vcluster-config",
-									MountPath: "/var/lib/vcluster",
-								},
-								{
-									Name:      "tmp",
-									MountPath: "/tmp",
-								},
-							},
+							VolumeMounts: func() []corev1.VolumeMount {
+								vMounts := []corev1.VolumeMount{
+									{
+										Name:      "data",
+										MountPath: "/data",
+									},
+									{
+										Name:      "binaries",
+										MountPath: "/binaries",
+									},
+									{
+										Name:      "certs",
+										MountPath: "/pki",
+									},
+									{
+										Name:      "helm-cache",
+										MountPath: "/.cache/helm",
+									},
+									{
+										Name:      "vcluster-config",
+										MountPath: "/var/lib/vcluster",
+									},
+									{
+										Name:      "tmp",
+										MountPath: "/tmp",
+									},
+								}
+								if hasCustomCA {
+									vMounts = append(vMounts, corev1.VolumeMount{
+										Name:      "custom-ca",
+										MountPath: "/etc/ssl/custom-ca",
+										ReadOnly:  true,
+									})
+									if customCaCert != "" {
+										vMounts = append(vMounts, corev1.VolumeMount{
+											Name:      "custom-ca",
+											MountPath: "/etc/ssl/certs/custom-ca.crt",
+											SubPath:   "ca.crt",
+											ReadOnly:  true,
+										})
+									}
+								}
+								return vMounts
+							}(),
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
@@ -565,6 +678,12 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 								VolumeSource: corev1.VolumeSource{
 									EmptyDir: &corev1.EmptyDirVolumeSource{},
 								},
+							})
+						}
+						if hasCustomCA {
+							vols = append(vols, corev1.Volume{
+								Name:         "custom-ca",
+								VolumeSource: customCaVolumeSource,
 							})
 						}
 						return vols

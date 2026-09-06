@@ -252,9 +252,25 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
     if (oidcInheritedFrom) {
       oidc.inheritedFrom = oidcInheritedFrom;
     }
+    const customCaCert = item.metadata?.annotations?.['vops.gitops.io/custom-ca-cert'] || item.metadata?.annotations?.['vops.gitops.io/oidc-ca-cert'] || oidc.caCertificate;
+    if (customCaCert) {
+      oidc.caCertificate = customCaCert;
+    }
+    const customCaSecret = item.metadata?.annotations?.['vops.gitops.io/custom-ca-secret'] || oidc.caSecretName;
+    if (customCaSecret) {
+      oidc.caSecretName = customCaSecret;
+    }
+    const customCaConfigMap = item.metadata?.annotations?.['vops.gitops.io/custom-ca-configmap'] || oidc.caConfigMapName;
+    if (customCaConfigMap) {
+      oidc.caConfigMapName = customCaConfigMap;
+    }
   } catch {
     // fallback
   }
+
+  const customCaCert = item.metadata?.annotations?.['vops.gitops.io/custom-ca-cert'] || item.metadata?.annotations?.['vops.gitops.io/oidc-ca-cert'] || oidc.caCertificate;
+  const customCaSecret = item.metadata?.annotations?.['vops.gitops.io/custom-ca-secret'] || oidc.caSecretName;
+  const customCaConfigMap = item.metadata?.annotations?.['vops.gitops.io/custom-ca-configmap'] || oidc.caConfigMapName;
 
   return {
     name,
@@ -333,6 +349,9 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       oidc,
       oidcInheritance: oidc.source,
       oidcInheritedFrom: oidc.inheritedFrom,
+      customCaCert,
+      customCaSecret,
+      customCaConfigMap,
     },
     sparklineData: {
       cpu: cpuSparkline,
@@ -400,6 +419,9 @@ export async function createVirtualCluster(data: {
   installedApps?: Array<{ appId: string; customValues?: string }>;
   customEndpoint?: string;
   oidc?: OidcConfig;
+  customCaCert?: string;
+  customCaSecret?: string;
+  customCaConfigMap?: string;
 }): Promise<VirtualCluster> {
   const name = data.clusterName.trim().toLowerCase();
   let k8sVer = data.kubernetesVersion;
@@ -469,6 +491,23 @@ export async function createVirtualCluster(data: {
     if (effectiveOidc.groupsClaim) annotations['vops.gitops.io/oidc-groups-claim'] = effectiveOidc.groupsClaim;
     if (effectiveOidc.source) annotations['vops.gitops.io/oidc-source'] = effectiveOidc.source;
     if (effectiveOidc.inheritedFrom) annotations['vops.gitops.io/oidc-inherited-from'] = effectiveOidc.inheritedFrom;
+  }
+
+  const customCa = data.customCaCert || effectiveOidc?.caCertificate;
+  if (customCa && customCa.trim()) {
+    annotations['vops.gitops.io/custom-ca-cert'] = customCa.trim();
+    annotations['vops.gitops.io/oidc-ca-cert'] = customCa.trim();
+    annotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
+  }
+  const customSec = data.customCaSecret || effectiveOidc?.caSecretName;
+  if (customSec && customSec.trim()) {
+    annotations['vops.gitops.io/custom-ca-secret'] = customSec.trim();
+    annotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
+  }
+  const customCm = data.customCaConfigMap || effectiveOidc?.caConfigMapName;
+  if (customCm && customCm.trim()) {
+    annotations['vops.gitops.io/custom-ca-configmap'] = customCm.trim();
+    annotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
   }
 
   const labels: Record<string, string> = {
@@ -977,15 +1016,27 @@ export function generateOidcKubeconfig(
     ? oidc.extraScopes
     : ['email', 'profile', 'groups'];
 
+  let effectiveCaData = caData;
+  if (!effectiveCaData && cluster.metadata?.customCaCert) {
+    effectiveCaData = Buffer.from(cluster.metadata.customCaCert.trim()).toString('base64');
+  }
+
   let clusterLines = `cluster:\n    server: ${endpoint}\n`;
-  if (caData) {
-    clusterLines += `    certificate-authority-data: ${caData}\n`;
+  if (effectiveCaData) {
+    clusterLines += `    certificate-authority-data: ${effectiveCaData}\n`;
   } else {
     clusterLines += `    insecure-skip-tls-verify: true\n`;
   }
   clusterLines += `  name: ${clusterName}`;
 
   const scopeLines = extraScopes.map((s) => `      - --oidc-extra-scope=${s}`).join('\n');
+
+  const customCa = oidc.caCertificate || cluster.metadata?.customCaCert;
+  let idpCaLine = '';
+  if (customCa && customCa.trim()) {
+    const b64 = Buffer.from(customCa.trim()).toString('base64');
+    idpCaLine = `      - --idp-certificate-authority-data=${b64}\n`;
+  }
 
   return `apiVersion: v1
 kind: Config
@@ -1012,7 +1063,7 @@ users:
       - --oidc-issuer-url=${issuerUrl}
       - --oidc-client-id=${clientId}
 ${scopeLines}
-      - --oidc-use-pkce
+${idpCaLine}      - --oidc-use-pkce
 `;
 }
 
@@ -1044,6 +1095,9 @@ export async function updateVirtualClusterEndpointAndOidc(
   data: {
     customEndpoint?: string;
     oidc?: OidcConfig;
+    customCaCert?: string;
+    customCaSecret?: string;
+    customCaConfigMap?: string;
   },
   namespace?: string
 ): Promise<VirtualCluster> {
@@ -1176,6 +1230,65 @@ export async function updateVirtualClusterEndpointAndOidc(
           (a: string) => !a.startsWith('--oidc-')
         );
       }
+    }
+  }
+
+  // 3. Handle Custom CA Certificates
+  if (data.customCaCert !== undefined) {
+    const trimmed = data.customCaCert.trim();
+    if (trimmed) {
+      updatedAnnotations['vops.gitops.io/custom-ca-cert'] = trimmed;
+      updatedAnnotations['vops.gitops.io/oidc-ca-cert'] = trimmed;
+      updatedAnnotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
+    } else {
+      delete updatedAnnotations['vops.gitops.io/custom-ca-cert'];
+      delete updatedAnnotations['vops.gitops.io/oidc-ca-cert'];
+    }
+  } else if (data.oidc?.caCertificate !== undefined) {
+    const trimmed = data.oidc.caCertificate.trim();
+    if (trimmed) {
+      updatedAnnotations['vops.gitops.io/custom-ca-cert'] = trimmed;
+      updatedAnnotations['vops.gitops.io/oidc-ca-cert'] = trimmed;
+      updatedAnnotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
+    } else {
+      delete updatedAnnotations['vops.gitops.io/custom-ca-cert'];
+      delete updatedAnnotations['vops.gitops.io/oidc-ca-cert'];
+    }
+  }
+
+  if (data.customCaSecret !== undefined) {
+    const trimmed = data.customCaSecret.trim();
+    if (trimmed) {
+      updatedAnnotations['vops.gitops.io/custom-ca-secret'] = trimmed;
+      updatedAnnotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
+    } else {
+      delete updatedAnnotations['vops.gitops.io/custom-ca-secret'];
+    }
+  } else if (data.oidc?.caSecretName !== undefined) {
+    const trimmed = data.oidc.caSecretName.trim();
+    if (trimmed) {
+      updatedAnnotations['vops.gitops.io/custom-ca-secret'] = trimmed;
+      updatedAnnotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
+    } else {
+      delete updatedAnnotations['vops.gitops.io/custom-ca-secret'];
+    }
+  }
+
+  if (data.customCaConfigMap !== undefined) {
+    const trimmed = data.customCaConfigMap.trim();
+    if (trimmed) {
+      updatedAnnotations['vops.gitops.io/custom-ca-configmap'] = trimmed;
+      updatedAnnotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
+    } else {
+      delete updatedAnnotations['vops.gitops.io/custom-ca-configmap'];
+    }
+  } else if (data.oidc?.caConfigMapName !== undefined) {
+    const trimmed = data.oidc.caConfigMapName.trim();
+    if (trimmed) {
+      updatedAnnotations['vops.gitops.io/custom-ca-configmap'] = trimmed;
+      updatedAnnotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
+    } else {
+      delete updatedAnnotations['vops.gitops.io/custom-ca-configmap'];
     }
   }
 

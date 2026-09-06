@@ -367,3 +367,110 @@ func TestVirtualClusterReconciler_SleepAndWake(t *testing.T) {
 		t.Errorf("Expected 3 replicas for syncer after waking up, got %v", syncerSts.Spec.Replicas)
 	}
 }
+
+func TestVirtualClusterReconciler_CustomCA(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-ca-cluster",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"vops.gitops.io/custom-ca-cert": "-----BEGIN CERTIFICATE-----\nMIIB_TEST_CA_DATA\n-----END CERTIFICATE-----",
+			},
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName:       "test-ca-cluster",
+			KubernetesVersion: "v1.31.0",
+			VClusterVersion:   "0.36.0",
+			SizePreset:        v1alpha1.PresetSmall,
+			HighAvailability:  false,
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc).
+		WithStatusSubresource(vc).
+		Build()
+
+	logger := zap.New(zap.UseDevMode(true))
+
+	reconciler := &VirtualClusterReconciler{
+		Client:               client,
+		Log:                  logger,
+		Scheme:               scheme,
+		EtcdReconciler:       NewEtcdReconciler(client),
+		SyncerReconciler:     NewSyncerReconciler(client),
+		KubeconfigReconciler: NewKubeconfigReconciler(client),
+		AddonsReconciler:     NewAddonsReconciler(client),
+		UpgradeManager:       NewUpgradeManager(client),
+	}
+
+	ctx := context.Background()
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      vc.Name,
+			Namespace: vc.Namespace,
+		},
+	}
+
+	// 1. First pass adds finalizer
+	_, _ = reconciler.Reconcile(ctx, req)
+	// 2. Second pass creates resources
+	_, err := reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+
+	// Verify custom CA Secret was created
+	sec := &corev1.Secret{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "vc-custom-ca-test-ca-cluster", Namespace: "default"}, sec); err != nil {
+		t.Fatalf("Expected Secret vc-custom-ca-test-ca-cluster to exist: %v", err)
+	}
+	if string(sec.Data["ca.crt"]) != "-----BEGIN CERTIFICATE-----\nMIIB_TEST_CA_DATA\n-----END CERTIFICATE-----" {
+		t.Errorf("Unexpected ca.crt content: %s", string(sec.Data["ca.crt"]))
+	}
+
+	// Verify StatefulSet mounts custom CA
+	sts := &appsv1.StatefulSet{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-ca-cluster", Namespace: "default"}, sts); err != nil {
+		t.Fatalf("Expected StatefulSet test-ca-cluster to exist: %v", err)
+	}
+
+	hasCAVolume := false
+	for _, v := range sts.Spec.Template.Spec.Volumes {
+		if v.Name == "custom-ca" && v.Secret != nil && v.Secret.SecretName == "vc-custom-ca-test-ca-cluster" {
+			hasCAVolume = true
+			break
+		}
+	}
+	if !hasCAVolume {
+		t.Errorf("Expected custom-ca volume in StatefulSet volumes")
+	}
+
+	syncerContainer := sts.Spec.Template.Spec.Containers[0]
+	hasCAMount := false
+	for _, m := range syncerContainer.VolumeMounts {
+		if m.Name == "custom-ca" && m.MountPath == "/etc/ssl/custom-ca" {
+			hasCAMount = true
+			break
+		}
+	}
+	if !hasCAMount {
+		t.Errorf("Expected /etc/ssl/custom-ca volume mount in syncer container")
+	}
+
+	hasSSLDirEnv := false
+	for _, e := range syncerContainer.Env {
+		if e.Name == "SSL_CERT_DIR" && e.Value == "/etc/ssl/certs:/etc/ssl/custom-ca" {
+			hasSSLDirEnv = true
+			break
+		}
+	}
+	if !hasSSLDirEnv {
+		t.Errorf("Expected SSL_CERT_DIR env var in syncer container")
+	}
+}

@@ -17,6 +17,9 @@ import {
   Tag,
   ArrowRight,
   ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  FileCode,
 } from 'lucide-react';
 import type { OidcProfile, OidcRegistry } from '../lib/types';
 
@@ -29,6 +32,7 @@ interface ClusterStatItem {
   inheritedFrom?: string;
   issuerUrl: string;
   clientId: string;
+  hasCustomCa?: boolean;
 }
 
 interface ClusterStats {
@@ -63,6 +67,9 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
   const [globalGroupsClaim, setGlobalGroupsClaim] = useState('groups');
   const [globalGroupsPrefix, setGlobalGroupsPrefix] = useState('');
   const [globalExtraScopes, setGlobalExtraScopes] = useState('email, profile, groups');
+  const [globalCaCert, setGlobalCaCert] = useState('');
+  const [globalCaSecret, setGlobalCaSecret] = useState('');
+  const [showGlobalCa, setShowGlobalCa] = useState(false);
 
   // Group Modal State
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -76,6 +83,9 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
   const [groupGroupsClaim, setGroupGroupsClaim] = useState('groups');
   const [groupGroupsPrefix, setGroupGroupsPrefix] = useState('');
   const [groupExtraScopes, setGroupExtraScopes] = useState('email, profile, groups');
+  const [groupCaCert, setGroupCaCert] = useState('');
+  const [groupCaSecret, setGroupCaSecret] = useState('');
+  const [showGroupCa, setShowGroupCa] = useState(false);
 
   // Confirmation Modal State
   const [confirmModal, setConfirmModal] = useState<{
@@ -109,6 +119,9 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
               ? g.extraScopes.join(', ')
               : 'email, profile, groups'
           );
+          setGlobalCaCert(g.caCertificate || '');
+          setGlobalCaSecret(g.caSecretName || '');
+          if (g.caCertificate || g.caSecretName) setShowGlobalCa(true);
         }
       }
     } catch (err: any) {
@@ -140,6 +153,9 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
         groupsClaim: globalGroupsClaim.trim() || 'groups',
         groupsPrefix: globalGroupsPrefix.trim(),
         extraScopes: scopes,
+        caCertificate: globalCaCert.trim(),
+        caSecretName: globalCaSecret.trim(),
+        caFile: globalCaCert.trim() ? '/etc/ssl/custom-ca/ca.crt' : '',
       };
 
       const res = await fetch('/api/admin/oidc', {
@@ -182,6 +198,9 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
       setGroupExtraScopes(
         p.extraScopes && p.extraScopes.length > 0 ? p.extraScopes.join(', ') : 'email, profile, groups'
       );
+      setGroupCaCert(p.caCertificate || '');
+      setGroupCaSecret(p.caSecretName || '');
+      setShowGroupCa(Boolean(p.caCertificate || p.caSecretName));
     } else {
       setEditingGroupName(groupName || '');
       setGroupProfileName(groupName ? `${groupName} OIDC Profile` : '');
@@ -194,6 +213,9 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
       setGroupGroupsClaim('groups');
       setGroupGroupsPrefix('');
       setGroupExtraScopes('email, profile, groups');
+      setGroupCaCert(globalCaCert);
+      setGroupCaSecret(globalCaSecret);
+      setShowGroupCa(Boolean(globalCaCert || globalCaSecret));
     }
     setIsGroupModalOpen(true);
   };
@@ -222,6 +244,9 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
         groupsClaim: groupGroupsClaim.trim() || 'groups',
         groupsPrefix: groupGroupsPrefix.trim(),
         extraScopes: scopes,
+        caCertificate: groupCaCert.trim(),
+        caSecretName: groupCaSecret.trim(),
+        caFile: groupCaCert.trim() ? '/etc/ssl/custom-ca/ca.crt' : '',
       };
 
       const res = await fetch('/api/admin/oidc', {
@@ -600,6 +625,59 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
                   />
                 </div>
               </div>
+
+              {/* Custom CA / TLS Trust Store */}
+              <div className="pt-3 border-t border-cyber-800">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                    Custom Root / Intermediate CA Certificate (Internal / Self-Signed)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowGlobalCa(!showGlobalCa)}
+                    className="text-[11px] text-cyan-400 hover:text-cyan-300 font-mono flex items-center gap-1"
+                  >
+                    {showGlobalCa ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    {showGlobalCa ? 'Hide' : globalCaCert || globalCaSecret ? 'Configured' : 'Configure'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
+                  Trust internal or enterprise PKI certificates. Automatically mounted to <code className="text-slate-400">/etc/ssl/custom-ca/ca.crt</code> in vCluster pods, passed to <code className="text-slate-400">--oidc-ca-file</code>, and injected into client PKCE kubeconfigs.
+                </p>
+
+                {showGlobalCa && (
+                  <div className="space-y-3 bg-cyber-950/60 p-3.5 rounded-xl border border-cyber-800 animate-in fade-in duration-100">
+                    <div>
+                      <label className="block text-[11px] font-mono text-slate-300 mb-1">
+                        Raw CA Certificate (PEM format)
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={globalCaCert}
+                        onChange={(e) => setGlobalCaCert(e.target.value)}
+                        disabled={!isAdmin}
+                        placeholder="-----BEGIN CERTIFICATE-----&#10;MIID...&#10;-----END CERTIFICATE-----"
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl p-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-cyan-400 select-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-mono text-slate-300 mb-1">
+                        Or Reference Existing Kubernetes Secret Name (in cluster namespace)
+                      </label>
+                      <input
+                        type="text"
+                        value={globalCaSecret}
+                        onChange={(e) => setGlobalCaSecret(e.target.value)}
+                        disabled={!isAdmin}
+                        placeholder="e.g. corporate-root-ca"
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -790,6 +868,7 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
                 <th className="py-3 px-4 font-medium">Virtual Cluster</th>
                 <th className="py-3 px-4 font-medium">Cluster Groups</th>
                 <th className="py-3 px-4 font-medium">OIDC State</th>
+                <th className="py-3 px-4 font-medium">TLS / CA Trust</th>
                 <th className="py-3 px-4 font-medium">Inheritance Source</th>
                 <th className="py-3 px-4 font-medium">Issuer URL</th>
                 <th className="py-3 px-4 font-medium">Client ID</th>
@@ -830,6 +909,16 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
                       </span>
                     ) : (
                       <span className="text-slate-500 text-[10px]">Disabled</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4">
+                    {c.hasCustomCa ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-mono font-bold">
+                        <ShieldCheck className="w-3 h-3 text-cyan-400" />
+                        Custom CA
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 text-[10px]">System CAs</span>
                     )}
                   </td>
                   <td className="py-3 px-4">
@@ -992,6 +1081,57 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
                     className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-400"
                   />
                 </div>
+              </div>
+
+              {/* Custom CA / TLS Trust Store for Group */}
+              <div className="pt-3 border-t border-cyber-800">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                    Custom CA Certificate (Self-Signed / Internal PKI)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowGroupCa(!showGroupCa)}
+                    className="text-[11px] text-cyan-400 hover:text-cyan-300 font-mono flex items-center gap-1"
+                  >
+                    {showGroupCa ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    {showGroupCa ? 'Hide' : groupCaCert || groupCaSecret ? 'Configured' : 'Configure'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
+                  Trust internal endpoints for all virtual clusters belonging to this group.
+                </p>
+
+                {showGroupCa && (
+                  <div className="space-y-3 bg-cyber-950/60 p-3.5 rounded-xl border border-cyber-800 animate-in fade-in duration-100">
+                    <div>
+                      <label className="block text-[11px] font-mono text-slate-300 mb-1">
+                        Raw CA Certificate (PEM format)
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={groupCaCert}
+                        onChange={(e) => setGroupCaCert(e.target.value)}
+                        placeholder="-----BEGIN CERTIFICATE-----&#10;MIID...&#10;-----END CERTIFICATE-----"
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl p-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-400 select-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-mono text-slate-300 mb-1">
+                        Or Existing Kubernetes Secret Name
+                      </label>
+                      <input
+                        type="text"
+                        value={groupCaSecret}
+                        onChange={(e) => setGroupCaSecret(e.target.value)}
+                        placeholder="e.g. corp-ca-secret"
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-indigo-400"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

@@ -109,3 +109,29 @@ func TestGenerateYAMLWithAnnotations(t *testing.T) {
 		t.Errorf("Expected --api-audiences preserved in yaml, got:\n%s", yamlStr)
 	}
 }
+
+func TestGenerateYAMLWithAnnotations_CustomCA(t *testing.T) {
+	spec := &v1alpha1.VirtualClusterSpec{
+		ClusterName:       "tenant-custom-ca",
+		KubernetesVersion: "v1.31.0",
+		SizePreset:        v1alpha1.PresetSmall,
+	}
+
+	annotations := map[string]string{
+		"vops.gitops.io/oidc-config":    `{"enabled":true,"issuerUrl":"https://keycloak.corp.local","clientId":"corp-client","caCertificate":"-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----"}`,
+		"vops.gitops.io/custom-ca-cert": "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----",
+	}
+
+	yamlBytes, err := GenerateYAMLWithAnnotations(spec, annotations)
+	if err != nil {
+		t.Fatalf("GenerateYAMLWithAnnotations failed: %v", err)
+	}
+
+	yamlStr := string(yamlBytes)
+	if !strings.Contains(yamlStr, "--oidc-ca-file=/etc/ssl/custom-ca/ca.crt") {
+		t.Errorf("Expected --oidc-ca-file=/etc/ssl/custom-ca/ca.crt in yaml, got:\n%s", yamlStr)
+	}
+	if !strings.Contains(yamlStr, "--oidc-issuer-url=https://keycloak.corp.local") {
+		t.Errorf("Expected --oidc-issuer-url in yaml, got:\n%s", yamlStr)
+	}
+}
