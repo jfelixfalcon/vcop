@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { PRESETS } from '../../lib/k8s-client';
+import { PRESETS } from '../../lib/presets';
 
 export const GET: APIRoute = async () => {
   return new Response(JSON.stringify({

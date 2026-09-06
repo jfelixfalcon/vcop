@@ -1,9 +1,10 @@
 import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
-import type { VirtualCluster, SizePreset, PoliciesSpec } from './types';
-export { PRESETS } from './presets';
+import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp } from './types';
+import { getAppStoreCatalog } from './appstore';
+import { PRESETS } from './presets';
+export { PRESETS, k8sRequest };
 
 interface K8sConnectionConfig {
   host: string;
@@ -142,6 +143,16 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
 
   const isReady = phase === 'Ready';
 
+  let installedApps: InstalledApp[] = [];
+  try {
+    const rawApps = item.metadata?.annotations?.['vops.gitops.io/installed-apps'];
+    if (rawApps) {
+      installedApps = JSON.parse(rawApps);
+    }
+  } catch {
+    installedApps = [];
+  }
+
   return {
     name,
     namespace,
@@ -197,6 +208,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
         .filter(Boolean),
       environment: (item.metadata?.labels?.['vops.gitops.io/environment'] as any) || 'development',
       tags: [spec.sizePreset || 'medium', spec.highAvailability ? 'ha-etcd' : 'single-node'],
+      installedApps,
     },
     sparklineData: {
       cpu: isReady ? [12, 18, 24, 28, 22, 26, 24, 24] : [0, 0, 0, 0, 0],
@@ -259,6 +271,7 @@ export async function createVirtualCluster(data: {
   vclusterVersion?: string;
   policies?: PoliciesSpec;
   customYaml?: string;
+  installedApps?: Array<{ appId: string; customValues?: string }>;
 }): Promise<VirtualCluster> {
   const name = data.clusterName.trim().toLowerCase();
   const k8sVer = data.kubernetesVersion || 'v1.31.0';
@@ -321,6 +334,67 @@ export async function createVirtualCluster(data: {
       body.spec.rawConfig = JSON.parse(data.customYaml);
     } catch {
       body.spec.rawConfig = { raw: data.customYaml };
+    }
+  }
+
+  // Configure initial App Store applications if chosen during creation
+  if (data.installedApps && data.installedApps.length > 0) {
+    try {
+      const catalog = await getAppStoreCatalog();
+      const appsToSave: InstalledApp[] = [];
+      const now = new Date().toISOString();
+      const installer = data.owner || 'Platform Administrator';
+
+      for (const item of data.installedApps) {
+        const catApp = catalog.apps.find((a) => a.id === item.appId);
+        if (catApp) {
+          const customValues = item.customValues !== undefined ? item.customValues : catApp.helm?.values;
+          appsToSave.push({
+            appId: catApp.id,
+            name: catApp.name,
+            version: catApp.version,
+            category: catApp.category,
+            installedAt: now,
+            installedBy: installer,
+            status: 'Installed',
+            customValues,
+            helm: catApp.helm ? { ...catApp.helm, values: customValues } : undefined,
+            manifests: catApp.manifests,
+          });
+        }
+      }
+
+      annotations['vops.gitops.io/installed-apps'] = JSON.stringify(appsToSave);
+
+      const helmDeployments = appsToSave
+        .filter((a) => a.helm)
+        .map((a) => ({
+          chart: {
+            name: a.helm!.name,
+            repo: a.helm!.repo,
+            version: a.helm!.version || a.version,
+          },
+          release: {
+            name: a.helm!.releaseName,
+            namespace: a.helm!.namespace || 'default',
+          },
+          values: a.customValues !== undefined ? a.customValues : a.helm!.values,
+        }));
+
+      const manifestsDeployments = appsToSave
+        .filter((a) => a.manifests && a.manifests.trim())
+        .map((a) => a.manifests!.trim())
+        .join('\n---\n');
+
+      body.spec.rawConfig = body.spec.rawConfig || {};
+      body.spec.rawConfig.experimental = body.spec.rawConfig.experimental || {};
+      body.spec.rawConfig.experimental.deploy = body.spec.rawConfig.experimental.deploy || {};
+      body.spec.rawConfig.experimental.deploy.vcluster = {
+        helm: helmDeployments,
+        manifests: manifestsDeployments,
+      };
+    } catch (e) {
+      console.warn('Failed compiling initial installed apps for new cluster:', e);
     }
   }
 

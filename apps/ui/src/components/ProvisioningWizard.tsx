@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Server,
   Layers,
@@ -17,8 +17,12 @@ import {
   Cpu,
   Database,
   HardDrive,
+  Package,
+  Box,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
-import type { SizePreset } from '../lib/types';
+import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup } from '../lib/types';
 import { PRESETS } from '../lib/presets';
 
 export const ProvisioningWizard: React.FC = () => {
@@ -55,6 +59,23 @@ export const ProvisioningWizard: React.FC = () => {
   const [kubernetesVersion, setKubernetesVersion] = useState<string>('v1.31.0');
   const [vclusterVersion, setVclusterVersion] = useState<string>('0.36.0');
   const [customYaml, setCustomYaml] = useState<string>('');
+
+  // App Store & Packs State
+  const [catalog, setCatalog] = useState<AppStoreCatalog | null>(null);
+  const [selectedAppIds, setSelectedAppIds] = useState<string[]>([]);
+  const [customValuesMap, setCustomValuesMap] = useState<Record<string, string>>({});
+  const [expandedValueAppId, setExpandedValueAppId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/appstore')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.data) {
+          setCatalog(data.data);
+        }
+      })
+      .catch((e) => console.warn('Failed loading catalog in wizard:', e));
+  }, []);
 
   // Submission State
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -123,7 +144,7 @@ export const ProvisioningWizard: React.FC = () => {
       }
     }
     setError(null);
-    setStep((prev) => Math.min(prev + 1, 3));
+    setStep((prev) => Math.min(prev + 1, 4));
   };
 
   const handlePrev = () => {
@@ -150,6 +171,10 @@ export const ProvisioningWizard: React.FC = () => {
         kubernetesVersion,
         vclusterVersion,
         customYaml: customYaml.trim() ? customYaml : undefined,
+        installedApps: selectedAppIds.map((id) => ({
+          appId: id,
+          customValues: customValuesMap[id],
+        })),
         policies: {
           resourceQuota: {
             enabled: true,
@@ -250,9 +275,10 @@ policies:
       <div className="bg-cyber-900/80 border border-cyber-700/60 rounded-2xl p-4 backdrop-blur-sm shadow-lg">
         <div className="flex items-center justify-between">
           {[
-            { num: 1, label: 'Name & Environment', icon: Server },
-            { num: 2, label: 'Size & Resources', icon: Layers },
-            { num: 3, label: 'Lifecycle & Policies', icon: Clock },
+            { num: 1, label: 'Name & Identity', icon: Server },
+            { num: 2, label: 'Size & Policies', icon: Layers },
+            { num: 3, label: 'App Store & Packs', icon: Package },
+            { num: 4, label: 'Lifecycle & Launch', icon: Clock },
           ].map((item, idx) => {
             const Icon = item.icon;
             const isCompleted = step > item.num;
@@ -279,8 +305,8 @@ policies:
                     <p className="text-[10px] text-slate-500 font-mono">Step 0{item.num}</p>
                   </div>
                 </div>
-                {idx < 2 && (
-                  <div className="flex-1 mx-4 h-[2px] bg-cyber-800 rounded">
+                {idx < 3 && (
+                  <div className="flex-1 mx-3 h-[2px] bg-cyber-800 rounded">
                     <div
                       className={`h-full transition-all duration-300 ${
                         step > idx + 1 ? 'bg-cyber-accent w-full' : 'w-0'
@@ -635,8 +661,196 @@ policies:
           </div>
         )}
 
-        {/* STEP 3: Lifecycle Policies & Embedded Add-ons */}
+        {/* STEP 3: App Store & Application Packs */}
         {step === 3 && (
+          <div className="space-y-6 animate-in fade-in duration-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xl font-bold text-white flex items-center gap-2.5">
+                  <Package className="w-5 h-5 text-cyan-400" />
+                  App Store & Addon Packs
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Pre-install curated Helm releases, ingress controllers, databases, or microservice manifests into your virtual cluster.
+                </p>
+              </div>
+              <span className="text-xs font-mono text-cyan-400 bg-cyan-950/60 px-3 py-1 rounded-xl border border-cyan-800/80 self-start sm:self-auto">
+                {selectedAppIds.length} Application{selectedAppIds.length !== 1 ? 's' : ''} Selected
+              </span>
+            </div>
+
+            {/* Curated Packs Quick Selector */}
+            {catalog?.groups && catalog.groups.length > 0 && (
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-2.5 flex items-center gap-1.5 uppercase font-mono tracking-wider">
+                  <Layers className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Curated Application Packs (1-Click Select)</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {catalog.groups.map((group) => {
+                    const allSelected = group.appIds.length > 0 && group.appIds.every((id) => selectedAppIds.includes(id));
+                    return (
+                      <div
+                        key={group.id}
+                        onClick={() => {
+                          if (allSelected) {
+                            setSelectedAppIds(selectedAppIds.filter((id) => !group.appIds.includes(id)));
+                          } else {
+                            const newSet = new Set([...selectedAppIds, ...group.appIds]);
+                            setSelectedAppIds(Array.from(newSet));
+                            for (const id of group.appIds) {
+                              const appObj = catalog.apps.find((a) => a.id === id);
+                              if (appObj?.helm?.values && !customValuesMap[id]) {
+                                setCustomValuesMap((prev) => ({ ...prev, [id]: appObj.helm!.values! }));
+                              }
+                            }
+                          }
+                        }}
+                        className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                          allSelected
+                            ? 'bg-purple-950/40 border-purple-500/60 shadow-glow-sm'
+                            : 'bg-cyber-950 border-cyber-800 hover:border-cyber-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-white">{group.name}</h4>
+                          <span
+                            className={`w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold ${
+                              allSelected ? 'bg-purple-500 text-white' : 'border border-cyber-700'
+                            }`}
+                          >
+                            {allSelected && <Check className="w-3 h-3" />}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{group.description}</p>
+                        <div className="mt-2 text-[10px] font-mono text-purple-400">
+                          {group.appIds.length} apps: {group.appIds.join(', ')}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Individual Applications Grid */}
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-2.5 flex items-center gap-1.5 uppercase font-mono tracking-wider">
+                <Package className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Available Applications & Microservices</span>
+              </label>
+
+              <div className="space-y-3">
+                {(!catalog?.apps || catalog.apps.length === 0) ? (
+                  <div className="p-8 text-center bg-cyber-950/60 rounded-2xl border border-dashed border-cyber-800">
+                    <Package className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                    <p className="text-xs font-semibold text-slate-300">App Store is Clean & Empty</p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                      No applications have been added to the catalog yet. You can continue to the next step and deploy applications post-launch once published.
+                    </p>
+                  </div>
+                ) : (
+                  (catalog?.apps || []).map((app) => {
+                    const isSelected = selectedAppIds.includes(app.id);
+                    const isExpanded = expandedValueAppId === app.id;
+
+                    return (
+                      <div
+                        key={app.id}
+                        className={`rounded-2xl border transition-all overflow-hidden ${
+                          isSelected
+                            ? 'bg-cyber-950 border-cyan-500/60'
+                            : 'bg-cyber-950/60 border-cyber-800 hover:border-cyber-700'
+                        }`}
+                      >
+                        <div
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedAppIds(selectedAppIds.filter((id) => id !== app.id));
+                            } else {
+                              setSelectedAppIds([...selectedAppIds, app.id]);
+                              if (app.helm?.values && !customValuesMap[app.id]) {
+                                setCustomValuesMap((prev) => ({ ...prev, [app.id]: app.helm!.values! }));
+                              }
+                            }
+                          }}
+                          className="p-3.5 flex items-center justify-between cursor-pointer"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
+                                isSelected
+                                  ? 'bg-cyan-500 border-cyan-500 text-slate-950'
+                                  : 'border-cyber-700 bg-cyber-900'
+                              }`}
+                            >
+                              {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-white">{app.name}</span>
+                                <span className="text-[10px] font-mono text-slate-500">v{app.version}</span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyber-900 border border-cyber-800 text-cyan-400 font-mono">
+                                  {app.category}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 mt-0.5">{app.description}</p>
+                            </div>
+                          </div>
+
+                          {app.helm && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!isSelected) {
+                                  setSelectedAppIds([...selectedAppIds, app.id]);
+                                  if (app.helm?.values && !customValuesMap[app.id]) {
+                                    setCustomValuesMap((prev) => ({ ...prev, [app.id]: app.helm!.values! }));
+                                  }
+                                }
+                                setExpandedValueAppId(isExpanded ? null : app.id);
+                              }}
+                              className="text-[11px] font-mono text-cyan-400 hover:text-cyan-300 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyber-900 border border-cyber-800 hover:border-cyan-500/30 transition-colors shrink-0 ml-2"
+                            >
+                              <Sliders className="w-3 h-3" />
+                              <span>{isExpanded ? 'Hide Values' : 'Customize values.yaml'}</span>
+                              {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Expandable values.yaml Editor */}
+                        {isExpanded && app.helm && (
+                          <div className="p-3.5 bg-cyber-900 border-t border-cyber-800 space-y-2 animate-in fade-in duration-100">
+                            <div className="flex items-center justify-between text-xs font-mono text-slate-400">
+                              <span className="flex items-center gap-1.5 text-cyan-400">
+                                <FileCode className="w-3.5 h-3.5" />
+                                values.yaml for {app.name}
+                              </span>
+                              <span className="text-[10px] text-slate-500">YAML Format</span>
+                            </div>
+                            <textarea
+                              value={customValuesMap[app.id] ?? app.helm.values ?? ''}
+                              onChange={(e) =>
+                                setCustomValuesMap({ ...customValuesMap, [app.id]: e.target.value })
+                              }
+                              rows={6}
+                              className="w-full bg-cyber-950 border border-cyber-700 rounded-xl p-3 text-xs text-cyan-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-400 font-mono leading-relaxed"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 4: Lifecycle Policies & Launch */}
+        {step === 4 && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div>
               <h3 className="text-xl font-bold text-white flex items-center gap-2.5">
@@ -644,7 +858,7 @@ policies:
                 Lifecycle Policies & Platform Add-ons
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                Configure auto-sleep to save cloud compute costs and ensure core add-on services.
+                Configure auto-sleep to save cloud compute costs, review scheduled apps, and launch.
               </p>
             </div>
 
@@ -699,6 +913,47 @@ policies:
                       className="w-24 bg-cyber-900 border border-cyber-700 rounded-lg px-3 py-1 font-mono text-xs text-white focus:outline-none focus:border-cyber-accent"
                     />
                     <span className="text-[11px] text-slate-500 font-mono">(0 = no auto-delete)</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Selected Applications Review */}
+              <div className="p-4 bg-cyber-950/70 border border-cyber-800 rounded-2xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                    Pre-configured Apps & Packs ({selectedAppIds.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setStep(3)}
+                    className="text-[11px] font-mono text-cyan-400 hover:underline"
+                  >
+                    Edit Apps
+                  </button>
+                </div>
+
+                {selectedAppIds.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic">No apps selected for initial installation (can be installed later from the App Store).</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {selectedAppIds.map((appId) => {
+                      const app = availableApps.find((a) => a.id === appId);
+                      return (
+                        <div
+                          key={appId}
+                          className="px-2.5 py-1 bg-cyber-900 border border-cyan-500/30 rounded-lg text-xs font-mono text-cyan-300 flex items-center gap-1.5"
+                        >
+                          <Package className="w-3 h-3 text-cyan-400" />
+                          <span>{app ? app.name : appId}</span>
+                          {customValuesMap[appId] && (
+                            <span className="text-[10px] bg-cyan-950 text-cyan-400 px-1 py-0.5 rounded border border-cyan-800">
+                              custom values
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -785,7 +1040,7 @@ policies:
           </div>
 
           <div>
-            {step < 3 ? (
+            {step < 4 ? (
               <button
                 type="button"
                 onClick={handleNext}

@@ -110,12 +110,13 @@ export interface VirtualCluster {
     observedGeneration?: number;
     createdAt?: string;
   };
-  metadata?: {
+    metadata?: {
     owner?: string;
     allowedGroups?: string[];
     allowedEmails?: string[];
     environment?: 'development' | 'staging' | 'production';
     tags?: string[];
+    installedApps?: InstalledApp[];
   };
   sparklineData?: {
     cpu: number[];
@@ -135,4 +136,65 @@ export interface PresetDetails {
   ha: boolean;
   description: string;
   badge: string;
+}
+
+export type AppCategory =
+  | 'Network & Ingress'
+  | 'Observability'
+  | 'Storage & Database'
+  | 'Security & Auth'
+  | 'Developer Tools';
+
+export interface HelmChartSpec {
+  name: string;
+  repo: string;
+  version?: string;
+  releaseName: string;
+  namespace?: string;
+  values?: string;
+}
+
+export interface AppDefinition {
+  id: string;
+  name: string;
+  description: string;
+  category: AppCategory;
+  version: string;
+  icon?: string;
+  helm?: HelmChartSpec;
+  manifests?: string;
+  group?: string;
+  tags?: string[];
+  isBuiltin?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AppGroup {
+  id: string;
+  name: string;
+  description: string;
+  icon?: string;
+  appIds: string[];
+}
+
+export interface AppStoreCatalog {
+  apps: AppDefinition[];
+  groups: AppGroup[];
+  updatedAt: string;
+}
+
+export interface InstalledApp {
+  appId: string;
+  name: string;
+  version?: string;
+  category?: AppCategory | string;
+  installedAt: string;
+  installedBy?: string;
+  status: 'Installing' | 'Installed' | 'Failed';
+  error?: string;
+  customValues?: string;
+  helm?: HelmChartSpec;
+  manifests?: string;
+  resourcesCreated?: Array<{ kind: string; name: string; namespace?: string }>;
 }

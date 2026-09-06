@@ -65,8 +65,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
       return context.redirect('/?denied=admin_required');
     }
 
-    // Block write operations on virtual clusters API
-    if (pathname.startsWith('/api/vclusters')) {
+    // Block write operations on virtual clusters API (except apps endpoints which enforce cluster ownership)
+    if (pathname.startsWith('/api/vclusters') && !pathname.includes('/apps')) {
       const method = request.method.toUpperCase();
       if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
         return new Response(
