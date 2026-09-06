@@ -3,6 +3,8 @@ package vcluster
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -56,8 +58,9 @@ type ControlPlaneHA struct {
 }
 
 type ProxyConfig struct {
-	BindAddress string `yaml:"bindAddress" json:"bindAddress"`
-	Port        int    `yaml:"port" json:"port"`
+	BindAddress string   `yaml:"bindAddress" json:"bindAddress"`
+	Port        int      `yaml:"port" json:"port"`
+	ExtraSANs   []string `yaml:"extraSANs,omitempty" json:"extraSANs,omitempty"`
 }
 
 type DistroConfig struct {
@@ -514,6 +517,196 @@ func mergeMaps(dest, src map[string]interface{}) {
 				continue
 			}
 		}
+		if (k == "extraArgs" || k == "extraSANs") && dest[k] != nil {
+			if destSlice, ok1 := dest[k].([]interface{}); ok1 {
+				if srcSlice, ok2 := v.([]interface{}); ok2 {
+					merged := append([]interface{}{}, destSlice...)
+					for _, item := range srcSlice {
+						itemStr := fmt.Sprintf("%v", item)
+						found := false
+						prefix := itemStr
+						if idx := strings.Index(itemStr, "="); idx != -1 {
+							prefix = itemStr[:idx+1]
+						}
+						for mIdx, existing := range merged {
+							existingStr := fmt.Sprintf("%v", existing)
+							if k == "extraArgs" && strings.HasPrefix(existingStr, prefix) {
+								merged[mIdx] = item
+								found = true
+								break
+							} else if k == "extraSANs" && existingStr == itemStr {
+								found = true
+								break
+							}
+						}
+						if !found {
+							merged = append(merged, item)
+						}
+					}
+					dest[k] = merged
+					continue
+				}
+			}
+		}
 		dest[k] = v
 	}
+}
+
+// GenerateYAMLWithAnnotations produces the final vcluster.yaml string, incorporating RawConfig, HelmValues, and OIDC / Endpoint annotations
+func GenerateYAMLWithAnnotations(spec *v1alpha1.VirtualClusterSpec, annotations map[string]string) ([]byte, error) {
+	yamlBytes, err := GenerateYAML(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(annotations) == 0 {
+		return yamlBytes, nil
+	}
+
+	var configMap map[string]interface{}
+	if err := yaml.Unmarshal(yamlBytes, &configMap); err != nil {
+		return yamlBytes, nil
+	}
+
+	// 1. Custom Endpoint -> Add SAN to controlPlane.proxy.extraSANs
+	customEp := annotations["vops.gitops.io/custom-endpoint"]
+	if customEp != "" {
+		host := customEp
+		if u, err := url.Parse(customEp); err == nil && u.Hostname() != "" {
+			host = u.Hostname()
+		} else {
+			host = strings.TrimPrefix(host, "https://")
+			host = strings.TrimPrefix(host, "http://")
+			if idx := strings.Index(host, ":"); idx != -1 {
+				host = host[:idx]
+			}
+			if idx := strings.Index(host, "/"); idx != -1 {
+				host = host[:idx]
+			}
+		}
+
+		if host != "" {
+			cp, ok := configMap["controlPlane"].(map[string]interface{})
+			if !ok {
+				cp = make(map[string]interface{})
+				configMap["controlPlane"] = cp
+			}
+			proxy, ok := cp["proxy"].(map[string]interface{})
+			if !ok {
+				proxy = make(map[string]interface{})
+				cp["proxy"] = proxy
+			}
+			var sans []interface{}
+			if existingSans, ok := proxy["extraSANs"].([]interface{}); ok {
+				sans = existingSans
+			}
+			exists := false
+			for _, s := range sans {
+				if fmt.Sprintf("%v", s) == host {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				proxy["extraSANs"] = append(sans, host)
+			}
+		}
+	}
+
+	// 2. OIDC Configuration -> Add kube-apiserver extraArgs
+	type OIDCAnnotation struct {
+		Enabled        bool   `json:"enabled"`
+		IssuerURL      string `json:"issuerUrl"`
+		ClientID       string `json:"clientId"`
+		UsernameClaim  string `json:"usernameClaim"`
+		UsernamePrefix string `json:"usernamePrefix"`
+		GroupsClaim    string `json:"groupsClaim"`
+		GroupsPrefix   string `json:"groupsPrefix"`
+		CAFile         string `json:"caFile"`
+	}
+
+	var oidcCfg OIDCAnnotation
+	if rawOIDC, ok := annotations["vops.gitops.io/oidc-config"]; ok && rawOIDC != "" {
+		_ = json.Unmarshal([]byte(rawOIDC), &oidcCfg)
+	} else if issuer, ok := annotations["vops.gitops.io/oidc-issuer-url"]; ok && issuer != "" {
+		oidcCfg = OIDCAnnotation{
+			Enabled:        true,
+			IssuerURL:      issuer,
+			ClientID:       annotations["vops.gitops.io/oidc-client-id"],
+			UsernameClaim:  annotations["vops.gitops.io/oidc-username-claim"],
+			UsernamePrefix: annotations["vops.gitops.io/oidc-username-prefix"],
+			GroupsClaim:    annotations["vops.gitops.io/oidc-groups-claim"],
+			GroupsPrefix:   annotations["vops.gitops.io/oidc-groups-prefix"],
+			CAFile:         annotations["vops.gitops.io/oidc-ca-file"],
+		}
+	}
+
+	if oidcCfg.Enabled && oidcCfg.IssuerURL != "" && oidcCfg.ClientID != "" {
+		if oidcCfg.UsernameClaim == "" {
+			oidcCfg.UsernameClaim = "email"
+		}
+		if oidcCfg.GroupsClaim == "" {
+			oidcCfg.GroupsClaim = "groups"
+		}
+
+		cp, ok := configMap["controlPlane"].(map[string]interface{})
+		if !ok {
+			cp = make(map[string]interface{})
+			configMap["controlPlane"] = cp
+		}
+		distro, ok := cp["distro"].(map[string]interface{})
+		if !ok {
+			distro = make(map[string]interface{})
+			cp["distro"] = distro
+		}
+		k8s, ok := distro["k8s"].(map[string]interface{})
+		if !ok {
+			k8s = make(map[string]interface{})
+			distro["k8s"] = k8s
+		}
+		apiServer, ok := k8s["apiServer"].(map[string]interface{})
+		if !ok {
+			apiServer = make(map[string]interface{})
+			k8s["apiServer"] = apiServer
+		}
+
+		var args []interface{}
+		if existingArgs, ok := apiServer["extraArgs"].([]interface{}); ok {
+			args = existingArgs
+		}
+
+		oidcArgs := []string{
+			fmt.Sprintf("--oidc-issuer-url=%s", oidcCfg.IssuerURL),
+			fmt.Sprintf("--oidc-client-id=%s", oidcCfg.ClientID),
+			fmt.Sprintf("--oidc-username-claim=%s", oidcCfg.UsernameClaim),
+			fmt.Sprintf("--oidc-groups-claim=%s", oidcCfg.GroupsClaim),
+		}
+		if oidcCfg.UsernamePrefix != "" {
+			oidcArgs = append(oidcArgs, fmt.Sprintf("--oidc-username-prefix=%s", oidcCfg.UsernamePrefix))
+		}
+		if oidcCfg.GroupsPrefix != "" {
+			oidcArgs = append(oidcArgs, fmt.Sprintf("--oidc-groups-prefix=%s", oidcCfg.GroupsPrefix))
+		}
+		if oidcCfg.CAFile != "" {
+			oidcArgs = append(oidcArgs, fmt.Sprintf("--oidc-ca-file=%s", oidcCfg.CAFile))
+		}
+
+		for _, oArg := range oidcArgs {
+			prefix := oArg[:strings.Index(oArg, "=")+1]
+			found := false
+			for aIdx, existing := range args {
+				if strings.HasPrefix(fmt.Sprintf("%v", existing), prefix) {
+					args[aIdx] = oArg
+					found = true
+					break
+				}
+			}
+			if !found {
+				args = append(args, oArg)
+			}
+		}
+		apiServer["extraArgs"] = args
+	}
+
+	return yaml.Marshal(configMap)
 }

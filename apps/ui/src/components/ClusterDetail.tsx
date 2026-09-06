@@ -37,6 +37,9 @@ import {
   Sparkles,
   FolderGit2,
   Tag,
+  AlertTriangle,
+  Globe,
+  Settings,
 } from 'lucide-react';
 import type { VirtualCluster, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
@@ -91,10 +94,16 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'telemetry' | 'quota' | 'access' | 'apps' | 'etcd' | 'addons' | 'yaml'>('telemetry');
   const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'quota' | 'sleep' | 'rbac' | 'install-app' | 'group' | null>(null);
+  const [kubeconfigInitialTab, setKubeconfigInitialTab] = useState<'admin' | 'oidc' | 'endpoint' | 'settings'>('admin');
   const [installAppTab, setInstallAppTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>('catalog');
   const [catalog, setCatalog] = useState<AppStoreCatalog | null>(null);
   const [inspectedApp, setInspectedApp] = useState<InstalledApp | null>(null);
   const [syncingApps, setSyncingApps] = useState<boolean>(false);
+
+  const openKubeconfigModal = (tab: 'admin' | 'oidc' | 'endpoint' | 'settings' = 'admin') => {
+    setKubeconfigInitialTab(tab);
+    setActiveModal('kubeconfig');
+  };
 
   const fetchCluster = async () => {
     try {
@@ -208,8 +217,24 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 </span>
               ))}
             </div>
-            <p className="text-xs text-slate-400 font-mono mt-0.5">
-              Namespace: <span className="text-slate-300">{cluster.namespace}</span> • Engine: <span className="text-cyber-accent">vCluster {vclusterVer}</span>
+            <p className="text-xs text-slate-400 font-mono mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>Namespace: <span className="text-slate-300">{cluster.namespace}</span></span>
+              <span>•</span>
+              <span>Engine: <span className="text-cyan-400">vCluster {vclusterVer}</span></span>
+              <span>•</span>
+              <button
+                onClick={() => openKubeconfigModal('endpoint')}
+                className="hover:text-cyan-300 hover:underline flex items-center gap-1 text-slate-300"
+                title="Click to view/change API server endpoint"
+              >
+                <Globe className="w-3 h-3 text-blue-400" />
+                Endpoint: <span className="text-slate-200">{cluster.metadata?.customEndpoint || cluster.status.endpoint || 'Internal'}</span>
+                {cluster.metadata?.customEndpoint && (
+                  <span className="text-[10px] px-1 bg-purple-500/20 text-purple-300 rounded border border-purple-500/30">
+                    custom
+                  </span>
+                )}
+              </button>
             </p>
           </div>
         </div>
@@ -217,7 +242,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => setActiveModal('kubeconfig')}
+            onClick={() => openKubeconfigModal('admin')}
             className="px-3.5 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all"
           >
             <Terminal className="w-3.5 h-3.5" />
@@ -879,6 +904,115 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 <p className="text-[11px] text-slate-400 mt-2">
                   Specific user email accounts granted view and kubeconfig permissions.
                 </p>
+              </div>
+            </div>
+
+            {/* OIDC Authentication & API Server Endpoint Configuration Card */}
+            <div className="bg-cyber-950 border border-cyber-800 rounded-xl p-5 mt-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-cyber-850">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Lock className="w-4 h-4 text-purple-400" />
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                      Virtual Cluster OIDC Authentication & Endpoint
+                    </h4>
+                    {cluster.metadata?.oidc?.enabled ? (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-mono text-[10px]">
+                        Active (PKCE)
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-mono text-[10px]">
+                        Disabled / Not Configured
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Secure developer access using OpenID Connect claims with PKCE. Tokens are validated by the API server against your Identity Provider.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => openKubeconfigModal('endpoint')}
+                    className="px-3 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-slate-200 text-xs font-medium rounded-lg border border-cyber-700 flex items-center gap-1.5 transition-colors"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-blue-400" />
+                    Edit Endpoint
+                  </button>
+                  <button
+                    onClick={() => openKubeconfigModal('settings')}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    Configure OIDC
+                  </button>
+                  <button
+                    onClick={() => openKubeconfigModal('oidc')}
+                    className="px-3 py-1.5 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-all"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    OIDC Kubeconfig
+                  </button>
+                </div>
+              </div>
+
+              {/* Endpoint & OIDC Spec Summary Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 text-xs font-mono">
+                {/* Active Endpoint */}
+                <div className="bg-cyber-900/80 border border-cyber-800 p-3 rounded-lg">
+                  <span className="text-[11px] text-slate-400 flex items-center gap-1 mb-1">
+                    <Globe className="w-3 h-3 text-blue-400" />
+                    API Endpoint
+                  </span>
+                  <div className="text-slate-200 truncate font-bold" title={cluster.metadata?.customEndpoint || cluster.status.endpoint}>
+                    {cluster.metadata?.customEndpoint || cluster.status.endpoint || 'ClusterIP'}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    {cluster.metadata?.customEndpoint ? 'Custom Ingress / VirtualService' : 'Host Cluster Internal Service'}
+                  </div>
+                </div>
+
+                {/* Issuer URL */}
+                <div className="bg-cyber-900/80 border border-cyber-800 p-3 rounded-lg">
+                  <span className="text-[11px] text-slate-400 flex items-center gap-1 mb-1">
+                    <Lock className="w-3 h-3 text-purple-400" />
+                    IdP Issuer
+                  </span>
+                  <div className="text-slate-200 truncate font-bold" title={cluster.metadata?.oidc?.issuerUrl || 'Not configured'}>
+                    {cluster.metadata?.oidc?.issuerUrl || 'Not configured'}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    Client ID: {cluster.metadata?.oidc?.clientId || 'N/A'}
+                  </div>
+                </div>
+
+                {/* Username Claim */}
+                <div className="bg-cyber-900/80 border border-cyber-800 p-3 rounded-lg">
+                  <span className="text-[11px] text-slate-400 flex items-center gap-1 mb-1">
+                    <Mail className="w-3 h-3 text-cyan-400" />
+                    Username Claim
+                  </span>
+                  <div className="text-cyan-300 font-bold">
+                    {cluster.metadata?.oidc?.usernameClaim || 'email'}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    Matches Authorized Emails
+                  </div>
+                </div>
+
+                {/* Groups Claim */}
+                <div className="bg-cyber-900/80 border border-cyber-800 p-3 rounded-lg">
+                  <span className="text-[11px] text-slate-400 flex items-center gap-1 mb-1">
+                    <Users className="w-3 h-3 text-purple-400" />
+                    Groups Claim
+                  </span>
+                  <div className="text-purple-300 font-bold">
+                    {cluster.metadata?.oidc?.groupsClaim || 'groups'}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    Matches Authorized Groups
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1572,7 +1706,9 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
       <KubeconfigModal
         cluster={cluster}
         isOpen={activeModal === 'kubeconfig'}
+        initialTab={kubeconfigInitialTab}
         onClose={() => setActiveModal(null)}
+        onClusterUpdated={fetchCluster}
       />
 
       <UpgradeModal

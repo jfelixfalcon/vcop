@@ -66,6 +66,18 @@ export interface QuotaStatus {
   used?: Record<string, string>;
 }
 
+export interface OidcConfig {
+  enabled: boolean;
+  issuerUrl: string;
+  clientId: string;
+  usernameClaim?: string;
+  usernamePrefix?: string;
+  groupsClaim?: string;
+  groupsPrefix?: string;
+  extraScopes?: string[];
+  caFile?: string;
+}
+
 export interface VirtualCluster {
   name: string;
   namespace: string;
@@ -98,6 +110,8 @@ export interface VirtualCluster {
     };
     rawConfig?: any;
     helmValues?: any;
+    customEndpoint?: string;
+    oidc?: OidcConfig;
   };
   status: {
     phase: ClusterPhase;
@@ -119,6 +133,8 @@ export interface VirtualCluster {
     environment?: 'development' | 'staging' | 'production';
     tags?: string[];
     installedApps?: InstalledApp[];
+    customEndpoint?: string;
+    oidc?: OidcConfig;
   };
   sparklineData?: {
     cpu: number[];

@@ -65,8 +65,21 @@ users:
 	vcSecName := fmt.Sprintf("vc-%s", vc.Name)
 	if err := r.Get(ctx, types.NamespacedName{Name: vcSecName, Namespace: vc.Namespace}, vcSec); err == nil {
 		if cfg, ok := vcSec.Data["config"]; ok && len(cfg) > 0 {
-			rawKubeconfig = strings.ReplaceAll(string(cfg), "https://localhost:8443", endpoint)
+			rawKubeconfig = string(cfg)
 		}
+	}
+
+	// Ensure server endpoint in kubeconfig matches target endpoint
+	if rawKubeconfig != "" && endpoint != "" {
+		lines := strings.Split(rawKubeconfig, "\n")
+		for i, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "server:") {
+				indent := line[:strings.Index(line, "server:")]
+				lines[i] = fmt.Sprintf("%sserver: %s", indent, endpoint)
+			}
+		}
+		rawKubeconfig = strings.Join(lines, "\n")
 	}
 
 	sec := &corev1.Secret{

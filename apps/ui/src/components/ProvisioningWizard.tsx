@@ -1011,7 +1011,7 @@ policies:
                 ) : (
                   <div className="flex flex-wrap gap-2 pt-1">
                     {selectedAppIds.map((appId) => {
-                      const app = availableApps.find((a) => a.id === appId);
+                      const app = (catalog?.apps || []).find((a) => a.id === appId);
                       return (
                         <div
                           key={appId}

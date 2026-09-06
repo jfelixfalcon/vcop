@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"reflect"
 
@@ -46,7 +47,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 	}
 
 	// 1. Generate and reconcile ConfigMap and Secret for vcluster.yaml
-	yamlBytes, err := vcluster.GenerateYAML(&vc.Spec)
+	yamlBytes, err := vcluster.GenerateYAMLWithAnnotations(&vc.Spec, vc.Annotations)
 	if err != nil {
 		return false, "", fmt.Errorf("failed generating vcluster.yaml: %w", err)
 	}
@@ -289,6 +290,9 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 	}
 
 	endpoint := fmt.Sprintf("https://%s.%s.svc.cluster.local:443", svc.Name, vc.Namespace)
+	if customEp, ok := vc.Annotations["vops.gitops.io/custom-endpoint"]; ok && customEp != "" {
+		endpoint = customEp
+	}
 
 	// Clean up any legacy deployment if transitioning to statefulset
 	legacyDep := &appsv1.Deployment{
@@ -365,6 +369,9 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: selectorLabels,
+					Annotations: map[string]string{
+						"vops.gitops.io/config-hash": fmt.Sprintf("%x", sha256.Sum256(yamlBytes)),
+					},
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            sa.Name,

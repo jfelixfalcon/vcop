@@ -1,7 +1,8 @@
 import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
-import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo } from './types';
+import path from 'node:path';
+import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig } from './types';
 import { getAppStoreCatalog } from './appstore';
 import { PRESETS } from './presets';
 export { PRESETS, k8sRequest };
@@ -191,6 +192,64 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       ]
     : [0, 0, 0, 0, 0];
 
+  const customEndpoint = item.metadata?.annotations?.['vops.gitops.io/custom-endpoint'] || spec.customEndpoint || '';
+
+  let oidc: OidcConfig = {
+    enabled: false,
+    issuerUrl: '',
+    clientId: '',
+    usernameClaim: 'email',
+    usernamePrefix: '',
+    groupsClaim: 'groups',
+    groupsPrefix: '',
+    extraScopes: ['email', 'profile', 'groups'],
+  };
+
+  try {
+    const rawOidc = item.metadata?.annotations?.['vops.gitops.io/oidc-config'];
+    if (rawOidc) {
+      oidc = { ...oidc, ...JSON.parse(rawOidc) };
+    } else if (item.metadata?.annotations?.['vops.gitops.io/oidc-issuer-url']) {
+      oidc = {
+        enabled: true,
+        issuerUrl: item.metadata.annotations['vops.gitops.io/oidc-issuer-url'] || '',
+        clientId: item.metadata.annotations['vops.gitops.io/oidc-client-id'] || '',
+        usernameClaim: item.metadata.annotations['vops.gitops.io/oidc-username-claim'] || 'email',
+        usernamePrefix: item.metadata.annotations['vops.gitops.io/oidc-username-prefix'] || '',
+        groupsClaim: item.metadata.annotations['vops.gitops.io/oidc-groups-claim'] || 'groups',
+        groupsPrefix: item.metadata.annotations['vops.gitops.io/oidc-groups-prefix'] || '',
+        caFile: item.metadata.annotations['vops.gitops.io/oidc-ca-file'] || '',
+        extraScopes: ['email', 'profile', 'groups'],
+      };
+    } else if (spec.oidc) {
+      oidc = { ...oidc, ...spec.oidc };
+    } else {
+      const extraArgs = spec.rawConfig?.controlPlane?.distro?.k8s?.apiServer?.extraArgs;
+      if (Array.isArray(extraArgs)) {
+        const issuerArg = extraArgs.find((a: string) => typeof a === 'string' && a.startsWith('--oidc-issuer-url='));
+        const clientArg = extraArgs.find((a: string) => typeof a === 'string' && a.startsWith('--oidc-client-id='));
+        if (issuerArg && clientArg) {
+          const userClaimArg = extraArgs.find((a: string) => typeof a === 'string' && a.startsWith('--oidc-username-claim='));
+          const groupsClaimArg = extraArgs.find((a: string) => typeof a === 'string' && a.startsWith('--oidc-groups-claim='));
+          const userPrefixArg = extraArgs.find((a: string) => typeof a === 'string' && a.startsWith('--oidc-username-prefix='));
+          const groupsPrefixArg = extraArgs.find((a: string) => typeof a === 'string' && a.startsWith('--oidc-groups-prefix='));
+          oidc = {
+            enabled: true,
+            issuerUrl: issuerArg.split('=')[1] || '',
+            clientId: clientArg.split('=')[1] || '',
+            usernameClaim: userClaimArg ? userClaimArg.split('=')[1] : 'email',
+            usernamePrefix: userPrefixArg ? userPrefixArg.split('=')[1] : '',
+            groupsClaim: groupsClaimArg ? groupsClaimArg.split('=')[1] : 'groups',
+            groupsPrefix: groupsPrefixArg ? groupsPrefixArg.split('=')[1] : '',
+            extraScopes: ['email', 'profile', 'groups'],
+          };
+        }
+      }
+    }
+  } catch {
+    // fallback
+  }
+
   return {
     name,
     namespace,
@@ -215,13 +274,15 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       customResources: spec.customResources,
       rawConfig: spec.rawConfig,
       helmValues: spec.helmValues,
+      customEndpoint,
+      oidc,
     },
     status: {
       phase,
       conditions,
       virtualK8sVersion: status.virtualK8sVersion || spec.kubernetesVersion || '',
       vclusterVersion: status.vclusterVersion || spec.vclusterVersion || '',
-      endpoint: status.endpoint || '',
+      endpoint: customEndpoint || status.endpoint || '',
       metrics: {
         activeNodeCount: isSleeping ? 0 : (metrics.activeNodeCount || 1),
         podCount: isSleeping ? 0 : (metrics.podCount || 0),
@@ -262,6 +323,8 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       environment: (item.metadata?.labels?.['vops.gitops.io/environment'] as any) || 'development',
       tags: [spec.sizePreset || 'medium', spec.highAvailability ? 'ha-etcd' : 'single-node'],
       installedApps,
+      customEndpoint,
+      oidc,
     },
     sparklineData: {
       cpu: cpuSparkline,
@@ -327,6 +390,8 @@ export async function createVirtualCluster(data: {
   policies?: PoliciesSpec;
   customYaml?: string;
   installedApps?: Array<{ appId: string; customValues?: string }>;
+  customEndpoint?: string;
+  oidc?: OidcConfig;
 }): Promise<VirtualCluster> {
   const name = data.clusterName.trim().toLowerCase();
   let k8sVer = data.kubernetesVersion;
@@ -361,6 +426,17 @@ export async function createVirtualCluster(data: {
   }
   if (data.allowedEmails && data.allowedEmails.length > 0) {
     annotations['vops.gitops.io/allowed-emails'] = data.allowedEmails.join(',');
+  }
+
+  if (data.customEndpoint) {
+    annotations['vops.gitops.io/custom-endpoint'] = data.customEndpoint.trim();
+  }
+  if (data.oidc) {
+    annotations['vops.gitops.io/oidc-config'] = JSON.stringify(data.oidc);
+    if (data.oidc.issuerUrl) annotations['vops.gitops.io/oidc-issuer-url'] = data.oidc.issuerUrl;
+    if (data.oidc.clientId) annotations['vops.gitops.io/oidc-client-id'] = data.oidc.clientId;
+    if (data.oidc.usernameClaim) annotations['vops.gitops.io/oidc-username-claim'] = data.oidc.usernameClaim;
+    if (data.oidc.groupsClaim) annotations['vops.gitops.io/oidc-groups-claim'] = data.oidc.groupsClaim;
   }
 
   const groupsList = Array.isArray(data.clusterGroups) && data.clusterGroups.length > 0
@@ -474,6 +550,45 @@ export async function createVirtualCluster(data: {
       };
     } catch (e) {
       console.warn('Failed compiling initial installed apps for new cluster:', e);
+    }
+  }
+
+  if (data.customEndpoint || (data.oidc && data.oidc.enabled)) {
+    body.spec.rawConfig = body.spec.rawConfig || {};
+    body.spec.rawConfig.controlPlane = body.spec.rawConfig.controlPlane || {};
+    if (data.customEndpoint) {
+      let host = data.customEndpoint.trim();
+      try {
+        const u = new URL(host);
+        host = u.hostname;
+      } catch {
+        host = host.replace(/^https?:\/\//, '').split(':')[0].split('/')[0];
+      }
+      if (host) {
+        body.spec.rawConfig.controlPlane.proxy = body.spec.rawConfig.controlPlane.proxy || {};
+        body.spec.rawConfig.controlPlane.proxy.extraSANs = [host];
+      }
+    }
+    if (data.oidc && data.oidc.enabled && data.oidc.issuerUrl && data.oidc.clientId) {
+      body.spec.rawConfig.controlPlane.distro = body.spec.rawConfig.controlPlane.distro || {};
+      body.spec.rawConfig.controlPlane.distro.k8s = body.spec.rawConfig.controlPlane.distro.k8s || {};
+      body.spec.rawConfig.controlPlane.distro.k8s.apiServer = body.spec.rawConfig.controlPlane.distro.k8s.apiServer || {};
+      body.spec.rawConfig.controlPlane.distro.k8s.apiServer.extraArgs = [
+        '--api-audiences=https://kubernetes.default.svc.cluster.local,https://kubernetes.default.svc.,https://kubernetes.default.svc,https://kubernetes.default',
+        `--oidc-issuer-url=${data.oidc.issuerUrl}`,
+        `--oidc-client-id=${data.oidc.clientId}`,
+        `--oidc-username-claim=${data.oidc.usernameClaim || 'email'}`,
+        `--oidc-groups-claim=${data.oidc.groupsClaim || 'groups'}`,
+      ];
+      if (data.oidc.usernamePrefix) {
+        body.spec.rawConfig.controlPlane.distro.k8s.apiServer.extraArgs.push(`--oidc-username-prefix=${data.oidc.usernamePrefix}`);
+      }
+      if (data.oidc.groupsPrefix) {
+        body.spec.rawConfig.controlPlane.distro.k8s.apiServer.extraArgs.push(`--oidc-groups-prefix=${data.oidc.groupsPrefix}`);
+      }
+      if (data.oidc.caFile) {
+        body.spec.rawConfig.controlPlane.distro.k8s.apiServer.extraArgs.push(`--oidc-ca-file=${data.oidc.caFile}`);
+      }
     }
   }
 
@@ -772,7 +887,13 @@ export async function deleteVirtualCluster(name: string, namespace?: string): Pr
   }
 }
 
-export async function getKubeconfig(name: string, namespace?: string): Promise<string | null> {
+export interface KubeconfigDetails {
+  config: string;
+  server: string;
+  caData?: string;
+}
+
+export async function getKubeconfigDetails(name: string, namespace?: string): Promise<KubeconfigDetails | null> {
   try {
     let targetNs = namespace;
     if (!targetNs) {
@@ -782,7 +903,14 @@ export async function getKubeconfig(name: string, namespace?: string): Promise<s
     }
     const res = await k8sRequest<any>(`/api/v1/namespaces/${targetNs}/secrets/${name}-kubeconfig`);
     if (res.statusCode === 200 && res.data?.data?.config) {
-      return Buffer.from(res.data.data.config, 'base64').toString('utf-8');
+      const raw = Buffer.from(res.data.data.config, 'base64').toString('utf-8');
+      const caMatch = raw.match(/certificate-authority-data:\s*([A-Za-z0-9+/=]+)/);
+      const serverMatch = raw.match(/server:\s*(\S+)/);
+      return {
+        config: raw,
+        server: serverMatch ? serverMatch[1] : '',
+        caData: caMatch ? caMatch[1] : undefined,
+      };
     }
   } catch {
     // Secret not available yet
@@ -790,12 +918,86 @@ export async function getKubeconfig(name: string, namespace?: string): Promise<s
   return null;
 }
 
-export function generateMockKubeconfig(cluster: VirtualCluster): string {
+export async function getKubeconfig(name: string, namespace?: string, endpointOverride?: string): Promise<string | null> {
+  const details = await getKubeconfigDetails(name, namespace);
+  if (!details) return null;
+  let config = details.config;
+  if (endpointOverride) {
+    config = config.replace(/server:\s*https?:\/\/[^\s]+/g, `server: ${endpointOverride}`);
+  }
+  return config;
+}
+
+export function generateOidcKubeconfig(
+  cluster: VirtualCluster,
+  oidcConfig?: OidcConfig,
+  endpointOverride?: string,
+  caData?: string
+): string {
+  const oidc = oidcConfig || cluster.metadata?.oidc || {
+    enabled: true,
+    issuerUrl: 'https://accounts.google.com',
+    clientId: `${cluster.name}-client`,
+    usernameClaim: 'email',
+    groupsClaim: 'groups',
+  };
+
+  const endpoint = endpointOverride || cluster.metadata?.customEndpoint || cluster.status.endpoint || 'https://kubernetes.default.svc';
+  const clusterName = cluster.name;
+  const contextName = `oidc@${clusterName}`;
+  const userName = `oidc@${clusterName}`;
+
+  const issuerUrl = oidc.issuerUrl || 'https://accounts.google.com';
+  const clientId = oidc.clientId || `${clusterName}-client`;
+  const extraScopes = oidc.extraScopes && oidc.extraScopes.length > 0
+    ? oidc.extraScopes
+    : ['email', 'profile', 'groups'];
+
+  let clusterBlock = `  name: ${clusterName}
+    cluster:
+      server: ${endpoint}\n`;
+  if (caData) {
+    clusterBlock += `      certificate-authority-data: ${caData}\n`;
+  } else {
+    clusterBlock += `      insecure-skip-tls-verify: true\n`;
+  }
+
+  const scopeLines = extraScopes.map((s) => `      - --oidc-extra-scope=${s}`).join('\n');
+
+  return `apiVersion: v1
+clusters:
+- ${clusterBlock.trim()}
+contexts:
+- context:
+    cluster: ${clusterName}
+    user: ${userName}
+  name: ${contextName}
+current-context: ${contextName}
+kind: Config
+preferences: {}
+users:
+- name: ${userName}
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: kubectl
+      args:
+      - oidc-login
+      - get-token
+      - --oidc-issuer-url=${issuerUrl}
+      - --oidc-client-id=${clientId}
+${scopeLines}
+      - --oidc-use-pkce
+`;
+}
+
+export function generateMockKubeconfig(cluster: VirtualCluster, endpointOverride?: string): string {
+  const server = endpointOverride || cluster.metadata?.customEndpoint || cluster.status.endpoint || 'https://kubernetes.default.svc';
   return `apiVersion: v1
 clusters:
 - cluster:
     insecure-skip-tls-verify: true
-    server: ${cluster.status.endpoint || 'https://kubernetes.default.svc'}
+    server: ${server}
   name: ${cluster.name}
 contexts:
 - context:
@@ -810,4 +1012,162 @@ users:
   user:
     token: vcop-token-${cluster.name}
 `;
+}
+
+export async function updateVirtualClusterEndpointAndOidc(
+  name: string,
+  data: {
+    customEndpoint?: string;
+    oidc?: OidcConfig;
+  },
+  namespace?: string
+): Promise<VirtualCluster> {
+  let targetNs = namespace;
+  if (!targetNs) {
+    const all = await listVirtualClusters();
+    const match = all.find((c) => c.name === name);
+    targetNs = match ? match.namespace : 'default';
+  }
+
+  const getRes = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`
+  );
+  if (getRes.statusCode !== 200 || !getRes.data) {
+    throw new Error(`Cluster ${name} not found in namespace ${targetNs}`);
+  }
+
+  const existing = getRes.data;
+  const updatedAnnotations = { ...(existing.metadata?.annotations || {}) };
+  const rawConfig = existing.spec?.rawConfig ? JSON.parse(JSON.stringify(existing.spec.rawConfig)) : {};
+
+  rawConfig.controlPlane = rawConfig.controlPlane || {};
+  rawConfig.controlPlane.distro = rawConfig.controlPlane.distro || {};
+  rawConfig.controlPlane.distro.k8s = rawConfig.controlPlane.distro.k8s || {};
+  rawConfig.controlPlane.distro.k8s.apiServer = rawConfig.controlPlane.distro.k8s.apiServer || {};
+  rawConfig.controlPlane.proxy = rawConfig.controlPlane.proxy || {};
+
+  // 1. Handle Endpoint
+  if (data.customEndpoint !== undefined) {
+    const trimmed = data.customEndpoint.trim();
+    if (trimmed) {
+      updatedAnnotations['vops.gitops.io/custom-endpoint'] = trimmed;
+      let host = trimmed;
+      try {
+        const u = new URL(trimmed);
+        host = u.hostname;
+      } catch {
+        host = trimmed.replace(/^https?:\/\//, '').split(':')[0].split('/')[0];
+      }
+      if (host) {
+        const existingSans: string[] = Array.isArray(rawConfig.controlPlane.proxy.extraSANs)
+          ? rawConfig.controlPlane.proxy.extraSANs
+          : [];
+        if (!existingSans.includes(host)) {
+          rawConfig.controlPlane.proxy.extraSANs = [...existingSans, host];
+        }
+      }
+    } else {
+      delete updatedAnnotations['vops.gitops.io/custom-endpoint'];
+    }
+  }
+
+  // 2. Handle OIDC
+  if (data.oidc !== undefined) {
+    const oidc = data.oidc;
+    updatedAnnotations['vops.gitops.io/oidc-config'] = JSON.stringify(oidc);
+    if (oidc.enabled && oidc.issuerUrl && oidc.clientId) {
+      updatedAnnotations['vops.gitops.io/oidc-issuer-url'] = oidc.issuerUrl;
+      updatedAnnotations['vops.gitops.io/oidc-client-id'] = oidc.clientId;
+      updatedAnnotations['vops.gitops.io/oidc-username-claim'] = oidc.usernameClaim || 'email';
+      updatedAnnotations['vops.gitops.io/oidc-groups-claim'] = oidc.groupsClaim || 'groups';
+      if (oidc.usernamePrefix !== undefined && oidc.usernamePrefix !== '') {
+        updatedAnnotations['vops.gitops.io/oidc-username-prefix'] = oidc.usernamePrefix;
+      } else {
+        delete updatedAnnotations['vops.gitops.io/oidc-username-prefix'];
+      }
+      if (oidc.groupsPrefix !== undefined && oidc.groupsPrefix !== '') {
+        updatedAnnotations['vops.gitops.io/oidc-groups-prefix'] = oidc.groupsPrefix;
+      } else {
+        delete updatedAnnotations['vops.gitops.io/oidc-groups-prefix'];
+      }
+      if (oidc.caFile) {
+        updatedAnnotations['vops.gitops.io/oidc-ca-file'] = oidc.caFile;
+      } else {
+        delete updatedAnnotations['vops.gitops.io/oidc-ca-file'];
+      }
+
+      const currentArgs: string[] = Array.isArray(rawConfig.controlPlane.distro.k8s.apiServer.extraArgs)
+        ? rawConfig.controlPlane.distro.k8s.apiServer.extraArgs
+        : [
+            '--api-audiences=https://kubernetes.default.svc.cluster.local,https://kubernetes.default.svc.,https://kubernetes.default.svc,https://kubernetes.default',
+          ];
+
+      const oidcFlags = [
+        `--oidc-issuer-url=${oidc.issuerUrl}`,
+        `--oidc-client-id=${oidc.clientId}`,
+        `--oidc-username-claim=${oidc.usernameClaim || 'email'}`,
+        `--oidc-groups-claim=${oidc.groupsClaim || 'groups'}`,
+      ];
+      if (oidc.usernamePrefix !== undefined && oidc.usernamePrefix !== '') {
+        oidcFlags.push(`--oidc-username-prefix=${oidc.usernamePrefix}`);
+      }
+      if (oidc.groupsPrefix !== undefined && oidc.groupsPrefix !== '') {
+        oidcFlags.push(`--oidc-groups-prefix=${oidc.groupsPrefix}`);
+      }
+      if (oidc.caFile) {
+        oidcFlags.push(`--oidc-ca-file=${oidc.caFile}`);
+      }
+
+      let mergedArgs = [...currentArgs];
+      for (const flag of oidcFlags) {
+        const prefix = flag.slice(0, flag.indexOf('=') + 1);
+        const idx = mergedArgs.findIndex((a) => a.startsWith(prefix));
+        if (idx >= 0) {
+          mergedArgs[idx] = flag;
+        } else {
+          mergedArgs.push(flag);
+        }
+      }
+      rawConfig.controlPlane.distro.k8s.apiServer.extraArgs = mergedArgs;
+    } else {
+      delete updatedAnnotations['vops.gitops.io/oidc-issuer-url'];
+      delete updatedAnnotations['vops.gitops.io/oidc-client-id'];
+      delete updatedAnnotations['vops.gitops.io/oidc-username-claim'];
+      delete updatedAnnotations['vops.gitops.io/oidc-groups-claim'];
+      delete updatedAnnotations['vops.gitops.io/oidc-username-prefix'];
+      delete updatedAnnotations['vops.gitops.io/oidc-groups-prefix'];
+      delete updatedAnnotations['vops.gitops.io/oidc-ca-file'];
+
+      if (Array.isArray(rawConfig.controlPlane?.distro?.k8s?.apiServer?.extraArgs)) {
+        rawConfig.controlPlane.distro.k8s.apiServer.extraArgs = rawConfig.controlPlane.distro.k8s.apiServer.extraArgs.filter(
+          (a: string) => !a.startsWith('--oidc-')
+        );
+      }
+    }
+  }
+
+  // Trigger operator reconciliation
+  updatedAnnotations['vops.gitops.io/reconcile-trigger'] = Date.now().toString();
+
+  const patch = {
+    metadata: {
+      annotations: updatedAnnotations,
+    },
+    spec: {
+      rawConfig,
+    },
+  };
+
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
+    'PATCH',
+    patch,
+    'application/merge-patch+json'
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to update virtual cluster endpoint and OIDC: HTTP ${res.statusCode}`);
 }

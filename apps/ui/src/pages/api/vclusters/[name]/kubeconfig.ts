@@ -1,5 +1,10 @@
 import type { APIRoute } from 'astro';
-import { getVirtualCluster, getKubeconfig, generateMockKubeconfig } from '../../../../lib/k8s-client';
+import {
+  getVirtualCluster,
+  getKubeconfigDetails,
+  generateOidcKubeconfig,
+  generateMockKubeconfig,
+} from '../../../../lib/k8s-client';
 import { canUserViewCluster } from '../../../../lib/auth';
 
 export const GET: APIRoute = async ({ params, url, locals }) => {
@@ -30,22 +35,50 @@ export const GET: APIRoute = async ({ params, url, locals }) => {
     );
   }
 
-  const realKubeconfig = await getKubeconfig(name);
-  const kubeconfig = realKubeconfig || generateMockKubeconfig(cluster);
+  const type = url.searchParams.get('type') === 'oidc' ? 'oidc' : 'admin';
+  const endpointOverride = url.searchParams.get('endpoint')?.trim() || undefined;
+  const effectiveEndpoint = endpointOverride || cluster.metadata?.customEndpoint || cluster.status.endpoint || 'https://kubernetes.default.svc';
   const download = url.searchParams.get('download') === 'true';
 
+  const details = await getKubeconfigDetails(name, cluster.namespace);
+  let kubeconfig = '';
+
+  if (type === 'oidc') {
+    kubeconfig = generateOidcKubeconfig(cluster, cluster.metadata?.oidc, effectiveEndpoint, details?.caData);
+  } else {
+    if (details?.config) {
+      kubeconfig = details.config;
+      if (effectiveEndpoint) {
+        kubeconfig = kubeconfig.replace(/server:\s*https?:\/\/[^\s]+/g, `server: ${effectiveEndpoint}`);
+      }
+    } else {
+      kubeconfig = generateMockKubeconfig(cluster, effectiveEndpoint);
+    }
+  }
+
   if (download) {
+    const filename = type === 'oidc' ? `${name}-oidc-kubeconfig.yaml` : `${name}-kubeconfig.yaml`;
     return new Response(kubeconfig, {
       status: 200,
       headers: {
         'Content-Type': 'application/x-yaml',
-        'Content-Disposition': `attachment; filename="${name}-kubeconfig.yaml"`,
+        'Content-Disposition': `attachment; filename="${filename}"`,
       },
     });
   }
 
-  return new Response(JSON.stringify({ success: true, kubeconfig, endpoint: cluster.status.endpoint }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return new Response(
+    JSON.stringify({
+      success: true,
+      kubeconfig,
+      type,
+      endpoint: effectiveEndpoint,
+      isCustomEndpoint: Boolean(cluster.metadata?.customEndpoint || endpointOverride),
+      oidc: cluster.metadata?.oidc,
+    }),
+    {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }
+  );
 };
