@@ -85,7 +85,7 @@ export const ClusterGroupModal: React.FC<Props> = ({
         setGroupClusterMembers([]);
       }
     }
-  }, [cluster, isOpen]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

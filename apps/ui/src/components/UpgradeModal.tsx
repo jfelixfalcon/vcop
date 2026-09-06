@@ -35,7 +35,7 @@ export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgr
         .catch((e) => console.warn('Failed to load version registry in upgrade modal:', e))
         .finally(() => setLoadingVersions(false));
     }
-  }, [isOpen, cluster]);
+  }, [isOpen]);
 
   if (!isOpen || !cluster) return null;
 

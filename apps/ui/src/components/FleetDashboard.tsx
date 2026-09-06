@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Server,
   Plus,
@@ -67,6 +67,11 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
     }
   };
 
+  const isAnyModalOpenRef = useRef(false);
+  useEffect(() => {
+    isAnyModalOpenRef.current = activeModal !== null || isGroupModalOpen;
+  }, [activeModal, isGroupModalOpen]);
+
   useEffect(() => {
     if (!user) {
       fetch('/api/auth/me')
@@ -79,7 +84,11 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
         .catch(() => {});
     }
     fetchClusters();
-    const interval = setInterval(fetchClusters, 3000);
+    const interval = setInterval(() => {
+      if (!isAnyModalOpenRef.current) {
+        fetchClusters();
+      }
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 

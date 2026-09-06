@@ -28,13 +28,13 @@ export const RbacModal: React.FC<Props> = ({ cluster, isOpen, onClose, onSuccess
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (cluster) {
+    if (isOpen && cluster) {
       setOwner(cluster.metadata?.owner || '');
       setAllowedGroups((cluster.metadata?.allowedGroups || []).join(', '));
       setAllowedEmails((cluster.metadata?.allowedEmails || []).join(', '));
       setError(null);
     }
-  }, [cluster, isOpen]);
+  }, [isOpen]);
 
   if (!isOpen || !cluster) return null;
 

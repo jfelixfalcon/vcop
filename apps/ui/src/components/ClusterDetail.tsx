@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Server,
   ArrowLeft,
@@ -135,6 +135,11 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
     setActiveModal('install-app');
   };
 
+  const activeModalRef = useRef(activeModal);
+  useEffect(() => {
+    activeModalRef.current = activeModal;
+  }, [activeModal]);
+
   useEffect(() => {
     if (!user) {
       fetch('/api/auth/me')
@@ -148,7 +153,11 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
     }
     fetchCluster();
     fetchCatalog();
-    const interval = setInterval(fetchCluster, 3000);
+    const interval = setInterval(() => {
+      if (!activeModalRef.current) {
+        fetchCluster();
+      }
+    }, 3000);
     return () => clearInterval(interval);
   }, [clusterName]);
 

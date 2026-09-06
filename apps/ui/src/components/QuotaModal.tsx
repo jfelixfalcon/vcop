@@ -22,8 +22,6 @@ interface Props {
 }
 
 export const QuotaModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpdateSuccess }) => {
-  if (!isOpen || !cluster) return null;
-
   // Active section tab
   const [activeTab, setActiveTab] = useState<'compute' | 'counts' | 'limits'>('compute');
 
@@ -59,7 +57,7 @@ export const QuotaModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpdate
 
   // Initialize from existing cluster spec or status
   useEffect(() => {
-    if (!cluster) return;
+    if (!isOpen || !cluster) return;
 
     const rq = cluster.spec.policies?.resourceQuota;
     const lr = cluster.spec.policies?.limitRange;
@@ -105,7 +103,7 @@ export const QuotaModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpdate
       if (lr.minCPU) setMinCPU(lr.minCPU);
       if (lr.minMemory) setMinMemory(lr.minMemory);
     }
-  }, [cluster]);
+  }, [isOpen]);
 
   const loadPreset = (preset: 'small' | 'medium' | 'large') => {
     switch (preset) {
@@ -230,6 +228,8 @@ export const QuotaModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpdate
       setSaving(false);
     }
   };
+
+  if (!isOpen || !cluster) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-150">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Trash2, AlertTriangle, X, Loader2 } from 'lucide-react';
 import type { VirtualCluster } from '../lib/types';
 
@@ -13,6 +13,13 @@ export const DeleteModal: React.FC<Props> = ({ cluster, isOpen, onClose, onDelet
   const [confirmInput, setConfirmInput] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setConfirmInput('');
+      setError(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen || !cluster) return null;
 
