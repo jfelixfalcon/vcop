@@ -340,10 +340,10 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white flex items-center gap-2.5">
             <Package className="w-8 h-8 text-cyan-400" />
-            DevOps Application Store & Packs
+            DevOps Application Store 
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-3xl">
-            Curated Helm charts and Kubernetes manifests ready for one-click deployment to any virtual cluster. Group apps into application packs or deploy individually.
+            Curated Helm charts and Kubernetes manifests ready for one-click deployment to any virtual cluster. Group apps into application  or deploy individually.
           </p>
         </div>
 
@@ -367,12 +367,12 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
         )}
       </div>
 
-      {/* App Groups / Packs Showcase Bar */}
+      {/* App Groups /  Showcase Bar */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 font-mono">
             <Layers className="w-3.5 h-3.5 text-purple-400" />
-            Curated Application Packs & Suites
+            Curated Application  & Suites
           </h3>
           <span className="text-[10px] font-mono text-slate-500">
             Click a pack to filter catalog
@@ -382,7 +382,7 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
         {groups.length === 0 ? (
           <div className="p-4 rounded-2xl border border-dashed border-cyber-800 bg-cyber-950/40 text-center">
             <p className="text-xs text-slate-500 font-mono">
-              No application packs defined yet. Click <span className="text-purple-400 font-semibold">+ Create App Group</span> above to bundle multiple apps into a 1-click deployment suite.
+              No application  defined yet. Click <span className="text-purple-400 font-semibold">+ Create App Group</span> above to bundle multiple apps into a 1-click deployment suite.
             </p>
           </div>
         ) : (

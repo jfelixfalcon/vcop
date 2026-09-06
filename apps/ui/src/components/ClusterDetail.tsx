@@ -347,7 +347,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
           { id: 'telemetry', label: 'Health & Telemetry', icon: Activity },
           { id: 'quota', label: 'Quotas & Policies', icon: Gauge },
           { id: 'access', label: 'Access & RBAC', icon: Users },
-          { id: 'apps', label: 'Applications & Packs', icon: Package },
+          { id: 'apps', label: 'Applications ', icon: Package },
           { id: 'etcd', label: 'HA etcd Backing Store', icon: Shield },
           { id: 'addons', label: 'CoreDNS & Metrics-Server', icon: Network },
           { id: 'yaml', label: 'Effective vcluster.yaml', icon: FileCode },
@@ -380,15 +380,15 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <div className="flex justify-between items-center mb-3">
                 <span className="text-xs font-semibold text-slate-300">Tenant CPU Utilization</span>
                 <span className="font-mono text-xs text-cyber-accent">
-                  {cluster.status.metrics?.cpuUsage || '85m'}
+                  {cluster.status.metrics?.cpuUsage || '0m'} ({cluster.status.metrics?.cpuPercent ?? 0}%)
                 </span>
               </div>
               <MetricSparkline
-                data={cluster.sparklineData?.cpu || [12, 18, 25, 30, 24, 28, 35, 38]}
+                data={cluster.sparklineData?.cpu || [0, 0, 0, 0, 0]}
                 color="cyan"
                 height={60}
                 unit="%"
-                currentValue={cluster.status.metrics?.cpuPercent ?? 38}
+                currentValue={cluster.status.metrics?.cpuPercent ?? 0}
               />
             </div>
 
@@ -396,15 +396,15 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <div className="flex justify-between items-center mb-3">
                 <span className="text-xs font-semibold text-slate-300">Tenant Memory Consumption</span>
                 <span className="font-mono text-xs text-purple-300">
-                  {cluster.status.metrics?.memoryUsage || '1.2Gi'}
+                  {cluster.status.metrics?.memoryUsage || '0Mi'} ({cluster.status.metrics?.memPercent ?? 0}%)
                 </span>
               </div>
               <MetricSparkline
-                data={cluster.sparklineData?.memory || [28, 30, 32, 34, 34, 35, 36, 39]}
+                data={cluster.sparklineData?.memory || [0, 0, 0, 0, 0]}
                 color="purple"
                 height={60}
                 unit="%"
-                currentValue={cluster.status.metrics?.memPercent ?? 39}
+                currentValue={cluster.status.metrics?.memPercent ?? 0}
               />
             </div>
           </div>
@@ -915,7 +915,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         </div>
       )}
 
-      {/* TAB CONTENT: Applications & App Store Packs */}
+      {/* TAB CONTENT: Applications & App Store  */}
       {activeTab === 'apps' && (
         <div className="space-y-6 animate-in fade-in duration-150">
           {/* Top Header Card */}
@@ -924,7 +924,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <Package className="w-5 h-5 text-cyan-400" />
-                  Deployed Applications & Packs
+                  Deployed Applications 
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 max-w-2xl">
                   Helm chart releases and Kubernetes manifests active inside this virtual cluster. Administrators can deploy additional applications or uninstall workloads dynamically.
@@ -1011,7 +1011,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 </span>
               </div>
               <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800">
-                <span className="text-[10px] text-slate-500 block mb-1">MANIFEST PACKS</span>
+                <span className="text-[10px] text-slate-500 block mb-1">MANIFEST </span>
                 <span className="text-emerald-300 font-bold text-base">
                   {(cluster.metadata?.installedApps || []).filter((a) => a.manifests).length}
                 </span>
@@ -1036,7 +1036,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 <Package className="w-12 h-12 text-slate-600 mx-auto mb-3" />
                 <h4 className="text-base font-bold text-white">No Applications Deployed Yet</h4>
                 <p className="text-xs text-slate-400 mt-1">
-                  This virtual cluster currently has no additional application packs or Helm charts installed. Choose an action below to deploy workloads or publish apps:
+                  This virtual cluster currently has no additional application  or Helm charts installed. Choose an action below to deploy workloads or publish apps:
                 </p>
               </div>
 
@@ -1267,7 +1267,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   App Store Catalog & Group Suites
                 </h4>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Pre-configured application packs available for deployment to {cluster.name}.
+                  Pre-configured application  available for deployment to {cluster.name}.
                 </p>
               </div>
               <div className="flex items-center gap-2">

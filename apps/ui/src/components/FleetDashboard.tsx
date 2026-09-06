@@ -10,6 +10,11 @@ import {
   Trash2,
   ExternalLink,
   Shield,
+  ShieldCheck,
+  Cpu,
+  Package,
+  LayoutGrid,
+  List,
   RefreshCw,
   CheckCircle2,
   Moon,
@@ -23,6 +28,7 @@ import { KubeconfigModal } from './KubeconfigModal';
 import { UpgradeModal } from './UpgradeModal';
 import { DeleteModal } from './DeleteModal';
 import { SleepModal } from './SleepModal';
+import { parseCpuMillis, parseMemoryBytes, getClusterCapacity } from '../lib/k8s-client';
 
 interface FleetDashboardProps {
   currentUser?: UserSession | null;
@@ -98,21 +104,52 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
   const readyClusters = clusters.filter((c) => c.status.phase === 'Ready').length;
   const sleepingClusters = clusters.filter((c) => c.status.phase === 'Sleeping').length;
   const upgradingClusters = clusters.filter((c) => c.status.phase === 'Upgrading').length;
+  const degradedClusters = clusters.filter((c) => c.status.phase === 'Degraded').length;
+
   const totalPods = clusters.reduce((acc, c) => acc + (c.status.metrics?.podCount || 0), 0);
-  const distinctEngines = Array.from(
-    new Set(clusters.map((c) => c.status.vclusterVersion || c.spec.vclusterVersion).filter(Boolean))
-  );
-  const dominantEngine = distinctEngines.length === 1
-    ? `vCluster ${distinctEngines[0]}`
-    : distinctEngines.length > 1
-    ? `${distinctEngines.length} Engines`
-    : 'vCluster OSS';
+  const totalInstalledApps = clusters.reduce((acc, c) => acc + (c.metadata?.installedApps?.length || 0), 0);
+  const totalHelmReleases = clusters.reduce((acc, c) => acc + (c.metadata?.installedApps?.filter((a) => a.helm)?.length || 0), 0);
+  const totalManifests = clusters.reduce((acc, c) => acc + (c.metadata?.installedApps?.filter((a) => a.manifests)?.length || 0), 0);
+
+  const haClustersCount = clusters.filter((c) => c.spec.highAvailability).length;
+  const quorumPercent = totalClusters > 0 ? Math.round((readyClusters / totalClusters) * 100) : 100;
+
+  // Compute resource allocations across fleet
+  let totalCommittedCores = 0;
+  let totalCommittedMemBytes = 0;
+  let totalUsedCpuMillis = 0;
+  let totalUsedMemBytes = 0;
+
+  clusters.forEach((c) => {
+    const isSleeping = c.status.phase === 'Sleeping' || c.spec.paused;
+    const capacity = getClusterCapacity(c.spec);
+    totalCommittedCores += capacity.cpuMillis / 1000;
+    totalCommittedMemBytes += capacity.memoryBytes;
+
+    if (!isSleeping && c.status.metrics) {
+      totalUsedCpuMillis += parseCpuMillis(c.status.metrics.cpuUsage);
+      totalUsedMemBytes += parseMemoryBytes(c.status.metrics.memoryUsage);
+    }
+  });
+
+  const totalCommittedMemGiB = totalCommittedMemBytes / (1024 * 1024 * 1024);
+  const totalUsedMemDisplay = totalUsedMemBytes >= 1024 * 1024 * 1024
+    ? `${(totalUsedMemBytes / (1024 * 1024 * 1024)).toFixed(1)} GiB`
+    : `${Math.round(totalUsedMemBytes / (1024 * 1024))} MiB`;
+
+  const totalUsedCpuDisplay = totalUsedCpuMillis >= 1000
+    ? `${(totalUsedCpuMillis / 1000).toFixed(1)} Cores`
+    : `${totalUsedCpuMillis}m`;
+
+  const fleetCpuLoad = totalCommittedCores > 0
+    ? Math.round((totalUsedCpuMillis / (totalCommittedCores * 1000)) * 100)
+    : 0;
 
   return (
     <div className="space-y-6">
       {/* Top Banner / Fleet Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1 */}
+        {/* Card 1: Fleet Scale */}
         <div className="relative overflow-hidden bg-cyber-900/90 border border-cyber-700/60 rounded-2xl p-5 shadow-lg backdrop-blur-sm">
           <div className="flex justify-between items-start">
             <div>
@@ -131,59 +168,75 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                 <span className="text-indigo-400 font-semibold">{sleepingClusters} Sleeping</span>
               </>
             )}
-            <span className="text-slate-600">•</span>
-            <span className="text-purple-400 font-semibold">{upgradingClusters} Upgrading</span>
+            {upgradingClusters > 0 && (
+              <>
+                <span className="text-slate-600">•</span>
+                <span className="text-purple-400 font-semibold">{upgradingClusters} Upgrading</span>
+              </>
+            )}
+            {degradedClusters > 0 && (
+              <>
+                <span className="text-slate-600">•</span>
+                <span className="text-rose-400 font-semibold">{degradedClusters} Degraded</span>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Card 2 */}
+        {/* Card 2: Fleet Compute Allocation */}
         <div className="relative overflow-hidden bg-cyber-900/90 border border-cyber-700/60 rounded-2xl p-5 shadow-lg backdrop-blur-sm">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Quorum Health</p>
-              <h3 className="text-3xl font-bold font-mono text-emerald-400 mt-1">
-                {totalClusters > 0 ? Math.round((readyClusters / totalClusters) * 100) : 100}%
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Fleet Compute Allocated</p>
+              <h3 className="text-2xl font-bold font-mono text-cyan-300 mt-1.5">
+                {totalCommittedCores} Cores <span className="text-slate-500 font-normal text-base">•</span> {Math.round(totalCommittedMemGiB)} GiB
+              </h3>
+            </div>
+            <div className="p-3 bg-cyan-500/10 rounded-xl border border-cyan-500/20 text-cyan-400">
+              <Cpu className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-center justify-between text-xs font-mono text-slate-400">
+            <span>In Use: <strong className="text-slate-200">{totalUsedCpuDisplay}</strong> • <strong className="text-slate-200">{totalUsedMemDisplay}</strong></span>
+            <span className="text-cyan-400 font-semibold">{fleetCpuLoad}% Load</span>
+          </div>
+        </div>
+
+        {/* Card 3: Workloads & Apps */}
+        <div className="relative overflow-hidden bg-cyber-900/90 border border-cyber-700/60 rounded-2xl p-5 shadow-lg backdrop-blur-sm">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Workloads & Apps</p>
+              <h3 className="text-3xl font-bold font-mono text-white mt-1">
+                {totalPods} <span className="text-sm font-normal text-slate-400 font-sans">Pods</span>
               </h3>
             </div>
             <div className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-400">
-              <Shield className="w-5 h-5" />
+              <Package className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="mt-3 text-xs font-mono text-slate-400 flex items-center justify-between">
+            <span>{totalInstalledApps} App Releases</span>
+            <span className="text-emerald-400 font-semibold">{totalHelmReleases} Helm • {totalManifests} Manifest</span>
+          </div>
+        </div>
+
+        {/* Card 4: HA Quorum & Governance (Replaces Engine Fleet) */}
+        <div className="relative overflow-hidden bg-cyber-900/90 border border-cyber-700/60 rounded-2xl p-5 shadow-lg backdrop-blur-sm">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">HA Quorum & Governance</p>
+              <h3 className="text-3xl font-bold font-mono text-emerald-400 mt-1">
+                {quorumPercent}%
+              </h3>
+            </div>
+            <div className="p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-indigo-400">
+              <ShieldCheck className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-3 text-xs font-mono text-slate-400 flex items-center gap-1.5">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            <span>3-Node HA etcd Quorum Verified</span>
-          </div>
-        </div>
-
-        {/* Card 3 */}
-        <div className="relative overflow-hidden bg-cyber-900/90 border border-cyber-700/60 rounded-2xl p-5 shadow-lg backdrop-blur-sm">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Tenant Workloads</p>
-              <h3 className="text-3xl font-bold font-mono text-white mt-1">{totalPods}</h3>
-            </div>
-            <div className="p-3 bg-cyber-800 rounded-xl border border-cyber-700 text-cyan-400">
-              <Layers className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3 text-xs font-mono text-slate-400">
-            <span>Isolated virtual pods synced to host</span>
-          </div>
-        </div>
-
-        {/* Card 4 */}
-        <div className="relative overflow-hidden bg-cyber-900/90 border border-cyber-700/60 rounded-2xl p-5 shadow-lg backdrop-blur-sm">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Engine Fleet</p>
-              <h3 className="text-2xl font-bold font-mono text-cyber-accent mt-1.5">{dominantEngine}</h3>
-            </div>
-            <div className="p-3 bg-cyber-800 rounded-xl border border-cyber-700 text-purple-400">
-              <Activity className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3 text-xs font-mono text-slate-400">
-            <span>Dynamic multi-version control</span>
+            <span>{haClustersCount}/{totalClusters} clusters with 3-Node HA etcd</span>
           </div>
         </div>
       </div>
@@ -248,19 +301,47 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
           ))}
         </div>
 
-        {/* Action button (Admins only) */}
-        {isAdmin && (
-          <a
-            href="/new"
-            className="w-full md:w-auto px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm flex items-center justify-center gap-1.5 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            Provision Virtual Cluster
-          </a>
-        )}
+        <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
+          {/* View Mode Toggle */}
+          <div className="flex items-center bg-cyber-950 p-1 rounded-xl border border-cyber-800 shrink-0">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`p-1.5 rounded-lg transition-colors ${
+                viewMode === 'grid'
+                  ? 'bg-cyber-800 text-cyber-accent shadow-sm'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title="Grid View"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`p-1.5 rounded-lg transition-colors ${
+                viewMode === 'table'
+                  ? 'bg-cyber-800 text-cyber-accent shadow-sm'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title="Table View"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Action button (Admins only) */}
+          {isAdmin && (
+            <a
+              href="/new"
+              className="w-full md:w-auto px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm flex items-center justify-center gap-1.5 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              Provision Virtual Cluster
+            </a>
+          )}
+        </div>
       </div>
 
-      {/* Cluster Fleet Grid */}
+      {/* Cluster Fleet Content */}
       {loading ? (
         <div className="py-20 text-center text-slate-500 flex flex-col items-center justify-center gap-3">
           <RefreshCw className="w-6 h-6 animate-spin text-cyber-accent" />
@@ -288,6 +369,153 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
               Contact your platform administrator to request access or cluster provisioning.
             </p>
           )}
+        </div>
+      ) : viewMode === 'table' ? (
+        <div className="overflow-x-auto bg-cyber-900/90 border border-cyber-700/70 rounded-2xl shadow-lg backdrop-blur-sm">
+          <table className="w-full text-left text-xs text-slate-300 font-mono">
+            <thead className="bg-cyber-950/80 border-b border-cyber-800 text-[11px] uppercase tracking-wider text-slate-400">
+              <tr>
+                <th className="py-3.5 px-4 font-medium">Cluster</th>
+                <th className="py-3.5 px-4 font-medium">Status</th>
+                <th className="py-3.5 px-4 font-medium">Tier & Engine</th>
+                <th className="py-3.5 px-4 font-medium">HA Backing</th>
+                <th className="py-3.5 px-4 font-medium">Workloads</th>
+                <th className="py-3.5 px-4 font-medium">CPU Usage</th>
+                <th className="py-3.5 px-4 font-medium">Memory Usage</th>
+                <th className="py-3.5 px-4 font-medium">Apps</th>
+                <th className="py-3.5 px-4 font-medium text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-cyber-800/60">
+              {filteredClusters.map((cluster) => {
+                const isHA = cluster.spec.highAvailability;
+                const size = cluster.spec.sizePreset || 'medium';
+                const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'N/A';
+                const isSleeping = cluster.status.phase === 'Sleeping';
+
+                return (
+                  <tr key={cluster.name} className="hover:bg-cyber-850/50 transition-colors">
+                    <td className="py-3.5 px-4">
+                      <div className="flex items-center gap-2">
+                        <a href={`/clusters/${cluster.name}`} className="font-bold text-white hover:text-cyber-accent transition-colors">
+                          {cluster.name}
+                        </a>
+                        {cluster.metadata?.environment && (
+                          <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-cyber-800 text-slate-400 border border-cyber-700">
+                            {cluster.metadata.environment}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-0.5 font-sans">
+                        {cluster.metadata?.owner || 'Tenant Space'}
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <StatusBadge phase={cluster.status.phase} />
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <div className="capitalize text-white font-semibold">{size}</div>
+                      <div className="text-[10px] text-cyber-accent">{k8sVer}</div>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      {isHA ? (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px]">
+                          3-Node HA
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 text-[10px]">
+                          Single Node
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-4 text-white font-bold">
+                      {cluster.status.metrics?.podCount || 0} pods
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <div className="text-cyan-300 font-semibold">{cluster.status.metrics?.cpuUsage || '0m'}</div>
+                      <div className="text-[10px] text-slate-500">{cluster.status.metrics?.cpuPercent ?? 0}% allocated</div>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <div className="text-purple-300 font-semibold">{cluster.status.metrics?.memoryUsage || '0Mi'}</div>
+                      <div className="text-[10px] text-slate-500">{cluster.status.metrics?.memPercent ?? 0}% allocated</div>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyber-800 text-slate-300 border border-cyber-700 text-[10px]">
+                        <Package className="w-3 h-3 text-emerald-400" />
+                        {cluster.metadata?.installedApps?.length || 0}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => {
+                            setSelectedCluster(cluster);
+                            setActiveModal('kubeconfig');
+                          }}
+                          className="p-1.5 bg-cyber-800 hover:bg-cyber-700 text-slate-200 rounded-lg border border-cyber-700 transition-colors"
+                          title="Connect via Kubeconfig"
+                        >
+                          <Terminal className="w-3.5 h-3.5 text-cyber-accent" />
+                        </button>
+                        {isAdmin ? (
+                          <>
+                            <button
+                              onClick={() => {
+                                setSelectedCluster(cluster);
+                                setActiveModal('upgrade');
+                              }}
+                              className="p-1.5 bg-cyber-800 hover:bg-cyber-700 text-purple-300 rounded-lg border border-cyber-700 transition-colors"
+                              title="Upgrade Engine / K8s Version"
+                            >
+                              <ArrowUpCircle className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedCluster(cluster);
+                                setActiveModal('sleep');
+                              }}
+                              className={`p-1.5 rounded-lg border transition-colors ${
+                                isSleeping
+                                  ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                  : 'bg-cyber-800 hover:bg-cyber-700 text-indigo-300 border-cyber-700'
+                              }`}
+                              title={isSleeping ? 'Wake Cluster' : 'Sleep Cluster'}
+                            >
+                              {isSleeping ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-400" />}
+                            </button>
+                          </>
+                        ) : (
+                          <span className="px-1.5 py-0.5 text-[9px] font-mono text-slate-400 bg-cyber-950 rounded border border-cyber-800 flex items-center gap-0.5">
+                            <Lock className="w-2.5 h-2.5 text-cyan-400" />
+                            <span>Read Only</span>
+                          </span>
+                        )}
+                        <a
+                          href={`/clusters/${cluster.name}`}
+                          className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-cyber-800 transition-colors"
+                          title="View Details"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                        {isAdmin && (
+                          <button
+                            onClick={() => {
+                              setSelectedCluster(cluster);
+                              setActiveModal('delete');
+                            }}
+                            className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
+                            title="Delete Cluster"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -337,24 +565,43 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                     )}
                   </div>
 
-                  {/* Telemetry Sparklines */}
+                  {/* Telemetry Sparklines with Live Usage */}
                   <div className="grid grid-cols-2 gap-3 py-3 px-3.5 bg-cyber-950/60 rounded-xl border border-cyber-800/80 mb-4">
-                    <MetricSparkline
-                      data={cluster.sparklineData?.cpu || [10, 15, 20, 25, 20, 30]}
-                      color="cyan"
-                      label="CPU"
-                      currentValue={cluster.status.metrics?.cpuPercent ?? 24}
-                    />
-                    <MetricSparkline
-                      data={cluster.sparklineData?.memory || [20, 22, 25, 26, 28, 28]}
-                      color="purple"
-                      label="Memory"
-                      currentValue={cluster.status.metrics?.memPercent ?? 34}
-                    />
+                    <div>
+                      <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 mb-1">
+                        <span>CPU</span>
+                        <span className="text-cyan-400 font-bold">{cluster.status.metrics?.cpuUsage || '0m'}</span>
+                      </div>
+                      <MetricSparkline
+                        data={cluster.sparklineData?.cpu || [0, 0, 0, 0, 0]}
+                        color="cyan"
+                        label=""
+                        currentValue={cluster.status.metrics?.cpuPercent ?? 0}
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 mb-1">
+                        <span>RAM</span>
+                        <span className="text-purple-400 font-bold">{cluster.status.metrics?.memoryUsage || '0Mi'}</span>
+                      </div>
+                      <MetricSparkline
+                        data={cluster.sparklineData?.memory || [0, 0, 0, 0, 0]}
+                        color="purple"
+                        label=""
+                        currentValue={cluster.status.metrics?.memPercent ?? 0}
+                      />
+                    </div>
                   </div>
 
-                  {/* Add-on features summary */}
+                  {/* Add-on features & apps summary */}
                   <div className="text-[11px] font-mono text-slate-400 space-y-1 mb-4">
+                    <div className="flex justify-between">
+                      <span>Applications:</span>
+                      <span className="text-slate-200 font-semibold flex items-center gap-1">
+                        <Package className="w-3 h-3 text-emerald-400" />
+                        {cluster.metadata?.installedApps?.length || 0} Installed
+                      </span>
+                    </div>
                     <div className="flex justify-between">
                       <span>External CoreDNS:</span>
                       <span className="text-emerald-400">Enabled</span>
@@ -362,12 +609,6 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                     <div className="flex justify-between">
                       <span>External Metrics (HPA):</span>
                       <span className="text-emerald-400">Enabled</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Endpoint:</span>
-                      <span className="text-slate-300 truncate max-w-[160px]" title={cluster.status.endpoint}>
-                        {cluster.status.endpoint ? 'Available' : 'Pending'}
-                      </span>
                     </div>
                   </div>
                 </div>
@@ -440,7 +681,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                       className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-cyber-800 transition-colors"
                       title="View Details"
                     >
-                      <ExternalLink className="w-4 h-4" />
+                      <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                     {isAdmin && (
                       <button
@@ -451,7 +692,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
                         title="Teardown Cluster"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>

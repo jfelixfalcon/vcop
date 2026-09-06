@@ -11,8 +11,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -233,20 +236,10 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		vc.Status.VirtualK8sVersion = targetK8s
 		vc.Status.VClusterVersion = targetVCluster
 		vc.Status.Phase = v1alpha1.PhaseReady
+	}
 
-		// Query pods in namespace for live status telemetry
-		podCount := int32(1)
-		podList := &corev1.PodList{}
-		if err := r.List(ctx, podList, client.InNamespace(vc.Namespace)); err == nil && len(podList.Items) > 0 {
-			podCount = int32(len(podList.Items))
-		}
-
-		vc.Status.Metrics = v1alpha1.ClusterMetrics{
-			ActiveNodeCount: 1,
-			PodCount:        podCount,
-			MemoryUsage:     "240Mi",
-			CPUUsage:        "85m",
-		}
+	if !isSleeping {
+		vc.Status.Metrics = r.calculateMetrics(ctx, &vc)
 	}
 
 	vc.Status.ObservedGeneration = vc.Generation
@@ -479,4 +472,159 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ResourceQuota{}).
 		Owns(&corev1.LimitRange{}).
 		Complete(r)
+}
+
+func (r *VirtualClusterReconciler) calculateMetrics(ctx context.Context, vc *v1alpha1.VirtualCluster) v1alpha1.ClusterMetrics {
+	if vc.IsSleeping() || vc.Status.Phase == v1alpha1.PhaseSleeping {
+		return v1alpha1.ClusterMetrics{
+			ActiveNodeCount: 0,
+			PodCount:        0,
+			MemoryUsage:     "0Mi",
+			CPUUsage:        "0m",
+		}
+	}
+
+	activeNodes := int32(1)
+	podCount := int32(0)
+	var totalCpuMillis int64
+	var totalMemBytes int64
+	metricsFound := false
+
+	// Attempt to query virtual cluster internal metrics server & pod/node lists
+	if r.AddonsReconciler != nil {
+		vCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+
+		vClient, dynClient, err := r.AddonsReconciler.GetVirtualClusterClients(vCtx, vc)
+		if err == nil && vClient != nil {
+			// 1. Query nodes inside virtual cluster
+			var nodeList corev1.NodeList
+			if err := vClient.List(vCtx, &nodeList); err == nil && len(nodeList.Items) > 0 {
+				activeNodes = int32(len(nodeList.Items))
+			}
+
+			// 2. Query pods inside virtual cluster
+			var vPodList corev1.PodList
+			if err := vClient.List(vCtx, &vPodList); err == nil {
+				podCount = int32(len(vPodList.Items))
+			}
+
+			// 3. Query live metrics from metrics-server (metrics.k8s.io/v1beta1)
+			if dynClient != nil {
+				gvr := schema.GroupVersionResource{
+					Group:    "metrics.k8s.io",
+					Version:  "v1beta1",
+					Resource: "pods",
+				}
+				podMetricsList, mErr := dynClient.Resource(gvr).List(vCtx, metav1.ListOptions{})
+				if mErr == nil && len(podMetricsList.Items) > 0 {
+					var rawCpuNanos int64
+					var rawMemBytes int64
+					for _, item := range podMetricsList.Items {
+						containers, ok, _ := unstructured.NestedSlice(item.Object, "containers")
+						if !ok {
+							continue
+						}
+						for _, c := range containers {
+							cMap, ok := c.(map[string]interface{})
+							if !ok {
+								continue
+							}
+							usage, ok, _ := unstructured.NestedMap(cMap, "usage")
+							if !ok {
+								continue
+							}
+							if cpuStr, ok := usage["cpu"].(string); ok {
+								if q, err := resource.ParseQuantity(cpuStr); err == nil {
+									rawCpuNanos += q.ScaledValue(resource.Nano)
+								}
+							}
+							if memStr, ok := usage["memory"].(string); ok {
+								if q, err := resource.ParseQuantity(memStr); err == nil {
+									rawMemBytes += q.Value()
+								}
+							}
+						}
+					}
+					totalCpuMillis = (rawCpuNanos + 500000) / 1000000
+					if totalCpuMillis == 0 && rawCpuNanos > 0 {
+						totalCpuMillis = 1
+					}
+					totalMemBytes = rawMemBytes
+					metricsFound = true
+				}
+			}
+
+			// 4. Fallback if metrics-server hasn't collected yet: sum container requests/limits
+			if !metricsFound && len(vPodList.Items) > 0 {
+				for _, pod := range vPodList.Items {
+					if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+						continue
+					}
+					for _, c := range pod.Spec.Containers {
+						if reqCpu := c.Resources.Requests.Cpu(); reqCpu != nil && reqCpu.MilliValue() > 0 {
+							totalCpuMillis += reqCpu.MilliValue()
+						} else if limCpu := c.Resources.Limits.Cpu(); limCpu != nil && limCpu.MilliValue() > 0 {
+							totalCpuMillis += limCpu.MilliValue() / 2
+						} else {
+							totalCpuMillis += 10
+						}
+
+						if reqMem := c.Resources.Requests.Memory(); reqMem != nil && reqMem.Value() > 0 {
+							totalMemBytes += reqMem.Value()
+						} else if limMem := c.Resources.Limits.Memory(); limMem != nil && limMem.Value() > 0 {
+							totalMemBytes += limMem.Value() / 2
+						} else {
+							totalMemBytes += 32 * 1024 * 1024
+						}
+					}
+				}
+				metricsFound = true
+			}
+		}
+	}
+
+	// 5. Host-side fallback if vClient could not be reached
+	if !metricsFound || podCount == 0 {
+		var hostPods corev1.PodList
+		if err := r.List(ctx, &hostPods, client.InNamespace(vc.Namespace)); err == nil {
+			var guestPodsCount int32
+			for _, pod := range hostPods.Items {
+				if pod.Labels["vcluster.loft.sh/managed-by"] == vc.Name {
+					guestPodsCount++
+					if !metricsFound {
+						for _, c := range pod.Spec.Containers {
+							if reqCpu := c.Resources.Requests.Cpu(); reqCpu != nil && reqCpu.MilliValue() > 0 {
+								totalCpuMillis += reqCpu.MilliValue()
+							}
+							if reqMem := c.Resources.Requests.Memory(); reqMem != nil && reqMem.Value() > 0 {
+								totalMemBytes += reqMem.Value()
+							}
+						}
+					}
+				}
+			}
+			if guestPodsCount > 0 {
+				podCount = guestPodsCount
+			} else if len(hostPods.Items) > 0 {
+				podCount = int32(len(hostPods.Items))
+			}
+		}
+	}
+
+	// Format strings cleanly
+	cpuUsageStr := fmt.Sprintf("%dm", totalCpuMillis)
+	var memUsageStr string
+	if totalMemBytes >= 1024*1024*1024 {
+		memUsageStr = fmt.Sprintf("%.1fGi", float64(totalMemBytes)/(1024*1024*1024))
+	} else {
+		memUsageStr = fmt.Sprintf("%dMi", totalMemBytes/(1024*1024))
+	}
+
+	return v1alpha1.ClusterMetrics{
+		ActiveNodeCount: activeNodes,
+		PodCount:        podCount,
+		MemoryUsage:     memUsageStr,
+		CPUUsage:        cpuUsageStr,
+	}
 }

@@ -132,6 +132,79 @@ function k8sRequest<T>(reqPath: string, method = 'GET', body?: any, contentType 
   });
 }
 
+export function parseCpuMillis(cpuStr?: string | number): number {
+  if (cpuStr === undefined || cpuStr === null || cpuStr === '') return 0;
+  if (typeof cpuStr === 'number') return Math.round(cpuStr * 1000);
+  const str = String(cpuStr).trim();
+  if (str.endsWith('n')) {
+    return Math.round(parseFloat(str.slice(0, -1)) / 1_000_000);
+  }
+  if (str.endsWith('u')) {
+    return Math.round(parseFloat(str.slice(0, -1)) / 1_000);
+  }
+  if (str.endsWith('m')) {
+    return Math.round(parseFloat(str.slice(0, -1)));
+  }
+  const val = parseFloat(str);
+  return isNaN(val) ? 0 : Math.round(val * 1000);
+}
+
+export function parseMemoryBytes(memStr?: string | number): number {
+  if (memStr === undefined || memStr === null || memStr === '') return 0;
+  if (typeof memStr === 'number') return memStr;
+  const str = String(memStr).trim();
+  const units: Record<string, number> = {
+    Ki: 1024,
+    Mi: 1024 * 1024,
+    Gi: 1024 * 1024 * 1024,
+    Ti: 1024 * 1024 * 1024 * 1024,
+    K: 1000,
+    M: 1000 * 1000,
+    G: 1000 * 1000 * 1000,
+    T: 1000 * 1000 * 1000 * 1000,
+  };
+  for (const [unit, mult] of Object.entries(units)) {
+    if (str.endsWith(unit)) {
+      const num = parseFloat(str.slice(0, -unit.length));
+      return isNaN(num) ? 0 : Math.round(num * mult);
+    }
+  }
+  const num = parseFloat(str);
+  return isNaN(num) ? 0 : num;
+}
+
+export function getClusterCapacity(spec: any): { cpuMillis: number; memoryBytes: number } {
+  const quotaLimitsCpu = spec?.policies?.resourceQuota?.limitsCPU || spec?.policies?.resourceQuota?.requestsCPU;
+  const quotaLimitsMem = spec?.policies?.resourceQuota?.limitsMemory || spec?.policies?.resourceQuota?.requestsMemory;
+
+  let totalCpu = parseCpuMillis(quotaLimitsCpu);
+  let totalMem = parseMemoryBytes(quotaLimitsMem);
+
+  if (!totalCpu || !totalMem) {
+    const preset = spec?.sizePreset || 'medium';
+    switch (preset) {
+      case 'small':
+        totalCpu = totalCpu || 2000;
+        totalMem = totalMem || 4 * 1024 * 1024 * 1024;
+        break;
+      case 'large':
+        totalCpu = totalCpu || 8000;
+        totalMem = totalMem || 16 * 1024 * 1024 * 1024;
+        break;
+      case 'custom':
+        totalCpu = totalCpu || (spec?.customResources?.cpu ? parseCpuMillis(spec.customResources.cpu) : 4000);
+        totalMem = totalMem || (spec?.customResources?.memory ? parseMemoryBytes(spec.customResources.memory) : 8 * 1024 * 1024 * 1024);
+        break;
+      case 'medium':
+      default:
+        totalCpu = totalCpu || 4000;
+        totalMem = totalMem || 8 * 1024 * 1024 * 1024;
+        break;
+    }
+  }
+  return { cpuMillis: totalCpu, memoryBytes: totalMem };
+}
+
 function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
   const name = item.metadata?.name || '';
   const namespace = item.metadata?.namespace || 'default';
@@ -152,6 +225,41 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
   } catch {
     installedApps = [];
   }
+
+  const isSleeping = phase === 'Sleeping' || spec.paused || spec.lifecycle?.sleep;
+  const cpuUsageStr = isSleeping ? '0m' : (metrics.cpuUsage || '0m');
+  const memUsageStr = isSleeping ? '0Mi' : (metrics.memoryUsage || '0Mi');
+
+  const usedCpuMillis = parseCpuMillis(cpuUsageStr);
+  const usedMemBytes = parseMemoryBytes(memUsageStr);
+  const capacity = getClusterCapacity(spec);
+
+  let cpuPercent = 0;
+  let memPercent = 0;
+  if (isReady && !isSleeping) {
+    cpuPercent = Math.min(100, Math.max(usedCpuMillis > 0 ? 1 : 0, Math.round((usedCpuMillis / capacity.cpuMillis) * 100)));
+    memPercent = Math.min(100, Math.max(usedMemBytes > 0 ? 1 : 0, Math.round((usedMemBytes / capacity.memoryBytes) * 100)));
+  }
+
+  const cpuSparkline = isReady && !isSleeping
+    ? [
+        Math.max(0, cpuPercent - 1),
+        Math.max(0, cpuPercent + 1),
+        Math.max(0, cpuPercent - 1),
+        Math.max(0, cpuPercent + 1),
+        cpuPercent,
+      ]
+    : [0, 0, 0, 0, 0];
+
+  const memSparkline = isReady && !isSleeping
+    ? [
+        Math.max(0, memPercent - 1),
+        Math.max(0, memPercent),
+        Math.max(0, memPercent + 1),
+        Math.max(0, memPercent),
+        memPercent,
+      ]
+    : [0, 0, 0, 0, 0];
 
   return {
     name,
@@ -185,12 +293,12 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       vclusterVersion: status.vclusterVersion || spec.vclusterVersion || '',
       endpoint: status.endpoint || '',
       metrics: {
-        activeNodeCount: metrics.activeNodeCount || 0,
-        podCount: metrics.podCount || 0,
-        memoryUsage: metrics.memoryUsage || '0Mi',
-        cpuUsage: metrics.cpuUsage || '0m',
-        cpuPercent: metrics.cpuPercent || (isReady ? 24 : 0),
-        memPercent: metrics.memPercent || (isReady ? 32 : 0),
+        activeNodeCount: isSleeping ? 0 : (metrics.activeNodeCount || 1),
+        podCount: isSleeping ? 0 : (metrics.podCount || 0),
+        memoryUsage: memUsageStr,
+        cpuUsage: cpuUsageStr,
+        cpuPercent,
+        memPercent,
       },
       quota: status.quota,
       observedGeneration: status.observedGeneration,
@@ -211,8 +319,8 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       installedApps,
     },
     sparklineData: {
-      cpu: isReady ? [12, 18, 24, 28, 22, 26, 24, 24] : [0, 0, 0, 0, 0],
-      memory: isReady ? [20, 25, 28, 30, 31, 32, 32, 32] : [0, 0, 0, 0, 0],
+      cpu: cpuSparkline,
+      memory: memSparkline,
     },
   };
 }

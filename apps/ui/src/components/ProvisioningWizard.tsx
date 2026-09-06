@@ -61,7 +61,7 @@ export const ProvisioningWizard: React.FC = () => {
   const [vclusterVersion, setVclusterVersion] = useState<string>('');
   const [customYaml, setCustomYaml] = useState<string>('');
 
-  // App Store & Packs State
+  // App Store  State
   const [catalog, setCatalog] = useState<AppStoreCatalog | null>(null);
   const [selectedAppIds, setSelectedAppIds] = useState<string[]>([]);
   const [customValuesMap, setCustomValuesMap] = useState<Record<string, string>>({});
@@ -292,7 +292,7 @@ policies:
           {[
             { num: 1, label: 'Name & Identity', icon: Server },
             { num: 2, label: 'Size & Policies', icon: Layers },
-            { num: 3, label: 'App Store & Packs', icon: Package },
+            { num: 3, label: 'App Store ', icon: Package },
             { num: 4, label: 'Lifecycle & Launch', icon: Clock },
           ].map((item, idx) => {
             const Icon = item.icon;
@@ -676,14 +676,14 @@ policies:
           </div>
         )}
 
-        {/* STEP 3: App Store & Application Packs */}
+        {/* STEP 3: App Store & Application  */}
         {step === 3 && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h3 className="text-xl font-bold text-white flex items-center gap-2.5">
                   <Package className="w-5 h-5 text-cyan-400" />
-                  App Store & Addon Packs
+                  App Store & Addon 
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
                   Pre-install curated Helm releases, ingress controllers, databases, or microservice manifests into your virtual cluster.
@@ -694,12 +694,12 @@ policies:
               </span>
             </div>
 
-            {/* Curated Packs Quick Selector */}
+            {/* Curated  Quick Selector */}
             {catalog?.groups && catalog.groups.length > 0 && (
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-2.5 flex items-center gap-1.5 uppercase font-mono tracking-wider">
                   <Layers className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Curated Application Packs (1-Click Select)</span>
+                  <span>Curated Application  (1-Click Select)</span>
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {catalog.groups.map((group) => {
@@ -937,7 +937,7 @@ policies:
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-mono font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                    Pre-configured Apps & Packs ({selectedAppIds.length})
+                    Pre-configured Apps  ({selectedAppIds.length})
                   </span>
                   <button
                     type="button"

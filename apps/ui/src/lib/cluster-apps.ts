@@ -222,7 +222,7 @@ export async function getInstalledApps(clusterName: string, namespace?: string):
 }
 
 /**
- * Installs one or more applications/application packs to a virtual cluster.
+ * Installs one or more applications/application  to a virtual cluster.
  * Connects directly to the guest cluster and executes deployment of Helm charts and manifests.
  */
 export async function installAppsToCluster(

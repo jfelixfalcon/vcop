@@ -403,7 +403,7 @@ export const InstallAppModal: React.FC<Props> = ({
             </div>
             <div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                Deploy Applications & Packs
+                Deploy Applications 
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
                 Target Cluster: <span className="font-mono text-cyan-400 font-semibold">{cluster.name}</span>
@@ -498,7 +498,7 @@ export const InstallAppModal: React.FC<Props> = ({
                 <div>
                   <h4 className="text-sm font-bold text-white">App Store is Clean & Empty</h4>
                   <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                    No applications or packs exist yet. Deploy a custom app directly to this cluster, or publish your first app or group right now!
+                    No applications or  exist yet. Deploy a custom app directly to this cluster, or publish your first app or group right now!
                   </p>
                 </div>
 
@@ -554,7 +554,7 @@ export const InstallAppModal: React.FC<Props> = ({
                   <div>
                     <label className="block text-xs font-medium text-slate-300 mb-2 flex items-center gap-1.5">
                       <Layers className="w-3.5 h-3.5 text-purple-400" />
-                      <span>One-Click Application Packs:</span>
+                      <span>One-Click Application :</span>
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {groups.map((grp) => {
