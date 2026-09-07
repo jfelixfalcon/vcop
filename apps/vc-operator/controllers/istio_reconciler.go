@@ -351,7 +351,7 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 	}
 	pilotImage := fmt.Sprintf("docker.io/istio/pilot:%s", istioVer)
 
-	replicas := int32(1)
+	replicas := r.GetIstiodReplicas(vc)
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "istiod",
@@ -420,8 +420,17 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 			return err
 		}
 	} else if err == nil {
-		if existingDep.Spec.Template.Spec.Containers[0].Image != dep.Spec.Template.Spec.Containers[0].Image {
+		updated := false
+		if existingDep.Spec.Replicas == nil || *existingDep.Spec.Replicas != replicas {
+			existingDep.Spec.Replicas = &replicas
+			updated = true
+		}
+		if len(existingDep.Spec.Template.Spec.Containers) > 0 &&
+			existingDep.Spec.Template.Spec.Containers[0].Image != dep.Spec.Template.Spec.Containers[0].Image {
 			existingDep.Spec.Template = dep.Spec.Template
+			updated = true
+		}
+		if updated {
 			if err := vClient.Update(ctx, existingDep); err != nil {
 				return err
 			}
@@ -518,7 +527,7 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 	}
 	proxyImage := fmt.Sprintf("docker.io/istio/proxyv2:%s", istioVer)
 
-	replicas := int32(1)
+	replicas := r.GetIngressGatewayReplicas(vc)
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "istio-ingressgateway",
@@ -602,9 +611,20 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 			return err
 		}
 	} else if err == nil {
-		existingDep.Spec.Template = dep.Spec.Template
-		if err := vClient.Update(ctx, existingDep); err != nil {
-			return err
+		updated := false
+		if existingDep.Spec.Replicas == nil || *existingDep.Spec.Replicas != replicas {
+			existingDep.Spec.Replicas = &replicas
+			updated = true
+		}
+		if len(existingDep.Spec.Template.Spec.Containers) > 0 &&
+			existingDep.Spec.Template.Spec.Containers[0].Image != dep.Spec.Template.Spec.Containers[0].Image {
+			existingDep.Spec.Template = dep.Spec.Template
+			updated = true
+		}
+		if updated {
+			if err := vClient.Update(ctx, existingDep); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -878,4 +898,42 @@ func portsEqual(a, b []corev1.ServicePort) bool {
 		}
 	}
 	return true
+}
+
+// GetIstiodReplicas computes the replica count for the istiod control plane.
+// If HighAvailability is true (or SizePreset is PresetHA), it returns 3 replicas; otherwise 1 replica.
+// Explicit Replicas setting in Spec overrides this.
+func (r *IstioReconciler) GetIstiodReplicas(vc *v1alpha1.VirtualCluster) int32 {
+	if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Replicas != nil {
+		return *vc.Spec.Components.Istio.Replicas
+	}
+	isHA := vc.Spec.HighAvailability
+	if vc.Spec.SizePreset == v1alpha1.PresetNormal {
+		isHA = false
+	} else if vc.Spec.SizePreset == v1alpha1.PresetHA {
+		isHA = true
+	}
+	if isHA {
+		return 3
+	}
+	return 1
+}
+
+// GetIngressGatewayReplicas computes the replica count for the Istio ingress gateway.
+// If HighAvailability is true (or SizePreset is PresetHA), it returns 3 replicas; otherwise 1 replica.
+// Explicit Replicas setting in Spec overrides this.
+func (r *IstioReconciler) GetIngressGatewayReplicas(vc *v1alpha1.VirtualCluster) int32 {
+	if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.IngressGateway != nil && vc.Spec.Components.Istio.IngressGateway.Replicas != nil {
+		return *vc.Spec.Components.Istio.IngressGateway.Replicas
+	}
+	isHA := vc.Spec.HighAvailability
+	if vc.Spec.SizePreset == v1alpha1.PresetNormal {
+		isHA = false
+	} else if vc.Spec.SizePreset == v1alpha1.PresetHA {
+		isHA = true
+	}
+	if isHA {
+		return 3
+	}
+	return 1
 }

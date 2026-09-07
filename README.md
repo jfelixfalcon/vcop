@@ -71,6 +71,7 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 - **Kubernetes Metrics Server:** Integrated inside the virtual cluster (`integrations.metricsServer.enabled: true`), allowing `kubectl top` and HPA controllers to function seamlessly within tenant boundaries.
 - **Istio Application Entrypoint (`charts/vcluster-istio`):**
   - High-performance ingress powered by in-cluster `istiod` and `istio-ingressgateway`.
+  - **Full High Availability Mode (3 Gateways & 3 istiod):** When high availability is chosen (`spec.highAvailability: true` or preset `ha`), the operator automatically provisions **3 `istiod` control plane replicas** and **3 `istio-ingressgateway` edge replicas** for multi-node fault tolerance and zero-downtime traffic ingress. Non-HA clusters run 1 replica each to conserve resources.
   - Service mesh is optional and disabled by default (`meshEnabled: false`) to preserve lightweight isolation.
   - Automatic HTTP-to-HTTPS upgrade: Gateway terminates port 80 and redirects traffic cleanly to port 443 with TLS.
   - Pre-configured `main-entrypoint` VirtualService routing traffic to tenant services for cluster FQDN hosts.

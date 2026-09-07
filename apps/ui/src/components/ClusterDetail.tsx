@@ -619,7 +619,9 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   {cluster.spec.components?.istio?.enabled ? (
                     <>
                       <CheckCircle2 className="w-4 h-4 text-cyan-400" />
-                      <span className="text-xs font-bold text-cyan-300">Istio Ingressgateway</span>
+                      <span className="text-xs font-bold text-cyan-300">
+                        Istio Ingressgateway {cluster.spec.highAvailability && <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-800 ml-1">HA (3x)</span>}
+                      </span>
                     </>
                   ) : (
                     <>
@@ -629,7 +631,9 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   )}
                 </div>
                 <span className="text-[11px] text-slate-400 font-mono block">
-                  {cluster.spec.components?.istio?.enabled ? 'Port 80 (HTTPS redirect) & 443' : 'Disabled'}
+                  {cluster.spec.components?.istio?.enabled
+                    ? (cluster.spec.highAvailability ? '3 Gateways & 3 istiod • Port 80 & 443' : '1 Gateway & 1 istiod • Port 80 & 443')
+                    : 'Disabled'}
                 </span>
               </div>
 

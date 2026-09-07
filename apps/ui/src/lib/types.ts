@@ -159,10 +159,12 @@ export interface VirtualCluster {
       istio?: {
         enabled: boolean;
         version?: string;
+        replicas?: number;
         meshEnabled?: boolean;
         ingressGateway?: {
           enabled: boolean;
           serviceType?: string;
+          replicas?: number;
         };
         certificateIssuer?: string;
         certificateIssuerKind?: string;

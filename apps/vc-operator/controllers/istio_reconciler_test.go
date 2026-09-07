@@ -116,3 +116,112 @@ func TestIstioReconciler_ValidateCertManagerIssuer_Exists(t *testing.T) {
 		t.Fatalf("expected issuer validation to pass, but got: %v", err)
 	}
 }
+
+func TestIstioReconciler_Replicas_NonHA(t *testing.T) {
+	r := NewIstioReconciler(nil, nil)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "vc-non-ha"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			HighAvailability: false,
+			SizePreset:       v1alpha1.PresetNormal,
+			Components: v1alpha1.ComponentsSpec{
+				Istio: &v1alpha1.IstioComponent{
+					Enabled: true,
+					IngressGateway: &v1alpha1.IstioGatewayConfig{
+						Enabled: true,
+					},
+				},
+			},
+		},
+	}
+
+	if rep := r.GetIstiodReplicas(vc); rep != 1 {
+		t.Fatalf("expected 1 istiod replica for non-HA cluster, got %d", rep)
+	}
+	if rep := r.GetIngressGatewayReplicas(vc); rep != 1 {
+		t.Fatalf("expected 1 ingress gateway replica for non-HA cluster, got %d", rep)
+	}
+}
+
+func TestIstioReconciler_Replicas_HA(t *testing.T) {
+	r := NewIstioReconciler(nil, nil)
+
+	// Case 1: HighAvailability = true
+	vc1 := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "vc-ha-flag"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			HighAvailability: true,
+			Components: v1alpha1.ComponentsSpec{
+				Istio: &v1alpha1.IstioComponent{
+					Enabled: true,
+					IngressGateway: &v1alpha1.IstioGatewayConfig{
+						Enabled: true,
+					},
+				},
+			},
+		},
+	}
+
+	if rep := r.GetIstiodReplicas(vc1); rep != 3 {
+		t.Fatalf("expected 3 istiod replicas for HA cluster, got %d", rep)
+	}
+	if rep := r.GetIngressGatewayReplicas(vc1); rep != 3 {
+		t.Fatalf("expected 3 ingress gateway replicas for HA cluster, got %d", rep)
+	}
+
+	// Case 2: SizePreset = ha
+	vc2 := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "vc-ha-preset"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			SizePreset: v1alpha1.PresetHA,
+			Components: v1alpha1.ComponentsSpec{
+				Istio: &v1alpha1.IstioComponent{
+					Enabled: true,
+					IngressGateway: &v1alpha1.IstioGatewayConfig{
+						Enabled: true,
+					},
+				},
+			},
+		},
+	}
+
+	if rep := r.GetIstiodReplicas(vc2); rep != 3 {
+		t.Fatalf("expected 3 istiod replicas for PresetHA cluster, got %d", rep)
+	}
+	if rep := r.GetIngressGatewayReplicas(vc2); rep != 3 {
+		t.Fatalf("expected 3 ingress gateway replicas for PresetHA cluster, got %d", rep)
+	}
+}
+
+func TestIstioReconciler_Replicas_ExplicitOverride(t *testing.T) {
+	r := NewIstioReconciler(nil, nil)
+
+	istiodRep := int32(5)
+	gwRep := int32(4)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "vc-custom-replicas"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			HighAvailability: true, // HA would default to 3, but explicit override should take precedence
+			Components: v1alpha1.ComponentsSpec{
+				Istio: &v1alpha1.IstioComponent{
+					Enabled:  true,
+					Replicas: &istiodRep,
+					IngressGateway: &v1alpha1.IstioGatewayConfig{
+						Enabled:  true,
+						Replicas: &gwRep,
+					},
+				},
+			},
+		},
+	}
+
+	if rep := r.GetIstiodReplicas(vc); rep != 5 {
+		t.Fatalf("expected 5 istiod replicas from explicit override, got %d", rep)
+	}
+	if rep := r.GetIngressGatewayReplicas(vc); rep != 4 {
+		t.Fatalf("expected 4 ingress gateway replicas from explicit override, got %d", rep)
+	}
+}
+

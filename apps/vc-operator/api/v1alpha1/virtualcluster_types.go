@@ -78,6 +78,9 @@ type IstioGatewayConfig struct {
 	// +kubebuilder:default="ClusterIP"
 	// +optional
 	ServiceType string `json:"serviceType,omitempty"`
+	// Replicas defines the replica count for the ingress gateway (defaults to 3 if highAvailability is true, otherwise 1)
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
 }
 
 // IstioComponent configures the opinionated Istio entrypoint and mesh stack
@@ -90,6 +93,10 @@ type IstioComponent struct {
 	// +kubebuilder:default="1.24.2"
 	// +optional
 	Version string `json:"version,omitempty"`
+
+	// Replicas defines the replica count for istiod control plane (defaults to 3 if highAvailability is true, otherwise 1)
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
 
 	// MeshEnabled enables service mesh sidecar injection (disabled by default)
 	// +kubebuilder:default=false
@@ -395,7 +402,7 @@ type VirtualClusterSpec struct {
 	// +optional
 	CustomResources *CustomResources `json:"customResources,omitempty"`
 
-	// HighAvailability enables 3-replica HA etcd and control-plane redundancy
+	// HighAvailability enables 3-replica HA etcd, 3-replica control-plane redundancy, and 3-replica Istio (3 istiod control plane & 3 ingress gateways)
 	// +kubebuilder:default=true
 	// +optional
 	HighAvailability bool `json:"highAvailability,omitempty"`

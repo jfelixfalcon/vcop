@@ -1123,6 +1123,16 @@ policies:
 
               {enableIstio && (
                 <div className="mt-4 space-y-4 pt-1">
+                  {/* HA Istio Notice */}
+                  {(sizePreset === 'ha' || sizePreset === 'large') && (
+                    <div className="flex items-center gap-2.5 p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs font-mono">
+                      <Zap className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <span>
+                        <strong className="text-white">High Availability Mode:</strong> Istio will automatically provision <strong className="text-cyan-200">3 istiod control plane replicas</strong> and <strong className="text-cyan-200">3 ingress gateway replicas</strong> for multi-replica resilience.
+                      </span>
+                    </div>
+                  )}
+
                   {/* Service Mesh Toggle */}
                   <div className="flex items-center justify-between p-3 rounded-xl bg-cyber-900/60 border border-cyber-800">
                     <div>
