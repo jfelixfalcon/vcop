@@ -1,119 +1,424 @@
 ---
-import { ShieldCheck, Plus, Terminal, Activity, LogOut, UserCheck, Shield } from 'lucide-react';
+import {
+  Layers,
+  Gauge,
+  Package,
+  GitBranch,
+  ShieldCheck,
+  Plus,
+  LogOut,
+  ChevronDown,
+  Menu,
+  X,
+  Sparkles,
+  Server,
+  Activity,
+  Terminal,
+} from 'lucide-react';
 
+const pathname = Astro.url.pathname;
 const user = Astro.locals.user;
 const isAdmin = user?.role === 'admin';
+
+// Navigation active states
+const isClustersActive = pathname === '/' || pathname.startsWith('/clusters');
+const isCapacityActive = pathname.startsWith('/capacity');
+const isAppsActive = pathname.startsWith('/apps');
+const isVersionsActive = pathname.startsWith('/admin/versions');
+const isOidcActive = pathname.startsWith('/admin/oidc');
+const isProvisionActive = pathname.startsWith('/new');
+
+// Breadcrumb resolution
+let currentSection = 'Fleet Overview';
+let clusterParam: string | null = null;
+
+if (pathname.startsWith('/clusters/')) {
+  currentSection = 'Fleet';
+  const parts = pathname.replace('/clusters/', '').split('/');
+  clusterParam = decodeURIComponent(parts[0]);
+} else if (isCapacityActive) {
+  currentSection = 'Capacity Guard';
+} else if (isAppsActive) {
+  currentSection = 'App Catalog';
+} else if (isVersionsActive) {
+  currentSection = 'Version Registry';
+} else if (isOidcActive) {
+  currentSection = 'OIDC Policy';
+} else if (isProvisionActive) {
+  currentSection = 'Provision Cluster';
+}
 ---
 
-<header class="sticky top-0 z-40 w-full border-b border-cyber-700/60 bg-cyber-950/80 backdrop-blur-md">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-    <!-- Brand -->
-    <div class="flex items-center gap-6">
-      <a href="/" class="flex items-center gap-3 group">
-        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center text-slate-950 font-bold font-mono shadow-glow-sm group-hover:shadow-glow-md transition-all">
-          <span class="text-base tracking-tighter">vC</span>
+<header class="sticky top-0 z-40 w-full border-b border-cyber-800/80 bg-cyber-950/90 backdrop-blur-xl transition-all">
+  <!-- Top Primary Header (Height: 56px) -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
+    <!-- Left: Brand & Context Breadcrumb -->
+    <div class="flex items-center gap-3.5 min-w-0">
+      <a href="/" class="flex items-center gap-2.5 group shrink-0" title="vCluster Operations Center">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-400 via-cyan-500 to-blue-600 flex items-center justify-center text-slate-950 font-black font-mono shadow-[0_0_15px_rgba(6,182,212,0.4)] group-hover:shadow-[0_0_20px_rgba(6,182,212,0.6)] group-hover:scale-105 transition-all">
+          <span class="text-xs tracking-tighter">vC</span>
         </div>
-        <div>
-          <span class="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
-            vCOp <span class="text-[10px] font-mono text-cyan-400 font-semibold px-2 py-0.5 rounded bg-cyan-950 border border-cyan-800">Platform</span>
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-bold tracking-tight text-white group-hover:text-cyan-300 transition-colors">
+            vCOp
           </span>
-          <p class="text-[10px] font-mono text-slate-400 -mt-0.5">Virtual Cluster Operations Center</p>
+          <span class="hidden sm:inline-flex px-1.5 py-0.2 rounded text-[10px] font-mono font-medium bg-cyber-900 border border-cyber-700/80 text-cyan-400/90">
+            Platform
+          </span>
         </div>
       </a>
 
-      <!-- Quick nav links -->
-      <nav class="hidden md:flex items-center gap-1 font-sans text-xs">
-        <a href="/" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
-          Fleet Clusters
+      <!-- Breadcrumbs divider -->
+      <span class="text-cyber-700 font-mono text-sm select-none shrink-0">/</span>
+
+      <!-- Active Section Breadcrumb -->
+      <div class="flex items-center gap-1.5 text-xs font-mono truncate">
+        <a href={isClustersActive ? '/' : pathname} class="text-slate-300 hover:text-white font-medium transition-colors truncate">
+          {currentSection}
         </a>
-        <a href="/capacity" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium flex items-center gap-1.5">
-          <span>Capacity & Quotas</span>
-          <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Guard</span>
-        </a>
-        <a href="/apps" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
-          App Store
-        </a>
-        {isAdmin && (
-          <a href="/admin/versions" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
-            Version Registry
-          </a>
+        {clusterParam && (
+          <>
+            <span class="text-cyber-700 font-mono select-none">/</span>
+            <span class="px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold text-cyan-300 bg-cyan-950/60 border border-cyan-800/80 shadow-[0_0_10px_rgba(6,182,212,0.15)] truncate">
+              {clusterParam}
+            </span>
+          </>
         )}
-        {isAdmin && (
-          <a href="/admin/oidc" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium flex items-center gap-1">
-            <span>OIDC Policy</span>
-            <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30">PKCE</span>
-          </a>
-        )}
-        {isAdmin && (
-          <a href="/new" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-cyber-900 transition-colors font-medium">
-            Provision
-          </a>
-        )}
-      </nav>
+      </div>
     </div>
 
-    <!-- Right Controls -->
-    <div class="flex items-center gap-3">
-      <!-- Operator Status Pill -->
-      <div class="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-cyber-900/80 border border-cyber-700/60 text-xs font-mono text-slate-300">
-        <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-glow-emerald animate-pulse"></span>
-        <span>Operator: <strong class="text-emerald-400 font-semibold">Active</strong></span>
+    <!-- Right: Telemetry Status, Quick Action & User Profile -->
+    <div class="flex items-center gap-3 shrink-0">
+      <!-- Operator Health Pulse (Compact 2026 indicator) -->
+      <div class="hidden md:flex items-center gap-2 px-2.5 py-1 rounded-full bg-cyber-900/60 border border-cyber-800/80 text-xs font-mono" title="vCOp Operator running healthy on host Kubernetes cluster">
+        <span class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></span>
+        </span>
+        <span class="text-slate-400 text-[11px]">Operator</span>
+        <span class="text-emerald-400 font-semibold text-[11px]">Active</span>
       </div>
 
+      <!-- Quick Action: New Cluster Button (Admins only) -->
+      {isAdmin && (
+        <a
+          href="/new"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-[0_0_14px_rgba(6,182,212,0.3)] hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all font-mono"
+        >
+          <Plus class="w-3.5 h-3.5 stroke-[2.5]" />
+          <span class="hidden sm:inline">New Cluster</span>
+        </a>
+      )}
+
+      <!-- User Profile Dropdown / Popover -->
       {user ? (
-        <div class="flex items-center gap-3">
-          <!-- User Profile & Role Badge -->
-          <div class="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-cyber-900/90 border border-cyber-700/80 text-xs">
-            <div class="w-6 h-6 rounded-lg bg-cyber-800 border border-cyber-700 flex items-center justify-center text-[11px] font-mono font-bold text-cyber-accent uppercase">
+        <div class="relative" id="user-menu-root">
+          <button
+            id="user-menu-trigger"
+            type="button"
+            class="flex items-center gap-2 p-1 pl-1.5 pr-2 rounded-xl bg-cyber-900/80 hover:bg-cyber-800/90 border border-cyber-700/80 hover:border-cyber-600 transition-all text-xs font-mono cursor-pointer focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+            aria-expanded="false"
+            aria-haspopup="true"
+          >
+            <!-- Avatar Initials -->
+            <div class={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold uppercase transition-all ${
+              isAdmin
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-[0_0_10px_rgba(168,85,247,0.25)]'
+                : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-[0_0_10px_rgba(6,182,212,0.25)]'
+            }`}>
               {user.username.slice(0, 2)}
             </div>
-            <div class="hidden sm:block text-left font-mono">
-              <div class="text-[11px] font-semibold text-slate-200 leading-none">
-                {user.email || user.username}
+            <span class="text-slate-200 text-xs font-medium max-w-[100px] truncate hidden sm:inline">
+              {user.username}
+            </span>
+            <ChevronDown class="w-3.5 h-3.5 text-slate-400 transition-transform duration-200" id="user-chevron" />
+          </button>
+
+          <!-- Floating Glassmorphism Popover Menu -->
+          <div
+            id="user-dropdown"
+            class="hidden absolute right-0 mt-2 w-64 rounded-2xl bg-cyber-950/95 backdrop-blur-2xl border border-cyber-700/80 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+          >
+            <!-- Header Identity -->
+            <div class="px-3 py-2.5 border-b border-cyber-800/80">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-white truncate">{user.name || user.username}</span>
+                <span class={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider ${
+                  isAdmin
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                    : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                }`}>
+                  {user.role}
+                </span>
               </div>
-              <div class="text-[9px] text-slate-400 capitalize mt-0.5">
-                {user.method === 'oidc' ? 'SSO Identity' : 'Breakglass Local'}
+              <p class="text-[11px] font-mono text-slate-400 truncate mt-0.5">{user.email || `${user.username}@cluster.local`}</p>
+              <div class="mt-2 flex items-center justify-between text-[10px] font-mono text-slate-500">
+                <span>Auth Provider:</span>
+                <span class="text-slate-300 capitalize">{user.method === 'oidc' ? 'Enterprise SSO' : 'Breakglass Local'}</span>
               </div>
             </div>
-            <span
-              class={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider ${
-                isAdmin
-                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-glow-sm'
-                  : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-              }`}
-            >
-              {user.role}
-            </span>
+
+            <!-- Quick Navigation -->
+            <div class="py-1">
+              <a
+                href="/"
+                class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono"
+              >
+                <Layers class="w-3.5 h-3.5 text-slate-400" />
+                <span>Fleet Clusters</span>
+              </a>
+              <a
+                href="/capacity"
+                class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono"
+              >
+                <Gauge class="w-3.5 h-3.5 text-slate-400" />
+                <span>Capacity Analytics</span>
+              </a>
+              <a
+                href="/apps"
+                class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono"
+              >
+                <Package class="w-3.5 h-3.5 text-slate-400" />
+                <span>App Store</span>
+              </a>
+              {isAdmin && (
+                <a
+                  href="/admin/versions"
+                  class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono"
+                >
+                  <GitBranch class="w-3.5 h-3.5 text-slate-400" />
+                  <span>Version Registry</span>
+                </a>
+              )}
+              {isAdmin && (
+                <a
+                  href="/admin/oidc"
+                  class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono"
+                >
+                  <ShieldCheck class="w-3.5 h-3.5 text-slate-400" />
+                  <span>OIDC Policies</span>
+                </a>
+              )}
+            </div>
+
+            <!-- Sign Out -->
+            <div class="pt-1 border-t border-cyber-800/80">
+              <a
+                href="/api/auth/logout"
+                class="flex items-center gap-2.5 px-3 py-2 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-colors font-mono font-medium"
+              >
+                <LogOut class="w-3.5 h-3.5 text-rose-400" />
+                <span>Sign Out</span>
+              </a>
+            </div>
           </div>
-
-          <!-- Provision Button (Admins only) -->
-          {isAdmin && (
-            <a
-              href="/new"
-              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm transition-all"
-            >
-              <span class="font-bold">+</span>
-              <span class="hidden sm:inline">New Cluster</span>
-            </a>
-          )}
-
-          <!-- Logout Button -->
-          <a
-            href="/api/auth/logout"
-            title="Sign Out"
-            class="p-2 text-slate-400 hover:text-rose-400 bg-cyber-900 hover:bg-rose-500/10 border border-cyber-700/80 hover:border-rose-500/30 rounded-xl transition-all"
-          >
-            <LogOut class="w-4 h-4" />
-          </a>
         </div>
       ) : (
         <a
           href="/login"
-          class="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-cyber-800 hover:bg-cyber-700 text-slate-200 font-semibold text-xs rounded-xl border border-cyber-700 transition-all"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-cyber-800 hover:bg-cyber-700 text-slate-200 font-semibold text-xs rounded-xl border border-cyber-700 transition-all font-mono"
         >
           Sign In
         </a>
       )}
+
+      <!-- Mobile Hamburger Toggle -->
+      <button
+        id="mobile-nav-toggle"
+        type="button"
+        class="md:hidden p-1.5 text-slate-400 hover:text-white bg-cyber-900 border border-cyber-800 rounded-xl transition-colors"
+        aria-label="Toggle navigation menu"
+      >
+        <Menu class="w-4 h-4" id="mobile-menu-icon" />
+      </button>
     </div>
   </div>
+
+  <!-- Sub-Header Navigation Bar (Fluid Horizontal Flow) -->
+  <div class="border-t border-cyber-800/60 bg-cyber-950/60 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <nav class="flex items-center gap-1 overflow-x-auto scrollbar-none py-1 text-xs">
+        <!-- Fleet Clusters -->
+        <a
+          href="/"
+          class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
+            isClustersActive
+              ? 'bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-900/60 border border-transparent'
+          }`}
+        >
+          <Layers class={`w-3.5 h-3.5 transition-colors ${isClustersActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+          <span>Fleet Clusters</span>
+        </a>
+
+        <!-- Capacity Guard -->
+        <a
+          href="/capacity"
+          class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
+            isCapacityActive
+              ? 'bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-900/60 border border-transparent'
+          }`}
+        >
+          <Gauge class={`w-3.5 h-3.5 transition-colors ${isCapacityActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+          <span>Capacity & Headroom</span>
+          <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Guard</span>
+        </a>
+
+        <!-- App Catalog -->
+        <a
+          href="/apps"
+          class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
+            isAppsActive
+              ? 'bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-900/60 border border-transparent'
+          }`}
+        >
+          <Package class={`w-3.5 h-3.5 transition-colors ${isAppsActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+          <span>App Catalog</span>
+        </a>
+
+        {isAdmin && (
+          <div class="h-4 w-px bg-cyber-800/80 my-auto mx-1"></div>
+        )}
+
+        <!-- Admin: Version Registry -->
+        {isAdmin && (
+          <a
+            href="/admin/versions"
+            class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
+              isVersionsActive
+                ? 'bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-900/60 border border-transparent'
+            }`}
+          >
+            <GitBranch class={`w-3.5 h-3.5 transition-colors ${isVersionsActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+            <span>Version Registry</span>
+          </a>
+        )}
+
+        <!-- Admin: OIDC Policy -->
+        {isAdmin && (
+          <a
+            href="/admin/oidc"
+            class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
+              isOidcActive
+                ? 'bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-900/60 border border-transparent'
+            }`}
+          >
+            <ShieldCheck class={`w-3.5 h-3.5 transition-colors ${isOidcActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+            <span>OIDC Identity</span>
+            <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30">PKCE</span>
+          </a>
+        )}
+
+        <!-- Admin: Provision -->
+        {isAdmin && (
+          <a
+            href="/new"
+            class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
+              isProvisionActive
+                ? 'bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-900/60 border border-transparent'
+            }`}
+          >
+            <Plus class={`w-3.5 h-3.5 transition-colors ${isProvisionActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+            <span>Provisioning</span>
+          </a>
+        )}
+      </nav>
+    </div>
+  </div>
+
+  <!-- Mobile Collapsible Menu -->
+  <div id="mobile-nav-panel" class="hidden md:hidden border-t border-cyber-800 bg-cyber-950/98 backdrop-blur-2xl px-4 py-3 space-y-2">
+    <div class="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1 px-1">Navigation</div>
+    <a href="/" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
+      <Layers class="w-4 h-4 text-cyan-400" />
+      <span>Fleet Clusters</span>
+    </a>
+    <a href="/capacity" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
+      <Gauge class="w-4 h-4 text-emerald-400" />
+      <span>Capacity Guard</span>
+    </a>
+    <a href="/apps" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
+      <Package class="w-4 h-4 text-purple-400" />
+      <span>App Store</span>
+    </a>
+    {isAdmin && (
+      <>
+        <div class="text-xs font-mono text-slate-400 uppercase tracking-wider mt-3 mb-1 px-1">Administration</div>
+        <a href="/admin/versions" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
+          <GitBranch class="w-4 h-4 text-cyan-400" />
+          <span>Version Registry</span>
+        </a>
+        <a href="/admin/oidc" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
+          <ShieldCheck class="w-4 h-4 text-purple-400" />
+          <span>OIDC Policies</span>
+        </a>
+        <a href="/new" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
+          <Plus class="w-4 h-4 text-cyan-400" />
+          <span>Provision New Cluster</span>
+        </a>
+      </>
+    )}
+    {user && (
+      <div class="pt-3 mt-3 border-t border-cyber-800">
+        <a href="/api/auth/logout" class="flex items-center gap-2.5 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors font-mono font-medium">
+          <LogOut class="w-4 h-4 text-rose-400" />
+          <span>Sign Out ({user.username})</span>
+        </a>
+      </div>
+    )}
+  </div>
 </header>
+
+<script>
+  // Setup user menu dropdown toggle & keyboard accessibility
+  const trigger = document.getElementById('user-menu-trigger');
+  const dropdown = document.getElementById('user-dropdown');
+  const chevron = document.getElementById('user-chevron');
+
+  if (trigger && dropdown) {
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isHidden = dropdown.classList.contains('hidden');
+      if (isHidden) {
+        dropdown.classList.remove('hidden');
+        trigger.setAttribute('aria-expanded', 'true');
+        chevron?.classList.add('rotate-180');
+      } else {
+        dropdown.classList.add('hidden');
+        trigger.setAttribute('aria-expanded', 'false');
+        chevron?.classList.remove('rotate-180');
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!dropdown.contains(e.target as Node) && !trigger.contains(e.target as Node)) {
+        dropdown.classList.add('hidden');
+        trigger.setAttribute('aria-expanded', 'false');
+        chevron?.classList.remove('rotate-180');
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        dropdown.classList.add('hidden');
+        trigger.setAttribute('aria-expanded', 'false');
+        chevron?.classList.remove('rotate-180');
+      }
+    });
+  }
+
+  // Setup mobile nav toggle
+  const mobileToggle = document.getElementById('mobile-nav-toggle');
+  const mobilePanel = document.getElementById('mobile-nav-panel');
+
+  if (mobileToggle && mobilePanel) {
+    mobileToggle.addEventListener('click', () => {
+      mobilePanel.classList.toggle('hidden');
+    });
+  }
+</script>
