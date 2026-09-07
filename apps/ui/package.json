@@ -3,6 +3,18 @@
   "type": "module",
   "version": "1.2.0",
   "license": "Apache-2.0",
+  "author": {
+    "name": "Juan Felix-Falcon",
+    "email": "jfelixfalcon@gmail.com",
+    "url": "https://github.com/jfelixfalcon"
+  },
+  "contributors": [
+    {
+      "name": "Juan Felix-Falcon",
+      "email": "jfelixfalcon@gmail.com",
+      "url": "https://github.com/jfelixfalcon"
+    }
+  ],
   "scripts": {
     "dev": "astro dev --host",
     "start": "astro dev --host",

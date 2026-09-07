@@ -240,6 +240,15 @@ spec:
 
 ---
 
+## Authors & Contributors
+
+- **Juan Felix-Falcon** ([@jfelixfalcon](https://github.com/jfelixfalcon)) — *Creator & Lead Maintainer*
+- **vCOp Authors & Open Source Community**
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for contributor details. We welcome community pull requests, bug fixes, and feature proposals!
+
+---
+
 ## License & Open Source Freedom
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
