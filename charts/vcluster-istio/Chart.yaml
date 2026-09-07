@@ -2,7 +2,7 @@ apiVersion: v2
 name: vcluster-istio
 description: Opinionated Istio Ingress Gateway & Service Mesh entrypoint stack for vCluster
 type: application
-version: 1.0.0
+version: 1.1.0
 appVersion: "1.24.2"
 icon: https://raw.githubusercontent.com/istio/istio/master/logo/istio-bluenavy.svg
 keywords:
