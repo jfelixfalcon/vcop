@@ -36,7 +36,26 @@ In enterprise and internal on-prem environments, corporate endpoints (Keycloak, 
     2. **Cluster Group:** Team or environment-specific IdP settings (e.g. `data-engineering`, `dev-team`).
     3. **Cluster Custom:** Per-cluster specific client credentials and scope overrides.
 
-### 1.3 Built-in Observability & Durable Metrics Storage (No Grafana Required)
+### 1.3 Opinionated Core Stack & Application Entrypoint (Istio + Cert-Manager TLS)
+
+Each virtual cluster is equipped with an opinionated, production-grade core application runtime stack:
+
+1. **CoreDNS:** Isolated intra-cluster DNS service discovery.
+2. **Metrics-Server:** Native in-vcluster pod and node metric aggregation for `kubectl top` and HPA.
+3. **Application Entrypoint (Istio Gateway & Control Plane):**
+   * **Components:** In-vcluster `istiod` control plane and `istio-ingressgateway` edge controller.
+   * **Service Mesh:** Disabled by default (`meshEnabled: false`) to keep tenant overhead low, but can be enabled on-demand.
+   * **Port 80 to 443 Upgrade:** Default `Gateway` terminates HTTP on Port 80 and automatically redirects all traffic to HTTPS (`tls.httpsRedirect: true`).
+   * **Port 443 TLS:** Terminating Gateway on Port 443 with TLS secret provisioned by cert-manager.
+   * **Default VirtualService:** Installs `main-entrypoint` VirtualService routing traffic for the cluster's custom endpoint / FQDN hosts.
+4. **Cert-Manager & TLS Secret Mirroring:**
+   * **Host Cert-Manager Assumption:** The host cluster operates cert-manager with an `Issuer` or `ClusterIssuer`.
+   * **Fail-Closed Pre-Validation & Webhook:** If the configured cert-manager issuer does not exist on the host cluster, admission webhooks reject creation, and the operator reconciler aborts deployment, setting `PhaseDegraded` and `IstioReady=False` (`Reason: CertManagerIssuerNotFound`).
+   * **UI Pre-Flight Warning:** The Operations Center queries `/apis/cert-manager.io/v1` and displays an amber alert banner *before* cluster creation if no issuer exists.
+   * **Host-to-Guest Secret Mirroring:** Operator creates a `Certificate` on the host, watches for the generated TLS `Secret`, and mirrors it into the guest virtual cluster's `istio-system` namespace.
+   * **Dedicated Helm Chart:** Shipped as a standalone Helm package in `charts/vcluster-istio`.
+
+### 1.4 Built-in Observability & Durable Metrics Storage (No Grafana Required)
 
 Users must be able to inspect live and historical container metrics (CPU millicores, Memory working set, restarts, health status) directly inside vCOp:
 
@@ -70,6 +89,7 @@ metadata:
   annotations:
     vops.gitops.io/cluster-groups: "engineering,sandbox"
     vops.gitops.io/owner: "dev-team@company.com"
+    vops.gitops.io/custom-endpoint: "vc-dev.apps.example.com"
 spec:
   clusterName: vc-dev
   vclusterVersion: "0.36.1"
@@ -80,6 +100,19 @@ spec:
       enabled: true
     metricsServer:
       enabled: true
+    istio:
+      enabled: true
+      certificateIssuer: "letsencrypt-staging"
+      certificateIssuerKind: "ClusterIssuer" # ClusterIssuer | Issuer
+      meshEnabled: false # optional service mesh
+      hosts:
+        - "vc-dev.apps.example.com"
+      gateway:
+        createDefaultGateway: true
+        httpPort: 80
+        httpsPort: 443
+        tlsSecretName: "vc-dev-tls"
+        httpsRedirect: true # auto-upgrades 80 -> 443
   security:
     customCaSecret: "corp-root-ca"
     oidc:
@@ -106,6 +139,10 @@ status:
     - type: ControlPlaneReady
       status: "True"
     - type: MetricsServerReady
+      status: "True"
+    - type: IstioReady
+      status: "True"
+    - type: CertificateReady
       status: "True"
   metrics:
     activeNodeCount: 1
@@ -171,6 +208,10 @@ When crafting master prompts for complex agentic systems and cloud-native platfo
 * *Anti-Pattern:* Importing utility functions from modules that contain Node.js built-ins (`fs`, `child_process`, `pg`).
 * *Best Practice:* Isolate client-safe formatting and mathematical algorithms in dedicated files (`metrics-utils.ts`), keeping database pools and cluster executors in server-only modules (`metrics-db.ts`, `metrics-collector.ts`).
 
+### 4.5 Fail-Closed Pre-Flight Validation for External Infrastructure Dependencies
+* *Anti-Pattern:* "Assume cert-manager is installed and let the deployment stall quietly in a CrashLoop or unfulfilled CertificateRequest."
+* *Best Practice:* "Enforce fail-closed validation across the entire stack: (1) UI pre-checks host cluster API to warn users before clicking create; (2) Admission Webhook blocks invalid CR creations immediately; (3) Operator reconciler actively checks for Issuer/ClusterIssuer existence, aborts deployment if absent, and marks the cluster phase as `Degraded` with explicit diagnostic error conditions."
+
 ---
 
 ## 5. Directory Structure & File Map
@@ -182,19 +223,24 @@ When crafting master prompts for complex agentic systems and cloud-native platfo
 ├── apps/
 │   ├── vc-operator/                # Go Kubernetes Operator (controller-runtime)
 │   │   ├── api/v1alpha1/           # VirtualCluster CRD Go types
-│   │   ├── controllers/            # Reconcilers (etcd, syncer, addons, metrics)
+│   │   ├── controllers/            # Reconcilers (etcd, syncer, addons, metrics, istio)
 │   │   └── main.go                 # Operator entrypoint
 │   └── ui/                         # Astro + React Operations Center
 │       ├── Dockerfile              # Multi-stage production container build
 │       ├── src/
-│       │   ├── components/         # React Islands (ClusterDetail, WorkloadMetricsView, Modals)
+│       │   ├── components/         # React Islands (ClusterDetail, WorkloadMetricsView, Modals, IstioModal)
 │       │   ├── lib/                # Backend services (k8s-client, metrics-collector, metrics-db)
-│       │   └── pages/              # Astro pages & API endpoints (/api/vclusters/*)
+│       │   └── pages/              # Astro pages & API endpoints (/api/vclusters/*, /api/cert-manager/issuers)
 ├── charts/
-│   └── vcop/                       # Official Helm v3 Packaging
+│   ├── vcop/                       # Official Helm v3 Packaging for Platform
+│   │   ├── Chart.yaml              # Chart metadata (v1.0.0)
+│   │   ├── values.yaml             # Configurable values (operator, UI, metricsDb)
+│   │   └── templates/              # Kubernetes templates (operator, ui, metrics-db)
+│   └── vcluster-istio/             # Dedicated Opinionated Istio & TLS Gateway Helm Chart
 │       ├── Chart.yaml              # Chart metadata (v1.0.0)
-│       ├── values.yaml             # Configurable values (operator, UI, metricsDb)
-│       └── templates/              # Kubernetes templates (operator, ui, metrics-db)
+│       ├── values.yaml             # Istiod, ingressgateway, gateway & virtualservice values
+│       ├── crds/                   # Istio Custom Resource Definitions
+│       └── templates/              # Gateway (80->443 redirect + 443 TLS), VirtualService, RBAC
 ├── deploy/                         # Standalone raw manifests
 │   ├── crds/                       # CustomResourceDefinitions
 │   ├── metrics-db.yaml             # PostgreSQL deployment + 5Gi PVC

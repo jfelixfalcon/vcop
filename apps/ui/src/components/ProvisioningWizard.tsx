@@ -23,6 +23,7 @@ import {
   ChevronUp,
   FolderGit2,
   Tag,
+  Globe,
 } from 'lucide-react';
 import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry } from '../lib/types';
 import { PRESETS } from '../lib/presets';
@@ -73,7 +74,32 @@ export const ProvisioningWizard: React.FC = () => {
   const [customValuesMap, setCustomValuesMap] = useState<Record<string, string>>({});
   const [expandedValueAppId, setExpandedValueAppId] = useState<string | null>(null);
 
+  // Opinionated Core Stack: Istio Ingress & Cert-Manager
+  const [enableIstio, setEnableIstio] = useState<boolean>(true);
+  const [enableMesh, setEnableMesh] = useState<boolean>(false);
+  const [certIssuerKind, setCertIssuerKind] = useState<'ClusterIssuer' | 'Issuer'>('ClusterIssuer');
+  const [certIssuer, setCertIssuer] = useState<string>('');
+  const [gatewayHost, setGatewayHost] = useState<string>('');
+  const [hostCertIssuers, setHostCertIssuers] = useState<{
+    installed: boolean;
+    clusterIssuers: string[];
+    issuers: string[];
+    error?: string;
+  }>({ installed: false, clusterIssuers: [], issuers: [] });
+
   useEffect(() => {
+    fetch('/api/cert-manager/issuers')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data) {
+          setHostCertIssuers(data);
+          if (data.clusterIssuers && data.clusterIssuers.length > 0) {
+            setCertIssuer((prev) => prev || data.clusterIssuers[0]);
+          }
+        }
+      })
+      .catch((e) => console.warn('Failed loading cert-manager issuers in wizard:', e));
+
     fetch('/api/appstore')
       .then((res) => res.json())
       .then((data) => {
@@ -195,6 +221,15 @@ export const ProvisioningWizard: React.FC = () => {
         customYaml: customYaml.trim() ? customYaml : undefined,
         customCaCert: customCaCert.trim() || undefined,
         customCaSecret: customCaSecret.trim() || undefined,
+        istio: enableIstio
+          ? {
+              enabled: true,
+              meshEnabled: enableMesh,
+              certificateIssuer: certIssuer.trim() || undefined,
+              certificateIssuerKind: certIssuerKind,
+              hosts: gatewayHost.trim() ? [gatewayHost.trim()] : undefined,
+            }
+          : { enabled: false },
         installedApps: selectedAppIds.map((id) => ({
           appId: id,
           customValues: customValuesMap[id],
@@ -746,6 +781,168 @@ policies:
               </span>
             </div>
 
+            {/* OPINIONATED CORE APP ENTRYPOINT: ISTIO & TLS GATEWAY */}
+            <div className="bg-cyber-950/80 border border-cyan-500/30 rounded-2xl p-5 shadow-glow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-cyber-850">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 text-cyan-400 rounded-xl shrink-0">
+                    <Globe className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-white">Opinionated Core App Entrypoint (Istio & TLS Gateway)</h4>
+                      <span className="text-[10px] font-mono uppercase bg-cyan-950 text-cyan-400 px-2 py-0.5 rounded border border-cyan-800 font-bold">
+                        Opinionated Stack
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Deploys dedicated <code className="text-cyan-300">istiod</code> control plane and <code className="text-cyan-300">istio-ingressgateway</code> serving Port 80 (auto-redirect to HTTPS) and Port 443 with TLS certificates.
+                    </p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={enableIstio}
+                    onChange={(e) => setEnableIstio(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-cyber-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-cyber-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+                </label>
+              </div>
+
+              {enableIstio && (
+                <div className="mt-4 space-y-4 pt-1">
+                  {/* Service Mesh Toggle */}
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-cyber-900/60 border border-cyber-800">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-200">Service Mesh Sidecar Injection</span>
+                        <span className="text-[10px] font-mono text-slate-400 bg-cyber-800 px-1.5 py-0.5 rounded">
+                          Optional
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Disabled by default. When enabled, workloads can receive automatic Envoy sidecar proxies for mTLS.
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={enableMesh}
+                        onChange={(e) => setEnableMesh(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-cyber-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-cyber-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                    </label>
+                  </div>
+
+                  {/* Cert-Manager Host Issuer Configuration */}
+                  <div className="p-3.5 rounded-xl bg-cyber-900/60 border border-cyber-800 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                        <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Host Cert-Manager Issuer & TLS Certificate</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="certIssuerKind"
+                            value="ClusterIssuer"
+                            checked={certIssuerKind === 'ClusterIssuer'}
+                            onChange={() => setCertIssuerKind('ClusterIssuer')}
+                            className="text-cyan-500 focus:ring-cyan-500"
+                          />
+                          ClusterIssuer
+                        </label>
+                        <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="certIssuerKind"
+                            value="Issuer"
+                            checked={certIssuerKind === 'Issuer'}
+                            onChange={() => setCertIssuerKind('Issuer')}
+                            className="text-cyan-500 focus:ring-cyan-500"
+                          />
+                          Issuer (Namespace)
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                          Certificate Issuer Name
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={certIssuer}
+                            onChange={(e) => setCertIssuer(e.target.value)}
+                            placeholder="e.g. letsencrypt-prod, vault-issuer, selfsigned-ca"
+                            list="discovered-issuers-list"
+                            className="w-full bg-cyber-950 border border-cyber-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
+                          />
+                          <datalist id="discovered-issuers-list">
+                            {(certIssuerKind === 'ClusterIssuer' ? hostCertIssuers.clusterIssuers : hostCertIssuers.issuers)?.map((name) => (
+                              <option key={name} value={name} />
+                            ))}
+                          </datalist>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                          Entrypoint Host FQDN
+                        </label>
+                        <input
+                          type="text"
+                          value={gatewayHost}
+                          onChange={(e) => setGatewayHost(e.target.value)}
+                          placeholder={clusterName ? `${clusterName.trim().toLowerCase()}.example.com` : 'e.g. vc-dev.example.com'}
+                          className="w-full bg-cyber-950 border border-cyber-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Pre-Creation Alert Check */}
+                    {certIssuer.trim() && (
+                      <div>
+                        {!hostCertIssuers.installed ? (
+                          <div className="p-3 bg-rose-950/40 border border-rose-500/40 rounded-xl text-xs text-rose-300 flex items-start gap-2.5 animate-in fade-in duration-150">
+                            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                            <div>
+                              <strong className="font-semibold text-rose-200">Host Cert-Manager Missing:</strong> Cert-manager CRDs are not detected on the host cluster. Deployment will abort with an error unless a valid cert-manager issuer is present.
+                            </div>
+                          </div>
+                        ) : certIssuerKind === 'ClusterIssuer' && !hostCertIssuers.clusterIssuers.includes(certIssuer.trim()) ? (
+                          <div className="p-3 bg-amber-950/40 border border-amber-500/40 rounded-xl text-xs text-amber-300 flex items-start gap-2.5 animate-in fade-in duration-150">
+                            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                            <div>
+                              <strong className="font-semibold text-amber-200">Issuer Not Found on Host:</strong> ClusterIssuer <code className="bg-amber-900/60 px-1 py-0.5 rounded font-mono text-white">{certIssuer.trim()}</code> was not detected in the host cluster. Deployment will fail-closed and abort unless this issuer is created.
+                            </div>
+                          </div>
+                        ) : certIssuerKind === 'Issuer' && !hostCertIssuers.issuers.includes(certIssuer.trim()) ? (
+                          <div className="p-3 bg-amber-950/40 border border-amber-500/40 rounded-xl text-xs text-amber-300 flex items-start gap-2.5 animate-in fade-in duration-150">
+                            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                            <div>
+                              <strong className="font-semibold text-amber-200">Issuer Not Found:</strong> Namespaced Issuer <code className="bg-amber-900/60 px-1 py-0.5 rounded font-mono text-white">{certIssuer.trim()}</code> was not detected. Deployment will abort unless this issuer exists.
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-2.5 bg-emerald-950/30 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2 animate-in fade-in duration-150">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                            <span>Valid {certIssuerKind} <strong className="font-mono text-white">{certIssuer.trim()}</strong> verified on host cluster.</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Curated  Quick Selector */}
             {catalog?.groups && catalog.groups.length > 0 && (
               <div>
@@ -1005,6 +1202,49 @@ policies:
                     })}
                   </div>
                 )}
+              </div>
+
+              {/* Opinionated Core Stack Review */}
+              <div className="p-4 bg-cyber-950/70 border border-cyber-800 rounded-2xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-cyan-400" />
+                    Opinionated Core Stack & Ingress Entrypoint
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setStep(3)}
+                    className="text-[11px] font-mono text-cyan-400 hover:underline"
+                  >
+                    Configure
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+                  <div className="p-2.5 rounded-xl bg-cyber-900 border border-cyber-800">
+                    <span className="text-[10px] text-slate-500 uppercase font-mono block">Istio Gateway</span>
+                    <span className={`font-semibold ${enableIstio ? 'text-cyan-400' : 'text-slate-500'}`}>
+                      {enableIstio ? 'Enabled (Port 80/443)' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-cyber-900 border border-cyber-800">
+                    <span className="text-[10px] text-slate-500 uppercase font-mono block">Service Mesh</span>
+                    <span className={`font-semibold ${enableMesh ? 'text-purple-400' : 'text-slate-500'}`}>
+                      {enableMesh ? 'Sidecars Active' : 'Disabled (Gateway only)'}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-cyber-900 border border-cyber-800">
+                    <span className="text-[10px] text-slate-500 uppercase font-mono block">Cert-Manager TLS</span>
+                    <span className="font-semibold text-white font-mono truncate block">
+                      {certIssuer ? `${certIssuer} (${certIssuerKind})` : 'Self-Signed / None'}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-cyber-900 border border-cyber-800">
+                    <span className="text-[10px] text-slate-500 uppercase font-mono block">Entrypoint Host</span>
+                    <span className="font-semibold text-cyan-300 font-mono truncate block">
+                      {gatewayHost || (clusterName ? `${clusterName.trim().toLowerCase()}.example.com` : 'auto')}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
