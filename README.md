@@ -104,6 +104,101 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 
 ---
 
+## Helm Deployment & Automated Istio Management
+
+### Do I need to deploy both `vcop` and `vcluster-istio` Helm charts?
+
+> [!IMPORTANT]
+> **No, you only need to deploy `charts/vcop`.**
+>
+> When you deploy the `vcop` Helm chart onto your host Kubernetes cluster, it installs the **vCOp Operator**, the **Operations Center UI**, and the **Metrics DB**. The operator then **natively reconciles, provisions, and manages Istio directly inside each virtual cluster**.
+>
+> You **do not** need to install `vcluster-istio` manually. The standalone [`charts/vcluster-istio`](charts/vcluster-istio) chart is provided as an optional reference/fallback package for teams wishing to deploy the opinionated Istio entrypoint stack manually or via GitOps (ArgoCD/Flux) on clusters without the vCOp operator.
+
+```bash
+# 1. Install the vCOp Operator & Operations Center UI on your host cluster
+helm install vcop charts/vcop \
+  --namespace vcop-system \
+  --create-namespace
+
+# 2. Access the Operations Center Dashboard (or configure ingress in values.yaml)
+kubectl port-forward -n vcop-system svc/vcop-ui 4321:80
+```
+
+---
+
+### How vCOp Installs and Manages Istio
+
+When you enable Istio (via the **Operations Center UI** or by setting `spec.components.istio.enabled: true` in your `VirtualCluster` CR), the vCOp Operator's `IstioReconciler` automates the entire lifecycle:
+
+```mermaid
+flowchart TD
+    subgraph Host["Host Kubernetes Cluster"]
+        CM["cert-manager"]
+        CI["ClusterIssuer / Issuer"]
+        Operator["vCOp Operator"]
+        HostCert["Certificate & Secret (vc-dev-tls)"]
+    end
+
+    subgraph Guest["Virtual Cluster (Guest)"]
+        NS["Namespace: istio-system"]
+        TLS["Synced TLS Secret"]
+        Istiod["istiod (Control Plane)"]
+        GW["istio-ingressgateway (ClusterIP)"]
+        CRD["Istio CRDs (Gateway, VirtualService)"]
+        Route["Default Gateway: Port 80 (Redirect) + 443 (TLS)"]
+    end
+
+    Operator -->|"1. Pre-flight Validation"| CI
+    Operator -->|"2. Create Certificate"| HostCert
+    CM -->|"Issues TLS"| HostCert
+    Operator -->|"3. Mirror TLS Secret"| TLS
+    Operator -->|"4. Deploy istiod & Gateway"| NS
+    NS --> Istiod
+    NS --> GW
+    Operator -->|"5. Apply CRDs & Routes"| CRD
+    CRD --> Route
+```
+
+#### Step-by-Step Lifecycle:
+
+1. **Pre-Flight Cert-Manager Validation (Fail-Closed):**
+   - The operator inspects the host cluster to verify that the configured `ClusterIssuer` or `Issuer` exists.
+   - If the issuer is missing, reconciliation aborts immediately with a clear condition (`cert-manager issuer validation failed`), preventing broken endpoints.
+2. **Automated TLS Issuance & Secret Mirroring:**
+   - Creates a `cert-manager.io/v1` `Certificate` on the host cluster for the cluster's FQDN (e.g. `team-dev.example.com`).
+   - Automatically mirrors the signed `kubernetes.io/tls` secret from the host namespace directly into the virtual cluster's `istio-system` namespace.
+3. **In-Cluster Control Plane (`istiod`):**
+   - Connects to the guest API server and ensures the `istio-system` namespace exists.
+   - Deploys `istiod` (`docker.io/istio/pilot:<version>`) along with its ServiceAccount, ClusterRole, and ClusterRoleBindings.
+   - Configures Pilot discovery and optional sidecar injection (`istio-injection: enabled/disabled`).
+4. **Ingress Gateway (`istio-ingressgateway`):**
+   - Deploys the Envoy-based ingress gateway proxy (`docker.io/istio/proxyv2:<version>`).
+   - Configures a **`ClusterIP`** Service exposing port 80 (HTTP) and port 443 (HTTPS), avoiding expensive cloud load balancers and keeping traffic routing lean.
+5. **CRDs, Gateway, & Routing:**
+   - Installs Istio networking CRDs (`Gateways`, `VirtualServices`) inside the guest cluster.
+   - Generates the root `Gateway` with automatic HTTP 80 -> HTTPS 443 redirection and HTTPS 443 TLS termination using the mirrored secret.
+   - Generates the default `VirtualService` routing traffic to your application services.
+6. **Zero-Downtime Rolling Upgrades:**
+   - Whenever you upgrade Istio in the UI or update `spec.components.istio.version`, the operator rolls out new container images with zero downtime and reports the active version in `status.componentVersions`.
+
+---
+
+### Core Stack Upgrade Matrix
+
+vCOp provides full dynamic version governance and zero-downtime rolling upgrades across all core components:
+
+| Component | Default Version | Container Image Tag | Managed By |
+|---|---|---|---|
+| **Kubernetes CP** | `v1.31.0` | `registry.k8s.io/kube-apiserver:<tag>` | Syncer / Distro |
+| **vCluster Engine** | `0.36.0` | `ghcr.io/loft-sh/vcluster:<tag>` | Operator Syncer |
+| **etcd Backing Store** | `3.6.8-0` | `registry.k8s.io/etcd:<tag>` | Operator StatefulSet |
+| **CoreDNS** | `v1.11.3` | `registry.k8s.io/coredns/coredns:<tag>` | Operator Addon |
+| **Metrics-Server** | `v0.7.2` | `registry.k8s.io/metrics-server/metrics-server:<tag>` | Operator Addon |
+| **Istio Control Plane & Gateway** | `1.24.2` | `docker.io/istio/pilot:<tag>` & `proxyv2:<tag>` | Operator IstioReconciler |
+
+---
+
 ## Directory Layout
 
 ```
@@ -208,27 +303,29 @@ metadata:
     vops.gitops.io/custom-endpoint: "billing.apps.example.com"
 spec:
   clusterName: billing-feature-auth
-  vclusterVersion: "0.36.1"
+  vclusterVersion: "0.36.0"
   kubernetesVersion: "v1.31.0"
-  topology: "normal" # normal (1 replica) | ha (3 replicas)
+  etcdVersion: "3.6.8-0"
+  sizePreset: normal # small | normal | medium | large | ha
+  highAvailability: false
   components:
     coreDNS:
       enabled: true
+      version: "v1.11.3"
     metricsServer:
       enabled: true
+      version: "v0.7.2"
     istio:
       enabled: true
-      certificateIssuer: "letsencrypt-staging"
+      version: "1.24.2"
+      certificateIssuer: "vcluster-ca-issuer"
       certificateIssuerKind: "ClusterIssuer" # ClusterIssuer | Issuer
       meshEnabled: false # optional service mesh
       hosts:
         - "billing.apps.example.com"
-      gateway:
-        createDefaultGateway: true
-        httpPort: 80
-        httpsPort: 443
-        tlsSecretName: "billing-tls"
-        httpsRedirect: true # automatic HTTP 80 -> HTTPS 443 upgrade
+      ingressGateway:
+        enabled: true
+        serviceType: "ClusterIP"
   sync:
     pods: true
     services: true
