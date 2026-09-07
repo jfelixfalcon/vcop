@@ -288,8 +288,34 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			targetVCluster = "0.36.0"
 		}
 
+		targetEtcd := vc.Spec.EtcdVersion
+		if targetEtcd == "" {
+			targetEtcd = "3.6.8-0"
+		}
+		targetCoreDNS := vc.Spec.Components.CoreDNS.Version
+		if targetCoreDNS == "" {
+			targetCoreDNS = "v1.11.3"
+		}
+		targetMetrics := vc.Spec.Components.MetricsServer.Version
+		if targetMetrics == "" {
+			targetMetrics = "v0.7.2"
+		}
+		targetIstio := ""
+		if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Enabled {
+			targetIstio = vc.Spec.Components.Istio.Version
+			if targetIstio == "" {
+				targetIstio = "1.24.2"
+			}
+		}
+
 		vc.Status.VirtualK8sVersion = targetK8s
 		vc.Status.VClusterVersion = targetVCluster
+		vc.Status.ComponentVersions = &v1alpha1.ComponentVersionsStatus{
+			Etcd:          targetEtcd,
+			CoreDNS:       targetCoreDNS,
+			MetricsServer: targetMetrics,
+			Istio:         targetIstio,
+		}
 		vc.Status.Phase = v1alpha1.PhaseReady
 		if previousPhase != v1alpha1.PhaseReady {
 			log.Info("Virtual cluster transitioned to Ready", "cluster", vc.Name, "previousPhase", previousPhase)

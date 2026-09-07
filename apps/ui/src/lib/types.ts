@@ -116,13 +116,15 @@ export interface VirtualCluster {
     clusterName: string;
     vclusterVersion: string;
     kubernetesVersion: string;
+    etcdVersion?: string;
     sizePreset: SizePreset;
     highAvailability: boolean;
     components: {
-      coreDNS: { enabled: boolean };
-      metricsServer: { enabled: boolean };
+      coreDNS: { enabled: boolean; version?: string };
+      metricsServer: { enabled: boolean; version?: string };
       istio?: {
         enabled: boolean;
+        version?: string;
         meshEnabled?: boolean;
         ingressGateway?: {
           enabled: boolean;
@@ -166,6 +168,12 @@ export interface VirtualCluster {
     quota?: QuotaStatus;
     observedGeneration?: number;
     createdAt?: string;
+    componentVersions?: {
+      etcd?: string;
+      coreDNS?: string;
+      metricsServer?: string;
+      istio?: string;
+    };
   };
     metadata?: {
     owner?: string;
@@ -273,6 +281,8 @@ export interface InstalledApp {
 
 export type VersionTag = 'default' | 'stable' | 'lts' | 'preview' | 'deprecated';
 
+export type VersionCategory = 'k8s' | 'vcluster' | 'etcd' | 'coredns' | 'metricsServer' | 'istio';
+
 export interface VersionItem {
   version: string;
   label?: string;
@@ -285,6 +295,10 @@ export interface VersionItem {
 export interface VersionRegistry {
   kubernetesVersions: VersionItem[];
   vclusterVersions: VersionItem[];
+  etcdVersions?: VersionItem[];
+  coreDNSVersions?: VersionItem[];
+  metricsServerVersions?: VersionItem[];
+  istioVersions?: VersionItem[];
   updatedAt: string;
 }
 

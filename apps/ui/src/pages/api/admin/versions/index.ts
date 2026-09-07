@@ -41,14 +41,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const body = await request.json();
     const { action, type, item, version } = body as {
       action?: 'add' | 'update' | 'setDefault';
-      type: 'k8s' | 'vcluster';
+      type: 'k8s' | 'vcluster' | 'etcd' | 'coredns' | 'metricsServer' | 'istio';
       item?: VersionItem;
       version?: string;
     };
 
-    if (type !== 'k8s' && type !== 'vcluster') {
+    const validTypes = ['k8s', 'vcluster', 'etcd', 'coredns', 'metricsServer', 'istio'];
+    if (!validTypes.includes(type)) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Invalid version type; must be "k8s" or "vcluster"' }),
+        JSON.stringify({ success: false, error: `Invalid version type; must be one of: ${validTypes.join(', ')}` }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -104,7 +105,7 @@ export const DELETE: APIRoute = async ({ request, url, locals }) => {
   }
 
   try {
-    let type: 'k8s' | 'vcluster' | null = url.searchParams.get('type') as any;
+    let type: any = url.searchParams.get('type');
     let version: string | null = url.searchParams.get('version');
 
     if (!type || !version) {
@@ -117,9 +118,10 @@ export const DELETE: APIRoute = async ({ request, url, locals }) => {
       }
     }
 
-    if ((type !== 'k8s' && type !== 'vcluster') || !version) {
+    const validTypes = ['k8s', 'vcluster', 'etcd', 'coredns', 'metricsServer', 'istio'];
+    if (!validTypes.includes(type) || !version) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Query or body must specify "type" ("k8s"|"vcluster") and "version"' }),
+        JSON.stringify({ success: false, error: `Query or body must specify valid "type" (${validTypes.join(', ')}) and "version"` }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }

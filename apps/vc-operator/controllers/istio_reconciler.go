@@ -345,6 +345,12 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 	}
 
 	// 3. Deployment
+	istioVer := "1.24.2"
+	if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Version != "" {
+		istioVer = vc.Spec.Components.Istio.Version
+	}
+	pilotImage := fmt.Sprintf("docker.io/istio/pilot:%s", istioVer)
+
 	replicas := int32(1)
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -374,7 +380,7 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 					Containers: []corev1.Container{
 						{
 							Name:  "discovery",
-							Image: "docker.io/istio/pilot:1.24.2",
+							Image: pilotImage,
 							Args: []string{
 								"discovery",
 								"--monitoringAddr=:15014",
@@ -412,6 +418,13 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 	if err := vClient.Get(ctx, types.NamespacedName{Name: "istiod", Namespace: "istio-system"}, existingDep); apierrors.IsNotFound(err) {
 		if err := vClient.Create(ctx, dep); err != nil {
 			return err
+		}
+	} else if err == nil {
+		if existingDep.Spec.Template.Spec.Containers[0].Image != dep.Spec.Template.Spec.Containers[0].Image {
+			existingDep.Spec.Template = dep.Spec.Template
+			if err := vClient.Update(ctx, existingDep); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -499,6 +512,12 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 	}
 
 	// 3. Deployment
+	istioVer := "1.24.2"
+	if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Version != "" {
+		istioVer = vc.Spec.Components.Istio.Version
+	}
+	proxyImage := fmt.Sprintf("docker.io/istio/proxyv2:%s", istioVer)
+
 	replicas := int32(1)
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -530,7 +549,7 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 					Containers: []corev1.Container{
 						{
 							Name:  "istio-proxy",
-							Image: "docker.io/istio/proxyv2:1.24.2",
+							Image: proxyImage,
 							Args: []string{
 								"proxy",
 								"router",

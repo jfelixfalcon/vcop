@@ -50,12 +50,22 @@ const (
 type CoreDNSComponent struct {
 	// +kubebuilder:default=true
 	Enabled bool `json:"enabled"`
+
+	// Version defines the CoreDNS image tag (default: "v1.11.3")
+	// +kubebuilder:default="v1.11.3"
+	// +optional
+	Version string `json:"version,omitempty"`
 }
 
 // MetricsServerComponent configures metrics-server add-on inside vCluster
 type MetricsServerComponent struct {
 	// +kubebuilder:default=true
 	Enabled bool `json:"enabled"`
+
+	// Version defines the metrics-server image tag (default: "v0.7.2")
+	// +kubebuilder:default="v0.7.2"
+	// +optional
+	Version string `json:"version,omitempty"`
 }
 
 // IstioGatewayConfig defines ingress gateway settings
@@ -73,6 +83,11 @@ type IstioComponent struct {
 	// Enabled deploys Istio (istiod + ingress gateway) as the application entrypoint
 	// +kubebuilder:default=false
 	Enabled bool `json:"enabled"`
+
+	// Version defines the Istio release version for control plane & ingress (default: "1.24.2")
+	// +kubebuilder:default="1.24.2"
+	// +optional
+	Version string `json:"version,omitempty"`
 
 	// MeshEnabled enables service mesh sidecar injection (disabled by default)
 	// +kubebuilder:default=false
@@ -292,6 +307,11 @@ type VirtualClusterSpec struct {
 	// +optional
 	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
 
+	// EtcdVersion defines the backing store etcd image tag (default: "3.6.8-0")
+	// +kubebuilder:default="3.6.8-0"
+	// +optional
+	EtcdVersion string `json:"etcdVersion,omitempty"`
+
 	// SizePreset sets predefined sizing tiers for compute & storage
 	// +kubebuilder:default="medium"
 	// +optional
@@ -390,9 +410,32 @@ type VirtualClusterStatus struct {
 	// +optional
 	Quota *QuotaStatus `json:"quota,omitempty"`
 
+	// ComponentVersions reflects the active versions of core infrastructure and add-ons
+	// +optional
+	ComponentVersions *ComponentVersionsStatus `json:"componentVersions,omitempty"`
+
 	// ObservedGeneration is the most recent generation observed by the controller
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// ComponentVersionsStatus tracks observed versions of core virtual cluster components
+type ComponentVersionsStatus struct {
+	// Etcd reflects the active etcd version
+	// +optional
+	Etcd string `json:"etcd,omitempty"`
+
+	// CoreDNS reflects the active CoreDNS add-on version
+	// +optional
+	CoreDNS string `json:"coreDNS,omitempty"`
+
+	// MetricsServer reflects the active Metrics-Server add-on version
+	// +optional
+	MetricsServer string `json:"metricsServer,omitempty"`
+
+	// Istio reflects the active Istio ingress & mesh version
+	// +optional
+	Istio string `json:"istio,omitempty"`
 }
 
 // +kubebuilder:object:root=true

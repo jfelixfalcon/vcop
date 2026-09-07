@@ -86,11 +86,17 @@ spec:
                   description: Virtual Kubernetes control plane version.
                   default: "v1.31.0"
                   pattern: "^v?[0-9]+\\.[0-9]+\\.[0-9]+.*$"
+                etcdVersion:
+                  type: string
+                  description: Backing store etcd image tag.
+                  default: "3.6.8-0"
                 sizePreset:
                   type: string
                   description: Sizing preset driving CPU, memory requests, and etcd storage tiers.
-                  default: "medium"
+                  default: "normal"
                   enum:
+                    - normal
+                    - ha
                     - small
                     - medium
                     - large
@@ -111,7 +117,7 @@ spec:
                 highAvailability:
                   type: boolean
                   description: Toggles 3-replica HA etcd and control-plane redundancy with automated quorum.
-                  default: true
+                  default: false
                 components:
                   type: object
                   description: Embedded internal add-ons.
@@ -122,12 +128,18 @@ spec:
                         enabled:
                           type: boolean
                           default: true
+                        version:
+                          type: string
+                          default: "v1.11.3"
                     metricsServer:
                       type: object
                       properties:
                         enabled:
                           type: boolean
                           default: true
+                        version:
+                          type: string
+                          default: "v0.7.2"
                     istio:
                       type: object
                       description: Opinionated Istio entrypoint and mesh stack.
@@ -135,6 +147,9 @@ spec:
                         enabled:
                           type: boolean
                           default: false
+                        version:
+                          type: string
+                          default: "1.24.2"
                         meshEnabled:
                           type: boolean
                           default: false
@@ -334,3 +349,15 @@ spec:
                 observedGeneration:
                   type: integer
                   format: int64
+                componentVersions:
+                  type: object
+                  description: Active versions of core virtual cluster components.
+                  properties:
+                    etcd:
+                      type: string
+                    coreDNS:
+                      type: string
+                    metricsServer:
+                      type: string
+                    istio:
+                      type: string

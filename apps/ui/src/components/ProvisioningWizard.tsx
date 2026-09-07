@@ -64,6 +64,10 @@ export const ProvisioningWizard: React.FC = () => {
   const [versionRegistry, setVersionRegistry] = useState<VersionRegistry | null>(null);
   const [kubernetesVersion, setKubernetesVersion] = useState<string>('');
   const [vclusterVersion, setVclusterVersion] = useState<string>('');
+  const [etcdVersion, setEtcdVersion] = useState<string>('');
+  const [coreDNSVersion, setCoreDNSVersion] = useState<string>('');
+  const [metricsServerVersion, setMetricsServerVersion] = useState<string>('');
+  const [istioVersion, setIstioVersion] = useState<string>('');
   const [customYaml, setCustomYaml] = useState<string>('');
   const [customCaCert, setCustomCaCert] = useState<string>('');
   const [customCaSecret, setCustomCaSecret] = useState<string>('');
@@ -126,8 +130,16 @@ export const ProvisioningWizard: React.FC = () => {
           setVersionRegistry(reg);
           const defaultK8s = reg.kubernetesVersions.find((v) => v.isDefault)?.version || reg.kubernetesVersions[0]?.version || 'v1.31.0';
           const defaultEngine = reg.vclusterVersions.find((v) => v.isDefault)?.version || reg.vclusterVersions[0]?.version || '0.36.0';
+          const defaultEtcd = reg.etcdVersions?.find((v) => v.isDefault)?.version || reg.etcdVersions?.[0]?.version || '3.6.8-0';
+          const defaultCoreDNS = reg.coreDNSVersions?.find((v) => v.isDefault)?.version || reg.coreDNSVersions?.[0]?.version || 'v1.11.3';
+          const defaultMetrics = reg.metricsServerVersions?.find((v) => v.isDefault)?.version || reg.metricsServerVersions?.[0]?.version || 'v0.7.2';
+          const defaultIstio = reg.istioVersions?.find((v) => v.isDefault)?.version || reg.istioVersions?.[0]?.version || '1.24.2';
           setKubernetesVersion((prev) => prev || defaultK8s);
           setVclusterVersion((prev) => prev || defaultEngine);
+          setEtcdVersion((prev) => prev || defaultEtcd);
+          setCoreDNSVersion((prev) => prev || defaultCoreDNS);
+          setMetricsServerVersion((prev) => prev || defaultMetrics);
+          setIstioVersion((prev) => prev || defaultIstio);
         }
       })
       .catch((e) => console.warn('Failed loading versions in wizard:', e));
@@ -218,6 +230,10 @@ export const ProvisioningWizard: React.FC = () => {
         ttlHours: autoSleep ? ttlHours : 0,
         kubernetesVersion,
         vclusterVersion,
+        etcdVersion: etcdVersion || undefined,
+        coreDNSVersion: coreDNSVersion || undefined,
+        metricsServerVersion: metricsServerVersion || undefined,
+        istioVersion: istioVersion || undefined,
         customYaml: customYaml.trim() ? customYaml : undefined,
         customCaCert: customCaCert.trim() || undefined,
         customCaSecret: customCaSecret.trim() || undefined,
@@ -228,6 +244,7 @@ export const ProvisioningWizard: React.FC = () => {
               certificateIssuer: certIssuer.trim() || undefined,
               certificateIssuerKind: certIssuerKind,
               hosts: gatewayHost.trim() ? [gatewayHost.trim()] : undefined,
+              version: istioVersion || undefined,
             }
           : { enabled: false },
         installedApps: selectedAppIds.map((id) => ({
@@ -1304,6 +1321,90 @@ policies:
                           )}
                         </select>
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
+                        <span>etcd Backing Store:</span>
+                        <a href="/admin/versions" className="text-[10px] text-amber-400 hover:underline">Manage Registry</a>
+                      </label>
+                      <select
+                        value={etcdVersion}
+                        onChange={(e) => setEtcdVersion(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
+                      >
+                        {versionRegistry?.etcdVersions?.map((v) => (
+                          <option key={v.version} value={v.version}>
+                            {v.label || `etcd ${v.version}`} {v.isDefault ? '★ (Default)' : ''}
+                          </option>
+                        ))}
+                        {etcdVersion && !versionRegistry?.etcdVersions?.some(v => v.version === etcdVersion) && (
+                          <option value={etcdVersion}>{etcdVersion}</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
+                        <span>CoreDNS Resolver:</span>
+                        <a href="/admin/versions" className="text-[10px] text-emerald-400 hover:underline">Manage Registry</a>
+                      </label>
+                      <select
+                        value={coreDNSVersion}
+                        onChange={(e) => setCoreDNSVersion(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
+                      >
+                        {versionRegistry?.coreDNSVersions?.map((v) => (
+                          <option key={v.version} value={v.version}>
+                            {v.label || `CoreDNS ${v.version}`} {v.isDefault ? '★ (Default)' : ''}
+                          </option>
+                        ))}
+                        {coreDNSVersion && !versionRegistry?.coreDNSVersions?.some(v => v.version === coreDNSVersion) && (
+                          <option value={coreDNSVersion}>{coreDNSVersion}</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
+                        <span>Metrics-Server:</span>
+                        <a href="/admin/versions" className="text-[10px] text-blue-400 hover:underline">Manage Registry</a>
+                      </label>
+                      <select
+                        value={metricsServerVersion}
+                        onChange={(e) => setMetricsServerVersion(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
+                      >
+                        {versionRegistry?.metricsServerVersions?.map((v) => (
+                          <option key={v.version} value={v.version}>
+                            {v.label || `Metrics ${v.version}`} {v.isDefault ? '★ (Default)' : ''}
+                          </option>
+                        ))}
+                        {metricsServerVersion && !versionRegistry?.metricsServerVersions?.some(v => v.version === metricsServerVersion) && (
+                          <option value={metricsServerVersion}>{metricsServerVersion}</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
+                        <span>Istio Mesh & Gateway:</span>
+                        <a href="/admin/versions" className="text-[10px] text-indigo-400 hover:underline">Manage Registry</a>
+                      </label>
+                      <select
+                        value={istioVersion}
+                        onChange={(e) => setIstioVersion(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
+                      >
+                        {versionRegistry?.istioVersions?.map((v) => (
+                          <option key={v.version} value={v.version}>
+                            {v.label || `Istio ${v.version}`} {v.isDefault ? '★ (Default)' : ''}
+                          </option>
+                        ))}
+                        {istioVersion && !versionRegistry?.istioVersions?.some(v => v.version === istioVersion) && (
+                          <option value={istioVersion}>{istioVersion}</option>
+                        )}
+                      </select>
                     </div>
                   </div>
 

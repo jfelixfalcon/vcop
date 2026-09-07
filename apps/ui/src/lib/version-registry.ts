@@ -52,10 +52,134 @@ export const DEFAULT_VERSION_REGISTRY: VersionRegistry = {
       notes: 'Next-generation vCluster preview with advanced isolation hooks',
     },
   ],
+  etcdVersions: [
+    {
+      version: '3.6.8-0',
+      label: '3.6.8-0 (Recommended)',
+      tag: 'default',
+      isDefault: true,
+      notes: 'High-performance backing store with enhanced Raft throughput',
+    },
+    {
+      version: '3.5.18-0',
+      label: '3.5.18-0 (LTS Stable)',
+      tag: 'stable',
+      isDefault: false,
+      notes: 'Battle-tested etcd v3.5 branch with long-term maintenance',
+    },
+    {
+      version: '3.5.16-0',
+      label: '3.5.16-0 (Legacy)',
+      tag: 'lts',
+      isDefault: false,
+      notes: 'Legacy etcd release for backward compatibility',
+    },
+  ],
+  coreDNSVersions: [
+    {
+      version: 'v1.11.3',
+      label: 'v1.11.3 (Recommended)',
+      tag: 'default',
+      isDefault: true,
+      notes: 'Standard CoreDNS plugin suite with optimal latency',
+    },
+    {
+      version: 'v1.11.1',
+      label: 'v1.11.1 (Stable)',
+      tag: 'stable',
+      isDefault: false,
+      notes: 'Proven stable DNS resolver',
+    },
+    {
+      version: 'v1.12.0',
+      label: 'v1.12.0 (Preview)',
+      tag: 'preview',
+      isDefault: false,
+      notes: 'Latest CoreDNS release with enhanced caching plugins',
+    },
+  ],
+  metricsServerVersions: [
+    {
+      version: 'v0.7.2',
+      label: 'v0.7.2 (Recommended)',
+      tag: 'default',
+      isDefault: true,
+      notes: 'Modern lightweight metrics-server with HPA support',
+    },
+    {
+      version: 'v0.7.1',
+      label: 'v0.7.1 (Stable)',
+      tag: 'stable',
+      isDefault: false,
+      notes: 'Stable metrics aggregation engine',
+    },
+    {
+      version: 'v0.6.4',
+      label: 'v0.6.4 (Legacy)',
+      tag: 'deprecated',
+      isDefault: false,
+      notes: 'Legacy v0.6 metrics-server pipeline',
+    },
+  ],
+  istioVersions: [
+    {
+      version: '1.24.2',
+      label: '1.24.2 (Recommended)',
+      tag: 'default',
+      isDefault: true,
+      notes: 'Production-ready Istio service mesh and ingress gateway',
+    },
+    {
+      version: '1.24.0',
+      label: '1.24.0 (Stable)',
+      tag: 'stable',
+      isDefault: false,
+      notes: 'Initial 1.24 minor release',
+    },
+    {
+      version: '1.23.3',
+      label: '1.23.3 (LTS)',
+      tag: 'lts',
+      isDefault: false,
+      notes: 'Long Term Support Istio release branch',
+    },
+    {
+      version: '1.25.0-alpha.1',
+      label: '1.25.0 (Preview)',
+      tag: 'preview',
+      isDefault: false,
+      notes: 'Next-generation Istio preview build with ambient enhancements',
+    },
+  ],
 };
 
 let memoryRegistryCache: VersionRegistry | null = null;
 let lastFetchTime = 0;
+
+export type VersionCategory = 'k8s' | 'vcluster' | 'etcd' | 'coredns' | 'metricsServer' | 'istio';
+
+function getListForCategory(registry: VersionRegistry, type: VersionCategory): VersionItem[] {
+  switch (type) {
+    case 'k8s': return registry.kubernetesVersions;
+    case 'vcluster': return registry.vclusterVersions;
+    case 'etcd': return registry.etcdVersions || [];
+    case 'coredns': return registry.coreDNSVersions || [];
+    case 'metricsServer': return registry.metricsServerVersions || [];
+    case 'istio': return registry.istioVersions || [];
+    default: return registry.kubernetesVersions;
+  }
+}
+
+function setListForCategory(registry: VersionRegistry, type: VersionCategory, list: VersionItem[]): void {
+  switch (type) {
+    case 'k8s': registry.kubernetesVersions = list; break;
+    case 'vcluster': registry.vclusterVersions = list; break;
+    case 'etcd': registry.etcdVersions = list; break;
+    case 'coredns': registry.coreDNSVersions = list; break;
+    case 'metricsServer': registry.metricsServerVersions = list; break;
+    case 'istio': registry.istioVersions = list; break;
+  }
+}
 
 /**
  * Retrieves the full Version Registry from the Kubernetes ConfigMap,
@@ -74,6 +198,10 @@ export async function getVersionRegistry(): Promise<VersionRegistry> {
 
     if (res.statusCode === 200 && res.data?.data?.['versions.json']) {
       const parsed = JSON.parse(res.data.data['versions.json']) as VersionRegistry;
+      if (!parsed.etcdVersions || parsed.etcdVersions.length === 0) parsed.etcdVersions = DEFAULT_VERSION_REGISTRY.etcdVersions;
+      if (!parsed.coreDNSVersions || parsed.coreDNSVersions.length === 0) parsed.coreDNSVersions = DEFAULT_VERSION_REGISTRY.coreDNSVersions;
+      if (!parsed.metricsServerVersions || parsed.metricsServerVersions.length === 0) parsed.metricsServerVersions = DEFAULT_VERSION_REGISTRY.metricsServerVersions;
+      if (!parsed.istioVersions || parsed.istioVersions.length === 0) parsed.istioVersions = DEFAULT_VERSION_REGISTRY.istioVersions;
       memoryRegistryCache = parsed;
       lastFetchTime = now;
       return parsed;
@@ -146,11 +274,11 @@ async function saveEntireRegistryToK8s(registry: VersionRegistry): Promise<void>
  * Adds or updates a version in the registry.
  */
 export async function saveVersion(
-  type: 'k8s' | 'vcluster',
+  type: VersionCategory,
   item: VersionItem
 ): Promise<VersionRegistry> {
   const registry = await getVersionRegistry();
-  const list = type === 'k8s' ? [...registry.kubernetesVersions] : [...registry.vclusterVersions];
+  const list = [...getListForCategory(registry, type)];
   const targetVer = item.version.trim();
 
   if (!targetVer) {
@@ -185,12 +313,7 @@ export async function saveVersion(
     list[0].tag = 'default';
   }
 
-  if (type === 'k8s') {
-    registry.kubernetesVersions = list;
-  } else {
-    registry.vclusterVersions = list;
-  }
-
+  setListForCategory(registry, type, list);
   await saveEntireRegistryToK8s(registry);
   return registry;
 }
@@ -199,19 +322,19 @@ export async function saveVersion(
  * Deletes a version from the registry.
  */
 export async function deleteVersion(
-  type: 'k8s' | 'vcluster',
+  type: VersionCategory,
   version: string
 ): Promise<VersionRegistry> {
   const registry = await getVersionRegistry();
-  const list = type === 'k8s' ? [...registry.kubernetesVersions] : [...registry.vclusterVersions];
+  const list = [...getListForCategory(registry, type)];
 
   if (list.length <= 1) {
-    throw new Error(`Cannot delete version "${version}". At least one ${type === 'k8s' ? 'Kubernetes' : 'vCluster'} version must remain in the registry.`);
+    throw new Error(`Cannot delete version "${version}". At least one version must remain in the registry.`);
   }
 
   const targetIdx = list.findIndex(v => v.version === version);
   if (targetIdx === -1) {
-    throw new Error(`Version "${version}" not found in ${type === 'k8s' ? 'Kubernetes' : 'vCluster'} registry.`);
+    throw new Error(`Version "${version}" not found in registry.`);
   }
 
   const wasDefault = list[targetIdx].isDefault;
@@ -223,12 +346,7 @@ export async function deleteVersion(
     list[0].tag = 'default';
   }
 
-  if (type === 'k8s') {
-    registry.kubernetesVersions = list;
-  } else {
-    registry.vclusterVersions = list;
-  }
-
+  setListForCategory(registry, type, list);
   await saveEntireRegistryToK8s(registry);
   return registry;
 }
@@ -237,11 +355,11 @@ export async function deleteVersion(
  * Marks a specific version as the active default.
  */
 export async function setDefaultVersion(
-  type: 'k8s' | 'vcluster',
+  type: VersionCategory,
   version: string
 ): Promise<VersionRegistry> {
   const registry = await getVersionRegistry();
-  const list = type === 'k8s' ? [...registry.kubernetesVersions] : [...registry.vclusterVersions];
+  const list = [...getListForCategory(registry, type)];
 
   const target = list.find(v => v.version === version);
   if (!target) {
@@ -258,12 +376,7 @@ export async function setDefaultVersion(
     }
   }
 
-  if (type === 'k8s') {
-    registry.kubernetesVersions = list;
-  } else {
-    registry.vclusterVersions = list;
-  }
-
+  setListForCategory(registry, type, list);
   await saveEntireRegistryToK8s(registry);
   return registry;
 }
@@ -274,13 +387,35 @@ export async function setDefaultVersion(
 export async function getDefaultVersions(): Promise<{
   kubernetesVersion: string;
   vclusterVersion: string;
+  etcdVersion: string;
+  coreDNSVersion: string;
+  metricsServerVersion: string;
+  istioVersion: string;
 }> {
   try {
     const registry = await getVersionRegistry();
     const defaultK8s = registry.kubernetesVersions.find(v => v.isDefault)?.version || registry.kubernetesVersions[0]?.version || 'v1.31.0';
     const defaultEngine = registry.vclusterVersions.find(v => v.isDefault)?.version || registry.vclusterVersions[0]?.version || '0.36.0';
-    return { kubernetesVersion: defaultK8s, vclusterVersion: defaultEngine };
+    const defaultEtcd = registry.etcdVersions?.find(v => v.isDefault)?.version || registry.etcdVersions?.[0]?.version || '3.6.8-0';
+    const defaultCoreDNS = registry.coreDNSVersions?.find(v => v.isDefault)?.version || registry.coreDNSVersions?.[0]?.version || 'v1.11.3';
+    const defaultMetrics = registry.metricsServerVersions?.find(v => v.isDefault)?.version || registry.metricsServerVersions?.[0]?.version || 'v0.7.2';
+    const defaultIstio = registry.istioVersions?.find(v => v.isDefault)?.version || registry.istioVersions?.[0]?.version || '1.24.2';
+    return {
+      kubernetesVersion: defaultK8s,
+      vclusterVersion: defaultEngine,
+      etcdVersion: defaultEtcd,
+      coreDNSVersion: defaultCoreDNS,
+      metricsServerVersion: defaultMetrics,
+      istioVersion: defaultIstio,
+    };
   } catch {
-    return { kubernetesVersion: 'v1.31.0', vclusterVersion: '0.36.0' };
+    return {
+      kubernetesVersion: 'v1.31.0',
+      vclusterVersion: '0.36.0',
+      etcdVersion: '3.6.8-0',
+      coreDNSVersion: 'v1.11.3',
+      metricsServerVersion: 'v0.7.2',
+      istioVersion: '1.24.2',
+    };
   }
 }

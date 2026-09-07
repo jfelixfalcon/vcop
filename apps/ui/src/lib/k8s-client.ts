@@ -455,6 +455,10 @@ export async function createVirtualCluster(data: {
   ttlHours?: number;
   kubernetesVersion?: string;
   vclusterVersion?: string;
+  etcdVersion?: string;
+  coreDNSVersion?: string;
+  metricsServerVersion?: string;
+  istioVersion?: string;
   policies?: PoliciesSpec;
   customYaml?: string;
   installedApps?: Array<{ appId: string; customValues?: string }>;
@@ -479,16 +483,27 @@ export async function createVirtualCluster(data: {
   const name = data.clusterName.trim().toLowerCase();
   let k8sVer = data.kubernetesVersion;
   let vclusterVer = data.vclusterVersion;
-  if (!k8sVer || !vclusterVer) {
-    try {
-      const { getDefaultVersions } = await import('./version-registry');
-      const defaults = await getDefaultVersions();
-      k8sVer = k8sVer || defaults.kubernetesVersion;
-      vclusterVer = vclusterVer || defaults.vclusterVersion;
-    } catch {
-      k8sVer = k8sVer || 'v1.31.0';
-      vclusterVer = vclusterVer || '0.36.0';
-    }
+  let etcdVer = data.etcdVersion;
+  let coreDNSVer = data.coreDNSVersion;
+  let metricsVer = data.metricsServerVersion;
+  let istioVer = data.istioVersion;
+
+  try {
+    const { getDefaultVersions } = await import('./version-registry');
+    const defaults = await getDefaultVersions();
+    k8sVer = k8sVer || defaults.kubernetesVersion;
+    vclusterVer = vclusterVer || defaults.vclusterVersion;
+    etcdVer = etcdVer || defaults.etcdVersion;
+    coreDNSVer = coreDNSVer || defaults.coreDNSVersion;
+    metricsVer = metricsVer || defaults.metricsServerVersion;
+    istioVer = istioVer || defaults.istioVersion;
+  } catch {
+    k8sVer = k8sVer || 'v1.31.0';
+    vclusterVer = vclusterVer || '0.36.0';
+    etcdVer = etcdVer || '3.6.8-0';
+    coreDNSVer = coreDNSVer || 'v1.11.3';
+    metricsVer = metricsVer || 'v0.7.2';
+    istioVer = istioVer || '1.24.2';
   }
   const isHA = data.preset === 'ha' || data.preset === 'large' || data.preset === 'medium';
   const namespace = (data as any).namespace || (name === 'team-alpha-dev' ? 'default' : name);
@@ -585,12 +600,26 @@ export async function createVirtualCluster(data: {
       clusterName: name,
       vclusterVersion: vclusterVer,
       kubernetesVersion: k8sVer,
+      etcdVersion: etcdVer,
       sizePreset: data.preset,
       highAvailability: isHA,
       components: {
-        coreDNS: { enabled: data.enableMonitoringAndDNS ?? true },
-        metricsServer: { enabled: data.enableMonitoringAndDNS ?? true },
-        ...(data.istio ? { istio: data.istio } : {}),
+        coreDNS: {
+          enabled: data.enableMonitoringAndDNS ?? true,
+          version: coreDNSVer,
+        },
+        metricsServer: {
+          enabled: data.enableMonitoringAndDNS ?? true,
+          version: metricsVer,
+        },
+        ...(data.istio
+          ? {
+              istio: {
+                ...data.istio,
+                version: istioVer,
+              },
+            }
+          : {}),
       },
       sync: { pods: true, services: true, ingresses: true },
       lifecycle: {
@@ -974,6 +1003,10 @@ export async function upgradeVirtualCluster(
   upgrades: {
     kubernetesVersion?: string;
     vclusterVersion?: string;
+    etcdVersion?: string;
+    coreDNSVersion?: string;
+    metricsServerVersion?: string;
+    istioVersion?: string;
   },
   namespace?: string
 ): Promise<VirtualCluster | null> {
@@ -984,12 +1017,34 @@ export async function upgradeVirtualCluster(
     targetNs = match ? match.namespace : 'default';
   }
 
-  const patch: any = { spec: {} };
+  const patch: any = {
+    metadata: {
+      annotations: {
+        'vops.gitops.io/reconcile-trigger': Date.now().toString(),
+      },
+    },
+    spec: {},
+  };
   if (upgrades.kubernetesVersion) {
     patch.spec.kubernetesVersion = upgrades.kubernetesVersion;
   }
   if (upgrades.vclusterVersion) {
     patch.spec.vclusterVersion = upgrades.vclusterVersion;
+  }
+  if (upgrades.etcdVersion) {
+    patch.spec.etcdVersion = upgrades.etcdVersion;
+  }
+  if (upgrades.coreDNSVersion || upgrades.metricsServerVersion || upgrades.istioVersion) {
+    patch.spec.components = {};
+    if (upgrades.coreDNSVersion) {
+      patch.spec.components.coreDNS = { version: upgrades.coreDNSVersion };
+    }
+    if (upgrades.metricsServerVersion) {
+      patch.spec.components.metricsServer = { version: upgrades.metricsServerVersion };
+    }
+    if (upgrades.istioVersion) {
+      patch.spec.components.istio = { version: upgrades.istioVersion };
+    }
   }
 
   const res = await k8sRequest<any>(

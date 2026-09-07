@@ -429,6 +429,12 @@ func (r *AddonsReconciler) reconcileCoreDNS(ctx context.Context, vc *v1alpha1.Vi
 		replicas = 3
 	}
 
+	dnsVer := vc.Spec.Components.CoreDNS.Version
+	if dnsVer == "" {
+		dnsVer = "v1.11.3"
+	}
+	dnsImage := fmt.Sprintf("registry.k8s.io/coredns/coredns:%s", dnsVer)
+
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "coredns",
@@ -456,7 +462,7 @@ func (r *AddonsReconciler) reconcileCoreDNS(ctx context.Context, vc *v1alpha1.Vi
 					Containers: []corev1.Container{
 						{
 							Name:            "coredns",
-							Image:           "registry.k8s.io/coredns/coredns:v1.11.3",
+							Image:           dnsImage,
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Args:            []string{"-conf", "/etc/coredns/Corefile"},
 							VolumeMounts: []corev1.VolumeMount{
@@ -566,6 +572,7 @@ func (r *AddonsReconciler) reconcileCoreDNS(ctx context.Context, vc *v1alpha1.Vi
 			needsUpdate = true
 		}
 		if existingDep.Spec.Template.Spec.DNSPolicy != dep.Spec.Template.Spec.DNSPolicy ||
+			existingDep.Spec.Template.Spec.Containers[0].Image != dep.Spec.Template.Spec.Containers[0].Image ||
 			!reflect.DeepEqual(existingDep.Spec.Template.Spec.Containers[0].Resources, dep.Spec.Template.Spec.Containers[0].Resources) ||
 			!reflect.DeepEqual(existingDep.Spec.Template.Spec.Containers[0].Ports, dep.Spec.Template.Spec.Containers[0].Ports) ||
 			!reflect.DeepEqual(existingDep.Spec.Template.Spec.Containers[0].Args, dep.Spec.Template.Spec.Containers[0].Args) {
@@ -756,6 +763,12 @@ func (r *AddonsReconciler) reconcileMetricsServer(ctx context.Context, vc *v1alp
 	}
 
 	// 8. Deployment
+	msVer := vc.Spec.Components.MetricsServer.Version
+	if msVer == "" {
+		msVer = "v0.7.2"
+	}
+	msImage := fmt.Sprintf("registry.k8s.io/metrics-server/metrics-server:%s", msVer)
+
 	replicas := int32(1)
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -781,7 +794,7 @@ func (r *AddonsReconciler) reconcileMetricsServer(ctx context.Context, vc *v1alp
 					Containers: []corev1.Container{
 						{
 							Name:            "metrics-server",
-							Image:           "registry.k8s.io/metrics-server/metrics-server:v0.7.2",
+							Image:           msImage,
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Args: []string{
 								"--cert-dir=/tmp",
@@ -858,7 +871,8 @@ func (r *AddonsReconciler) reconcileMetricsServer(ctx context.Context, vc *v1alp
 			return err
 		}
 	} else if err == nil {
-		if !reflect.DeepEqual(existingDep.Spec.Template.Spec.Containers[0].Args, dep.Spec.Template.Spec.Containers[0].Args) {
+		if !reflect.DeepEqual(existingDep.Spec.Template.Spec.Containers[0].Args, dep.Spec.Template.Spec.Containers[0].Args) ||
+			existingDep.Spec.Template.Spec.Containers[0].Image != dep.Spec.Template.Spec.Containers[0].Image {
 			existingDep.Spec.Template = dep.Spec.Template
 			_ = c.Update(ctx, existingDep)
 		}

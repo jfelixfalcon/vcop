@@ -36,6 +36,10 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
     const updated = await upgradeVirtualCluster(name, {
       kubernetesVersion: body.kubernetesVersion,
       vclusterVersion: body.vclusterVersion,
+      etcdVersion: body.etcdVersion,
+      coreDNSVersion: body.coreDNSVersion,
+      metricsServerVersion: body.metricsServerVersion,
+      istioVersion: body.istioVersion,
     }, targetNs);
 
     return new Response(JSON.stringify({

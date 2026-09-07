@@ -151,6 +151,12 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 	}
 	initialClusterStr := strings.Join(initialCluster, ",")
 
+	etcdVer := vc.Spec.EtcdVersion
+	if etcdVer == "" {
+		etcdVer = "3.6.8-0"
+	}
+	etcdImage := fmt.Sprintf("registry.k8s.io/etcd:%s", etcdVer)
+
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-etcd", vc.Name),
@@ -172,7 +178,7 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 					Containers: []corev1.Container{
 						{
 							Name:            "etcd",
-							Image:           "registry.k8s.io/etcd:3.6.8-0",
+							Image:           etcdImage,
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command: []string{
 								"etcd",
