@@ -589,8 +589,8 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 		}
 	}
 
-	// 4. Service (type LoadBalancer by default, synced to host)
-	svcType := corev1.ServiceTypeLoadBalancer
+	// 4. Service (type ClusterIP by default)
+	svcType := corev1.ServiceTypeClusterIP
 	if vc.Spec.Components.Istio.IngressGateway != nil && vc.Spec.Components.Istio.IngressGateway.ServiceType != "" {
 		svcType = corev1.ServiceType(vc.Spec.Components.Istio.IngressGateway.ServiceType)
 	}
@@ -605,8 +605,7 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 			},
 		},
 		Spec: corev1.ServiceSpec{
-			Type:                          svcType,
-			AllocateLoadBalancerNodePorts: func(b bool) *bool { return &b }(false),
+			Type: svcType,
 			Selector: map[string]string{
 				"app":   "istio-ingressgateway",
 				"istio": "ingressgateway",
@@ -623,6 +622,17 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 		if err := vClient.Create(ctx, svc); err != nil {
 			return err
 		}
+	} else if err == nil {
+		// Update service type and ports if they differ
+		if existingSvc.Spec.Type != svcType || !portsEqual(existingSvc.Spec.Ports, svc.Spec.Ports) {
+			existingSvc.Spec.Type = svcType
+			existingSvc.Spec.Ports = svc.Spec.Ports
+			if err := vClient.Update(ctx, existingSvc); err != nil {
+				return err
+			}
+		}
+	} else {
+		return err
 	}
 
 	return nil
@@ -836,4 +846,17 @@ func (r *IstioReconciler) reconcileCRDs(ctx context.Context, dyn dynamic.Interfa
 		}
 	}
 	return nil
+}
+
+// portsEqual compares two ServicePort slices for equality by name, port, and targetPort.
+func portsEqual(a, b []corev1.ServicePort) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name || a[i].Port != b[i].Port || a[i].TargetPort != b[i].TargetPort {
+			return false
+		}
+	}
+	return true
 }

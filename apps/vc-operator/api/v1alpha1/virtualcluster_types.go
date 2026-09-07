@@ -62,8 +62,8 @@ type MetricsServerComponent struct {
 type IstioGatewayConfig struct {
 	// +kubebuilder:default=true
 	Enabled bool `json:"enabled"`
-	// ServiceType defines Kubernetes service type for the gateway (LoadBalancer, ClusterIP, NodePort)
-	// +kubebuilder:default="LoadBalancer"
+	// ServiceType defines Kubernetes service type for the gateway (ClusterIP, LoadBalancer, NodePort)
+	// +kubebuilder:default="ClusterIP"
 	// +optional
 	ServiceType string `json:"serviceType,omitempty"`
 }

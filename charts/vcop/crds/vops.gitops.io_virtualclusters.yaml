@@ -146,7 +146,7 @@ spec:
                               default: true
                             serviceType:
                               type: string
-                              default: LoadBalancer
+                              default: ClusterIP
                         certificateIssuer:
                           type: string
                         certificateIssuerKind:
