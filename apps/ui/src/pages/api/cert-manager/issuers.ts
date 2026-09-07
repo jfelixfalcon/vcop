@@ -22,6 +22,7 @@ export const GET: APIRoute = async ({ request }) => {
 
     // 2. Fetch ClusterIssuers
     const clusterIssuers: string[] = [];
+    let rbacWarning: string | undefined;
     const ciRes = await k8sRequest<{ items?: Array<{ metadata?: { name?: string } }> }>(
       '/apis/cert-manager.io/v1/clusterissuers'
     );
@@ -31,6 +32,11 @@ export const GET: APIRoute = async ({ request }) => {
           clusterIssuers.push(item.metadata.name);
         }
       }
+    } else if (ciRes.statusCode === 403) {
+      rbacWarning = 'Permission denied listing ClusterIssuers (HTTP 403). Check UI RBAC roles.';
+      console.warn('[cert-manager/issuers] 403 Forbidden while listing clusterissuers');
+    } else if (ciRes.statusCode !== 200) {
+      console.warn(`[cert-manager/issuers] Unexpected HTTP ${ciRes.statusCode} while listing clusterissuers`);
     }
 
     // 3. Fetch namespaced Issuers
@@ -45,6 +51,8 @@ export const GET: APIRoute = async ({ request }) => {
             issuers.push(item.metadata.name);
           }
         }
+      } else if (iRes.statusCode !== 200) {
+        console.warn(`[cert-manager/issuers] Failed to list issuers in ${namespace} (HTTP ${iRes.statusCode})`);
       }
     }
 
@@ -52,6 +60,7 @@ export const GET: APIRoute = async ({ request }) => {
       installed: true,
       clusterIssuers,
       issuers,
+      warning: rbacWarning,
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

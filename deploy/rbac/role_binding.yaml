@@ -10,6 +10,9 @@ subjects:
   - kind: ServiceAccount
     name: vc-operator-controller-manager
     namespace: vcop-system
+  - kind: ServiceAccount
+    name: vcop-operator
+    namespace: vcop-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
