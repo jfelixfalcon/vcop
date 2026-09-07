@@ -105,7 +105,6 @@ func (r *QuotaReconciler) buildHardLimits(vc *v1alpha1.VirtualCluster) corev1.Re
 	limCPU := "8"
 	limMem := "16Gi"
 	pods := "25"
-	services := "25"
 	pvcs := "10"
 
 	switch vc.Spec.SizePreset {
@@ -116,7 +115,6 @@ func (r *QuotaReconciler) buildHardLimits(vc *v1alpha1.VirtualCluster) corev1.Re
 		limCPU = "2"
 		limMem = "4Gi"
 		pods = "10"
-		services = "10"
 		pvcs = "5"
 	case v1alpha1.PresetHA, v1alpha1.PresetLarge:
 		reqCPU = "8"
@@ -125,7 +123,6 @@ func (r *QuotaReconciler) buildHardLimits(vc *v1alpha1.VirtualCluster) corev1.Re
 		limCPU = "16"
 		limMem = "32Gi"
 		pods = "50"
-		services = "50"
 		pvcs = "25"
 	}
 
@@ -164,9 +161,6 @@ func (r *QuotaReconciler) buildHardLimits(vc *v1alpha1.VirtualCluster) corev1.Re
 		}
 		if rq.Pods != "" {
 			pods = rq.Pods
-		}
-		if rq.Services != "" {
-			services = rq.Services
 		}
 		if rq.PersistentVolumeClaims != "" {
 			pvcs = rq.PersistentVolumeClaims
@@ -211,9 +205,6 @@ func (r *QuotaReconciler) buildHardLimits(vc *v1alpha1.VirtualCluster) corev1.Re
 	}
 	if q, err := resource.ParseQuantity(pods); err == nil {
 		hard[corev1.ResourcePods] = q
-	}
-	if q, err := resource.ParseQuantity(services); err == nil {
-		hard[corev1.ResourceServices] = q
 	}
 	if q, err := resource.ParseQuantity(pvcs); err == nil {
 		hard[corev1.ResourcePersistentVolumeClaims] = q
