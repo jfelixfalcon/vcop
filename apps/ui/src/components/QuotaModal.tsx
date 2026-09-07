@@ -11,8 +11,11 @@ import {
   HardDrive,
   Layers,
   Sparkles,
+  AlertOctagon,
+  ShieldCheck,
 } from 'lucide-react';
-import type { VirtualCluster, PoliciesSpec } from '../lib/types';
+import type { VirtualCluster, PoliciesSpec, ClusterCapacityData } from '../lib/types';
+import { parseCpuMillis, parseMemoryBytes, formatCpuMillis, formatMemoryBytes } from '../lib/metrics-utils';
 
 interface Props {
   cluster: VirtualCluster | null;
@@ -54,6 +57,60 @@ export const QuotaModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpdate
   // Submission state
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [clusterCapacity, setClusterCapacity] = useState<ClusterCapacityData | null>(null);
+  const [ignoreCapacityCheck, setIgnoreCapacityCheck] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    fetch('/api/cluster/capacity')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.capacity) {
+          setClusterCapacity(data.capacity);
+        }
+      })
+      .catch((e) => console.warn('Failed loading capacity in QuotaModal:', e));
+  }, [isOpen]);
+
+  const checkQuotaOvercommit = () => {
+    if (!clusterCapacity || !cluster) return { isOverallocated: false, errors: [] as string[] };
+    const currentReqCpu = parseCpuMillis(cluster.spec.policies?.resourceQuota?.requestsCPU || cluster.status.quota?.hard?.['requests.cpu'] || '4');
+    const currentReqMem = parseMemoryBytes(cluster.spec.policies?.resourceQuota?.requestsMemory || cluster.status.quota?.hard?.['requests.memory'] || '8Gi');
+    const currentReqStorage = parseMemoryBytes(cluster.spec.policies?.resourceQuota?.requestsStorage || cluster.status.quota?.hard?.['requests.storage'] || '25Gi');
+
+    const newReqCpu = parseCpuMillis(requestsCPU);
+    const newReqMem = parseMemoryBytes(requestsMemory);
+    const newReqStorage = parseMemoryBytes(requestsStorage);
+
+    const deltaCpu = newReqCpu - currentReqCpu;
+    const deltaMem = newReqMem - currentReqMem;
+    const deltaStorage = newReqStorage - currentReqStorage;
+
+    const errors: string[] = [];
+    if (deltaCpu > 0 && deltaCpu > clusterCapacity.availableCpuMillis) {
+      errors.push(
+        `CPU increase (+${formatCpuMillis(deltaCpu)}) exceeds available cluster headroom (${clusterCapacity.availableCpuStr} remaining)`
+      );
+    }
+    if (deltaMem > 0 && deltaMem > clusterCapacity.availableMemoryBytes) {
+      errors.push(
+        `Memory increase (+${formatMemoryBytes(deltaMem)}) exceeds available cluster headroom (${clusterCapacity.availableMemoryStr} remaining)`
+      );
+    }
+    if (deltaStorage > 0 && deltaStorage > clusterCapacity.availableStorageBytes) {
+      errors.push(
+        `Storage increase (+${formatMemoryBytes(deltaStorage)}) exceeds available cluster headroom (${clusterCapacity.availableStorageStr} remaining)`
+      );
+    }
+
+    return {
+      isOverallocated: errors.length > 0,
+      errors,
+      deltaCpu,
+      deltaMem,
+      deltaStorage,
+    };
+  };
 
   // Initialize from existing cluster spec or status
   useEffect(() => {
@@ -205,6 +262,13 @@ export const QuotaModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpdate
       },
     };
 
+    const overcommit = checkQuotaOvercommit();
+    if (overcommit.isOverallocated && !ignoreCapacityCheck) {
+      setError(`Cannot save quota: ${overcommit.errors[0]}. Reduce requested values or enable Administrator Override.`);
+      setSaving(false);
+      return;
+    }
+
     try {
       const res = await fetch(`/api/vclusters/${cluster.name}`, {
         method: 'PATCH',
@@ -212,6 +276,7 @@ export const QuotaModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpdate
         body: JSON.stringify({
           policies,
           namespace: cluster.namespace,
+          ignoreCapacityCheck,
         }),
       });
 
@@ -330,6 +395,58 @@ export const QuotaModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpdate
           {/* TAB 1: Compute & Storage */}
           {activeTab === 'compute' && (
             <div className="space-y-4 animate-in fade-in duration-150">
+              {/* Headroom & Capacity Telemetry */}
+              {clusterCapacity && (() => {
+                const overcommit = checkQuotaOvercommit();
+                return (
+                  <div className={`p-3 rounded-xl border text-xs font-mono transition-all ${
+                    overcommit.isOverallocated && !ignoreCapacityCheck
+                      ? 'bg-rose-950/40 border-rose-500/50 text-rose-300'
+                      : 'bg-cyber-950/70 border-cyber-800 text-slate-400'
+                  }`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        {overcommit.isOverallocated && !ignoreCapacityCheck ? (
+                          <AlertOctagon className="w-4 h-4 text-rose-400 animate-pulse" />
+                        ) : (
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                        )}
+                        <span className="text-white font-semibold">
+                          Host Headroom: {clusterCapacity.availableCpuStr} CPU • {clusterCapacity.availableMemoryStr} RAM • {clusterCapacity.availableStorageStr} Storage
+                        </span>
+                      </div>
+                      {overcommit.isOverallocated && (
+                        <span className={`text-[10px] px-2 py-0.2 rounded border ${
+                          ignoreCapacityCheck
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                        }`}>
+                          {ignoreCapacityCheck ? 'Override Active' : 'Headroom Exceeded'}
+                        </span>
+                      )}
+                    </div>
+                    {overcommit.isOverallocated && (
+                      <div className="mt-2 pt-2 border-t border-rose-800/40 space-y-1 text-[11px]">
+                        {overcommit.errors.map((err, i) => (
+                          <div key={i} className="text-rose-300">• {err}</div>
+                        ))}
+                        <label className="flex items-center gap-2 pt-1 text-slate-300 hover:text-white cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={ignoreCapacityCheck}
+                            onChange={(e) => setIgnoreCapacityCheck(e.target.checked)}
+                            className="rounded border-cyber-700 bg-cyber-900 text-cyan-500"
+                          />
+                          <span className="text-amber-300 text-[10px]">
+                            Administrator Override: Force overcommit beyond host allocatable capacity
+                          </span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <div className="flex items-center justify-between pb-2 border-b border-cyber-800">
                 <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-white">
                   <input

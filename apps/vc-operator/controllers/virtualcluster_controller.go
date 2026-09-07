@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
+	"github.com/vops/vc-operator/pkg/capacity"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 )
@@ -116,6 +117,19 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if needsUpgrade {
 		log.Info("Upgrade required", "details", upgradeDesc)
 		vc.Status.Phase = v1alpha1.PhaseUpgrading
+	}
+
+	// 2.5 Check Host Capacity & Overallocation Guardrails
+	if err := capacity.ValidateVirtualClusterCapacity(ctx, r.Client, &vc, nil); err != nil {
+		log.Info("Host capacity overallocation detected", "cluster", vc.Name, "error", err.Error())
+		r.setCondition(&vc, v1alpha1.ConditionCapacityAvailable, metav1.ConditionFalse, "HostCapacityExceeded", err.Error())
+		if vc.Status.Phase == v1alpha1.PhasePending || vc.Status.Phase == v1alpha1.PhaseProvisioning {
+			vc.Status.Phase = v1alpha1.PhaseDegraded
+			_ = r.Status().Update(ctx, &vc)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	} else {
+		r.setCondition(&vc, v1alpha1.ConditionCapacityAvailable, metav1.ConditionTrue, "CapacityAvailable", "Host cluster has sufficient allocatable compute and storage for requested quota")
 	}
 
 	// 3 & 4. Reconcile HA etcd Backing Store & vCluster Syncer

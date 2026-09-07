@@ -84,3 +84,7 @@ export function formatCpuMillis(millis: number): string {
   }
   return `${millis}m`;
 }
+
+export const parseBytes = parseMemoryBytes;
+export const formatBytes = formatMemoryBytes;
+

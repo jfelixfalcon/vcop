@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
+	"github.com/vops/vc-operator/pkg/capacity"
 )
 
 var (
@@ -86,8 +87,8 @@ func NewVirtualClusterValidator(c ...client.Client) *VirtualClusterValidator {
 	return &VirtualClusterValidator{}
 }
 
-// ValidateCreate validates a new VirtualCluster
-func (v *VirtualClusterValidator) ValidateCreate(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
+// validateBasicSpec performs static syntax and component validation
+func (v *VirtualClusterValidator) validateBasicSpec(ctx context.Context, vc *v1alpha1.VirtualCluster) field.ErrorList {
 	var allErrs field.ErrorList
 	fldPath := field.NewPath("spec")
 
@@ -159,6 +160,20 @@ func (v *VirtualClusterValidator) ValidateCreate(ctx context.Context, vc *v1alph
 		}
 	}
 
+	return allErrs
+}
+
+// ValidateCreate validates a new VirtualCluster
+func (v *VirtualClusterValidator) ValidateCreate(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
+	allErrs := v.validateBasicSpec(ctx, vc)
+
+	// Validate host capacity to prevent overallocation
+	if v.Client != nil {
+		if err := capacity.ValidateVirtualClusterCapacity(ctx, v.Client, vc, nil); err != nil {
+			allErrs = append(allErrs, field.Forbidden(field.NewPath("spec"), err.Error()))
+		}
+	}
+
 	if len(allErrs) == 0 {
 		return nil
 	}
@@ -167,17 +182,8 @@ func (v *VirtualClusterValidator) ValidateCreate(ctx context.Context, vc *v1alph
 
 // ValidateUpdate validates modifications to an existing VirtualCluster
 func (v *VirtualClusterValidator) ValidateUpdate(ctx context.Context, oldVC, newVC *v1alpha1.VirtualCluster) error {
-	var allErrs field.ErrorList
+	allErrs := v.validateBasicSpec(ctx, newVC)
 	fldPath := field.NewPath("spec")
-
-	// Validate create rules first
-	if err := v.ValidateCreate(ctx, newVC); err != nil {
-		if statusErr, ok := err.(*apierrors.StatusError); ok && statusErr.ErrStatus.Details != nil {
-			for _, cause := range statusErr.ErrStatus.Details.Causes {
-				allErrs = append(allErrs, field.Invalid(field.NewPath(cause.Field), "", cause.Message))
-			}
-		}
-	}
 
 	// ClusterName is immutable
 	if oldVC.Spec.ClusterName != "" && newVC.Spec.ClusterName != oldVC.Spec.ClusterName {
@@ -212,6 +218,13 @@ func (v *VirtualClusterValidator) ValidateUpdate(ctx context.Context, oldVC, new
 			if CompareVersions(newEng, oldEng) < 0 {
 				allErrs = append(allErrs, field.Forbidden(fldPath.Child("vclusterVersion"), fmt.Sprintf("vCluster engine downgrade from %s to %s is prohibited", oldVC.Spec.VClusterVersion, newVC.Spec.VClusterVersion)))
 			}
+		}
+	}
+
+	// Validate host capacity on update to prevent overallocation
+	if v.Client != nil {
+		if err := capacity.ValidateVirtualClusterCapacity(ctx, v.Client, newVC, oldVC); err != nil {
+			allErrs = append(allErrs, field.Forbidden(fldPath, err.Error()))
 		}
 	}
 

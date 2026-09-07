@@ -2,7 +2,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig, K8sEvent } from './types';
+import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig, K8sEvent, ClusterCapacityData, VClusterCapacityItem } from './types';
 import { getAppStoreCatalog } from './appstore';
 import { PRESETS } from './presets';
 import { syncGuestClusterRBAC } from './cluster-rbac';
@@ -152,8 +152,8 @@ function k8sRequest<T>(reqPath: string, method = 'GET', body?: any, contentType 
   });
 }
 
-import { parseCpuMillis, parseMemoryBytes, getClusterCapacity } from './metrics-utils';
-export { parseCpuMillis, parseMemoryBytes, getClusterCapacity };
+import { parseCpuMillis, parseMemoryBytes, parseBytes, formatBytes, formatCpuMillis, getClusterCapacity } from './metrics-utils';
+export { parseCpuMillis, parseMemoryBytes, parseBytes, formatBytes, formatCpuMillis, getClusterCapacity };
 
 function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
   const name = item.metadata?.name || '';
@@ -460,6 +460,8 @@ export async function createVirtualCluster(data: {
   metricsServerVersion?: string;
   istioVersion?: string;
   policies?: PoliciesSpec;
+  customResources?: { cpu?: string; memory?: string; storage?: string };
+  ignoreCapacityCheck?: boolean;
   customYaml?: string;
   installedApps?: Array<{ appId: string; customValues?: string }>;
   customEndpoint?: string;
@@ -505,6 +507,39 @@ export async function createVirtualCluster(data: {
     metricsVer = metricsVer || 'v0.7.2';
     istioVer = istioVer || '1.24.2';
   }
+  // Pre-flight host capacity guardrail
+  if (!data.ignoreCapacityCheck) {
+    try {
+      const cap = await getHostClusterCapacity();
+      const demands = getVClusterDemands({
+        sizePreset: data.preset,
+        customResources: data.customResources,
+        policies: data.policies,
+      });
+
+      if (demands.reqCpuMillis > cap.availableCpuMillis) {
+        throw new Error(
+          `Host overallocation prevented: Requesting ${demands.reqCpuStr} CPU exceeds available cluster headroom (${cap.availableCpuStr} remaining of ${cap.allocatableCpuStr} allocatable).`
+        );
+      }
+      if (demands.reqMemBytes > cap.availableMemoryBytes) {
+        throw new Error(
+          `Host overallocation prevented: Requesting ${demands.reqMemStr} Memory exceeds available cluster headroom (${cap.availableMemoryStr} remaining of ${cap.allocatableMemoryStr} allocatable).`
+        );
+      }
+      if (demands.reqStorageBytes > cap.availableStorageBytes) {
+        throw new Error(
+          `Host overallocation prevented: Requesting ${demands.reqStorageStr} Storage exceeds available cluster headroom (${cap.availableStorageStr} remaining of ${cap.allocatableStorageStr} allocatable).`
+        );
+      }
+    } catch (e: any) {
+      if (e.message?.startsWith('Host overallocation prevented')) {
+        throw e;
+      }
+      console.warn('Pre-flight capacity check skipped due to error:', e);
+    }
+  }
+
   const isHA = data.preset === 'ha' || data.preset === 'large' || data.preset === 'medium';
   const namespace = (data as any).namespace || (name === 'team-alpha-dev' ? 'default' : name);
 
@@ -519,6 +554,9 @@ export async function createVirtualCluster(data: {
   const annotations: Record<string, string> = {
     'vops.gitops.io/owner': data.owner || 'Platform User',
   };
+  if (data.ignoreCapacityCheck) {
+    annotations['vops.gitops.io/ignore-capacity-check'] = 'true';
+  }
   if (data.allowedGroups && data.allowedGroups.length > 0) {
     annotations['vops.gitops.io/allowed-groups'] = data.allowedGroups.join(',');
   }
@@ -754,13 +792,55 @@ export async function createVirtualCluster(data: {
 export async function updateVirtualClusterPolicies(
   name: string,
   policies: PoliciesSpec,
-  namespace?: string
+  namespace?: string,
+  ignoreCapacityCheck?: boolean
 ): Promise<VirtualCluster | null> {
-  let targetNs = namespace;
-  if (!targetNs) {
-    const all = await listVirtualClusters();
-    const match = all.find((c) => c.name === name);
-    targetNs = match ? match.namespace : 'default';
+  const all = await listVirtualClusters();
+  const currentCluster = all.find((c) => c.name === name);
+  const targetNs = namespace || (currentCluster ? currentCluster.namespace : 'default');
+
+  // Pre-flight capacity check if increasing requested quota
+  if (!ignoreCapacityCheck && policies.resourceQuota) {
+    try {
+      const cap = await getHostClusterCapacity();
+      const currentDemands = currentCluster
+        ? getVClusterDemands({
+            sizePreset: currentCluster.spec?.sizePreset || (currentCluster as any).sizePreset,
+            customResources: currentCluster.spec?.customResources || (currentCluster as any).raw?.spec?.customResources,
+            policies: currentCluster.spec?.policies || (currentCluster as any).policies,
+          })
+        : { reqCpuMillis: 0, reqMemBytes: 0, reqStorageBytes: 0, reqCpuStr: '0', reqMemStr: '0', reqStorageStr: '0' };
+
+      const newDemands = getVClusterDemands({
+        sizePreset: currentCluster?.spec?.sizePreset || (currentCluster as any)?.sizePreset,
+        policies,
+      });
+
+      const deltaCpu = newDemands.reqCpuMillis - currentDemands.reqCpuMillis;
+      const deltaMem = newDemands.reqMemBytes - currentDemands.reqMemBytes;
+      const deltaStorage = newDemands.reqStorageBytes - currentDemands.reqStorageBytes;
+
+      if (deltaCpu > 0 && deltaCpu > cap.availableCpuMillis) {
+        throw new Error(
+          `Host overallocation prevented: Increasing CPU to ${newDemands.reqCpuStr} exceeds remaining host capacity (${cap.availableCpuStr} available).`
+        );
+      }
+      if (deltaMem > 0 && deltaMem > cap.availableMemoryBytes) {
+        throw new Error(
+          `Host overallocation prevented: Increasing Memory to ${newDemands.reqMemStr} exceeds remaining host capacity (${cap.availableMemoryStr} available).`
+        );
+      }
+      if (deltaStorage > 0 && deltaStorage > cap.availableStorageBytes) {
+        throw new Error(
+          `Host overallocation prevented: Increasing Storage to ${newDemands.reqStorageStr} exceeds remaining host capacity (${cap.availableStorageStr} available).`
+        );
+      }
+    } catch (e: any) {
+      if (e.message?.startsWith('Host overallocation prevented')) {
+        throw e;
+      }
+      console.warn('Capacity validation skipped:', e);
+    }
   }
 
   const patch: any = {
@@ -768,6 +848,14 @@ export async function updateVirtualClusterPolicies(
       policies,
     },
   };
+
+  if (ignoreCapacityCheck) {
+    patch.metadata = {
+      annotations: {
+        'vops.gitops.io/ignore-capacity-check': 'true',
+      },
+    };
+  }
 
   const res = await k8sRequest<any>(
     `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
@@ -1526,4 +1614,229 @@ export async function updateVirtualClusterIstio(
 
   throw new Error((res.data as any)?.message || `Failed to update virtual cluster Istio: HTTP ${res.statusCode}`);
 }
+
+// ==========================================
+// Capacity & Overallocation Management
+// ==========================================
+
+export function getVClusterDemands(vc: {
+  sizePreset?: SizePreset;
+  customResources?: { cpu?: string; memory?: string; storage?: string };
+  policies?: { resourceQuota?: any };
+}) {
+  let reqCpu = '4';
+  let reqMem = '8Gi';
+  let reqStorage = '25Gi';
+  let limCpu = '8';
+  let limMem = '16Gi';
+
+  const preset = vc.sizePreset || 'medium';
+  if (preset === 'small' || preset === 'normal') {
+    reqCpu = '1';
+    reqMem = '2Gi';
+    reqStorage = '10Gi';
+    limCpu = '2';
+    limMem = '4Gi';
+  } else if (preset === 'ha' || preset === 'large') {
+    reqCpu = '8';
+    reqMem = '16Gi';
+    reqStorage = '50Gi';
+    limCpu = '16';
+    limMem = '32Gi';
+  }
+
+  if (vc.customResources) {
+    if (vc.customResources.cpu) {
+      reqCpu = vc.customResources.cpu;
+      limCpu = vc.customResources.cpu;
+    }
+    if (vc.customResources.memory) {
+      reqMem = vc.customResources.memory;
+      limMem = vc.customResources.memory;
+    }
+    if (vc.customResources.storage) {
+      reqStorage = vc.customResources.storage;
+    }
+  }
+
+  if (vc.policies?.resourceQuota) {
+    const rq = vc.policies.resourceQuota;
+    if (rq.requestsCPU) reqCpu = rq.requestsCPU;
+    if (rq.requestsMemory) reqMem = rq.requestsMemory;
+    if (rq.requestsStorage) reqStorage = rq.requestsStorage;
+    if (rq.limitsCPU) limCpu = rq.limitsCPU;
+    if (rq.limitsMemory) limMem = rq.limitsMemory;
+  }
+
+  return {
+    reqCpuMillis: parseCpuMillis(reqCpu),
+    reqMemBytes: parseBytes(reqMem),
+    reqStorageBytes: parseBytes(reqStorage),
+    limCpuMillis: parseCpuMillis(limCpu),
+    limMemBytes: parseBytes(limMem),
+    reqCpuStr: reqCpu,
+    reqMemStr: reqMem,
+    reqStorageStr: reqStorage,
+    limCpuStr: limCpu,
+    limMemStr: limMem,
+  };
+}
+
+export async function getHostClusterCapacity(): Promise<ClusterCapacityData> {
+  const nodesRes = await k8sRequest<any>('/api/v1/nodes').catch((e) => {
+    console.warn('Failed listing nodes for capacity:', e);
+    return { statusCode: 500, data: { items: [] } };
+  });
+
+  const nodes = nodesRes.data?.items || [];
+  let allocatableCpuMillis = 0;
+  let allocatableMemoryBytes = 0;
+  let allocatableStorageBytes = 0;
+  let totalCpuMillis = 0;
+  let totalMemoryBytes = 0;
+  let totalStorageBytes = 0;
+  const nodeNames: string[] = [];
+
+  for (const node of nodes) {
+    nodeNames.push(node.metadata?.name || 'unknown');
+    const alloc = node.status?.allocatable || {};
+    const cap = node.status?.capacity || {};
+
+    allocatableCpuMillis += parseCpuMillis(alloc.cpu);
+    allocatableMemoryBytes += parseBytes(alloc.memory);
+    allocatableStorageBytes += parseBytes(alloc['ephemeral-storage']);
+
+    totalCpuMillis += parseCpuMillis(cap.cpu);
+    totalMemoryBytes += parseBytes(cap.memory);
+    totalStorageBytes += parseBytes(cap['ephemeral-storage']);
+  }
+
+  // Fallbacks if not connected to live cluster
+  if (allocatableCpuMillis === 0) allocatableCpuMillis = 32000;
+  if (allocatableMemoryBytes === 0) allocatableMemoryBytes = 32 * 1024 ** 3;
+  if (allocatableStorageBytes === 0) allocatableStorageBytes = 2000 * 1024 ** 3;
+  if (totalCpuMillis === 0) totalCpuMillis = allocatableCpuMillis;
+  if (totalMemoryBytes === 0) totalMemoryBytes = allocatableMemoryBytes;
+  if (totalStorageBytes === 0) totalStorageBytes = allocatableStorageBytes;
+
+  const clusters = await listVirtualClusters().catch(() => []);
+
+  let requestedCpuMillis = 0;
+  let requestedMemoryBytes = 0;
+  let requestedStorageBytes = 0;
+  let limitsCpuMillis = 0;
+  let limitsMemoryBytes = 0;
+  let usedCpuMillis = 0;
+  let usedMemoryBytes = 0;
+  let usedStorageBytes = 0;
+
+  const vclusters: VClusterCapacityItem[] = [];
+
+  for (const c of clusters) {
+    const demands = getVClusterDemands({
+      sizePreset: c.spec?.sizePreset || (c as any).sizePreset,
+      customResources: c.spec?.customResources || (c as any).raw?.spec?.customResources,
+      policies: c.spec?.policies || (c as any).policies,
+    });
+
+    requestedCpuMillis += demands.reqCpuMillis;
+    requestedMemoryBytes += demands.reqMemBytes;
+    requestedStorageBytes += demands.reqStorageBytes;
+    limitsCpuMillis += demands.limCpuMillis;
+    limitsMemoryBytes += demands.limMemBytes;
+
+    const uCpu = parseCpuMillis(c.status?.quota?.used?.['requests.cpu'] || c.status?.metrics?.cpuUsage || (c as any).quota?.used?.['requests.cpu'] || (c as any).metrics?.cpuUsage || '0');
+    const uMem = parseBytes(c.status?.quota?.used?.['requests.memory'] || c.status?.metrics?.memoryUsage || (c as any).quota?.used?.['requests.memory'] || (c as any).metrics?.memoryUsage || '0');
+    const uStorage = parseBytes(c.status?.quota?.used?.['requests.storage'] || (c as any).quota?.used?.['requests.storage'] || '0');
+
+    usedCpuMillis += uCpu;
+    usedMemoryBytes += uMem;
+    usedStorageBytes += uStorage;
+
+    const cpuShare = allocatableCpuMillis > 0 ? (demands.reqCpuMillis / allocatableCpuMillis) * 100 : 0;
+    const memShare = allocatableMemoryBytes > 0 ? (demands.reqMemBytes / allocatableMemoryBytes) * 100 : 0;
+    const storageShare = allocatableStorageBytes > 0 ? (demands.reqStorageBytes / allocatableStorageBytes) * 100 : 0;
+
+    vclusters.push({
+      name: c.name,
+      namespace: c.namespace,
+      phase: c.status?.phase || (c as any).phase || 'Unknown',
+      preset: c.spec?.sizePreset || (c as any).sizePreset || 'normal',
+      requestedCpuMillis: demands.reqCpuMillis,
+      requestedCpuStr: demands.reqCpuStr,
+      requestedMemoryBytes: demands.reqMemBytes,
+      requestedMemoryStr: demands.reqMemStr,
+      requestedStorageBytes: demands.reqStorageBytes,
+      requestedStorageStr: demands.reqStorageStr,
+      limitsCpuMillis: demands.limCpuMillis,
+      limitsCpuStr: demands.limCpuStr,
+      limitsMemoryBytes: demands.limMemBytes,
+      limitsMemoryStr: demands.limMemStr,
+      usedCpuMillis: uCpu,
+      usedCpuStr: formatCpuMillis(uCpu),
+      usedMemoryBytes: uMem,
+      usedMemoryStr: formatBytes(uMem),
+      usedStorageBytes: uStorage,
+      usedStorageStr: formatBytes(uStorage),
+      cpuSharePercent: Math.round(cpuShare * 10) / 10,
+      memorySharePercent: Math.round(memShare * 10) / 10,
+      storageSharePercent: Math.round(storageShare * 10) / 10,
+    });
+  }
+
+  const availableCpuMillis = Math.max(0, allocatableCpuMillis - requestedCpuMillis);
+  const availableMemoryBytes = Math.max(0, allocatableMemoryBytes - requestedMemoryBytes);
+  const availableStorageBytes = Math.max(0, allocatableStorageBytes - requestedStorageBytes);
+
+  const cpuUtilizationPct = allocatableCpuMillis > 0 ? Math.round((requestedCpuMillis / allocatableCpuMillis) * 1000) / 10 : 0;
+  const memoryUtilizationPct = allocatableMemoryBytes > 0 ? Math.round((requestedMemoryBytes / allocatableMemoryBytes) * 1000) / 10 : 0;
+  const storageUtilizationPct = allocatableStorageBytes > 0 ? Math.round((requestedStorageBytes / allocatableStorageBytes) * 1000) / 10 : 0;
+
+  return {
+    totalNodes: nodes.length || 1,
+    nodeNames,
+    allocatableCpuMillis,
+    allocatableCpuStr: formatCpuMillis(allocatableCpuMillis),
+    allocatableMemoryBytes,
+    allocatableMemoryStr: formatBytes(allocatableMemoryBytes),
+    allocatableStorageBytes,
+    allocatableStorageStr: formatBytes(allocatableStorageBytes),
+    totalCpuMillis,
+    totalCpuStr: formatCpuMillis(totalCpuMillis),
+    totalMemoryBytes,
+    totalMemoryStr: formatBytes(totalMemoryBytes),
+    totalStorageBytes,
+    totalStorageStr: formatBytes(totalStorageBytes),
+    requestedCpuMillis,
+    requestedCpuStr: formatCpuMillis(requestedCpuMillis),
+    requestedMemoryBytes,
+    requestedMemoryStr: formatBytes(requestedMemoryBytes),
+    requestedStorageBytes,
+    requestedStorageStr: formatBytes(requestedStorageBytes),
+    limitsCpuMillis,
+    limitsCpuStr: formatCpuMillis(limitsCpuMillis),
+    limitsMemoryBytes,
+    limitsMemoryStr: formatBytes(limitsMemoryBytes),
+    usedCpuMillis,
+    usedCpuStr: formatCpuMillis(usedCpuMillis),
+    usedMemoryBytes,
+    usedMemoryStr: formatBytes(usedMemoryBytes),
+    usedStorageBytes,
+    usedStorageStr: formatBytes(usedStorageBytes),
+    availableCpuMillis,
+    availableCpuStr: formatCpuMillis(availableCpuMillis),
+    availableMemoryBytes,
+    availableMemoryStr: formatBytes(availableMemoryBytes),
+    availableStorageBytes,
+    availableStorageStr: formatBytes(availableStorageBytes),
+    cpuUtilizationPct,
+    memoryUtilizationPct,
+    storageUtilizationPct,
+    isCpuOverallocated: requestedCpuMillis > allocatableCpuMillis,
+    isMemoryOverallocated: requestedMemoryBytes > allocatableMemoryBytes,
+    isStorageOverallocated: requestedStorageBytes > allocatableStorageBytes,
+    vclusters,
+  };
+}
+
 

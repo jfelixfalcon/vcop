@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
+	"github.com/vops/vc-operator/pkg/capacity"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -169,5 +172,60 @@ func TestValidator_ValidateCreate_IstioCertManager(t *testing.T) {
 	}
 	if err := vOnlineValid.ValidateCreate(ctx, validIssuerVC); err != nil {
 		t.Fatalf("expected valid issuer to pass, got: %v", err)
+	}
+}
+
+func TestValidator_ValidateCapacity(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-1"},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:              resource.MustParse("16"),
+				corev1.ResourceMemory:           resource.MustParse("32Gi"),
+				corev1.ResourceEphemeralStorage: resource.MustParse("100Gi"),
+			},
+		},
+	}
+
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+	v := NewVirtualClusterValidator(client)
+
+	// Fits within 16 CPU:
+	fitVC := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "fit-vc", Namespace: "default"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "fit-vc",
+			SizePreset:  v1alpha1.PresetMedium, // 4 CPU, 8Gi RAM
+		},
+	}
+	if err := v.ValidateCreate(ctx, fitVC); err != nil {
+		t.Fatalf("Expected fitVC to be accepted, got: %v", err)
+	}
+
+	// Exceeds 16 CPU (Preset large is 8 CPU, but asking 20 CPU custom):
+	hugeVC := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "huge-vc", Namespace: "default"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "huge-vc",
+			CustomResources: &v1alpha1.CustomResources{
+				CPU:    "20",
+				Memory: "10Gi",
+			},
+		},
+	}
+	if err := v.ValidateCreate(ctx, hugeVC); err == nil {
+		t.Fatalf("Expected hugeVC to be rejected for exceeding host CPU, but succeeded")
+	}
+
+	// Bypass annotation allows creation despite overallocation
+	bypassVC := hugeVC.DeepCopy()
+	bypassVC.Annotations = map[string]string{capacity.IgnoreCapacityAnnotation: "true"}
+	if err := v.ValidateCreate(ctx, bypassVC); err != nil {
+		t.Fatalf("Expected bypassVC to succeed, got: %v", err)
 	}
 }

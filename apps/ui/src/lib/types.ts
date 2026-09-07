@@ -406,3 +406,76 @@ export interface K8sEvent {
   lastTimestamp?: string;
   source?: { component?: string };
 }
+
+export interface VClusterCapacityItem {
+  name: string;
+  namespace: string;
+  phase: string;
+  preset: string;
+  requestedCpuMillis: number;
+  requestedCpuStr: string;
+  requestedMemoryBytes: number;
+  requestedMemoryStr: string;
+  requestedStorageBytes: number;
+  requestedStorageStr: string;
+  limitsCpuMillis: number;
+  limitsCpuStr: string;
+  limitsMemoryBytes: number;
+  limitsMemoryStr: string;
+  usedCpuMillis: number;
+  usedCpuStr: string;
+  usedMemoryBytes: number;
+  usedMemoryStr: string;
+  usedStorageBytes: number;
+  usedStorageStr: string;
+  cpuSharePercent: number;
+  memorySharePercent: number;
+  storageSharePercent: number;
+}
+
+export interface ClusterCapacityData {
+  totalNodes: number;
+  nodeNames: string[];
+  allocatableCpuMillis: number;
+  allocatableCpuStr: string;
+  allocatableMemoryBytes: number;
+  allocatableMemoryStr: string;
+  allocatableStorageBytes: number;
+  allocatableStorageStr: string;
+  totalCpuMillis: number;
+  totalCpuStr: string;
+  totalMemoryBytes: number;
+  totalMemoryStr: string;
+  totalStorageBytes: number;
+  totalStorageStr: string;
+  requestedCpuMillis: number;
+  requestedCpuStr: string;
+  requestedMemoryBytes: number;
+  requestedMemoryStr: string;
+  requestedStorageBytes: number;
+  requestedStorageStr: string;
+  limitsCpuMillis: number;
+  limitsCpuStr: string;
+  limitsMemoryBytes: number;
+  limitsMemoryStr: string;
+  usedCpuMillis: number;
+  usedCpuStr: string;
+  usedMemoryBytes: number;
+  usedMemoryStr: string;
+  usedStorageBytes: number;
+  usedStorageStr: string;
+  availableCpuMillis: number;
+  availableCpuStr: string;
+  availableMemoryBytes: number;
+  availableMemoryStr: string;
+  availableStorageBytes: number;
+  availableStorageStr: string;
+  cpuUtilizationPct: number;
+  memoryUtilizationPct: number;
+  storageUtilizationPct: number;
+  isCpuOverallocated: boolean;
+  isMemoryOverallocated: boolean;
+  isStorageOverallocated: boolean;
+  vclusters: VClusterCapacityItem[];
+}
+

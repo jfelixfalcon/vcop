@@ -34,7 +34,7 @@ rules:
       - patch
       - update
       - watch
-  # Core resources (Services, ConfigMaps, Secrets, PVCs, Pods, Namespaces)
+  # Core resources (Services, ConfigMaps, Secrets, PVCs, Pods, Namespaces, Nodes)
   - apiGroups:
       - ""
     resources:
@@ -47,6 +47,7 @@ rules:
       - namespaces
       - resourcequotas
       - limitranges
+      - nodes
     verbs:
       - create
       - delete
@@ -124,6 +125,7 @@ rules:
       - pods
       - services
       - namespaces
+      - nodes
     verbs:
       - create
       - get

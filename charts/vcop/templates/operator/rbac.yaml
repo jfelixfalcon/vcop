@@ -51,6 +51,7 @@ rules:
       - serviceaccounts
       - resourcequotas
       - limitranges
+      - nodes
     verbs:
       - create
       - delete

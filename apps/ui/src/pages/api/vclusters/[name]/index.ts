@@ -73,7 +73,7 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
       updated = await setVirtualClusterSleep(name, Boolean(sleep ?? paused), namespace);
     }
     if (policies) {
-      updated = await updateVirtualClusterPolicies(name, policies, namespace);
+      updated = await updateVirtualClusterPolicies(name, policies, namespace, body.ignoreCapacityCheck);
     }
     if (rbac || owner !== undefined || allowedGroups !== undefined || allowedEmails !== undefined) {
       const rbacData = rbac || { owner, allowedGroups, allowedEmails };

@@ -102,6 +102,14 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 - **Instant Kubeconfig & CLI Access:** Single-click download and live CLI connect command generator.
 - **Telemetry Sparklines:** Real-time CPU and Memory utilization sparklines streamed directly from cluster telemetry.
 
+### 9. Host Capacity Tracking & Overallocation Prevention Engine
+- **Host Resource Discovery:** Continuously aggregates physical node metrics (`allocatable` and `capacity`) for CPU cores, RAM, and Ephemeral Storage across all host Kubernetes nodes.
+- **Dynamic Fleet Quota Accounting:** Calculates requested resources, limits, and actual real-time utilization for every tenant `VirtualCluster` based on size presets, custom resources, and active `ResourceQuota` policies.
+- **Deterministic Overallocation Guardrails:** Admission webhooks and pre-flight UI checks prevent provisioning virtual clusters or expanding resource quotas beyond available host headroom.
+- **Condition `CapacityAvailable`:** Operator dynamically maintains the `CapacityAvailable` condition on each `VirtualCluster` CR, raising explicit `HostCapacityExceeded` events if node physical capacity is breached.
+- **Administrator Bypass:** For non-production oversubscription testbeds, platform operators can bypass capacity validation via the annotation `vops.gitops.io/ignore-capacity-check: "true"` or the UI override toggle.
+- **Dedicated Capacity Dashboard (`/capacity`):** Full telemetry dashboard showing host allocatable vs requested gauges, overcommit alert badges, and a granular tenant breakdown table.
+
 ---
 
 ## Helm Deployment & Automated Istio Management
@@ -196,6 +204,102 @@ vCOp provides full dynamic version governance and zero-downtime rolling upgrades
 | **CoreDNS** | `v1.11.3` | `registry.k8s.io/coredns/coredns:<tag>` | Operator Addon |
 | **Metrics-Server** | `v0.7.2` | `registry.k8s.io/metrics-server/metrics-server:<tag>` | Operator Addon |
 | **Istio Control Plane & Gateway** | `1.24.2` | `docker.io/istio/pilot:<tag>` & `proxyv2:<tag>` | Operator IstioReconciler |
+
+---
+
+## Cluster Capacity Tracking & Overallocation Prevention
+
+vCOp includes a real-time **Cluster Capacity Engine** and deterministic **Admission Guardrails** to track physical node capacity and prevent overcommitting the host Kubernetes cluster.
+
+### How Capacity Tracking Works
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                   Host Cluster Nodes (kubectl get nodes)               │
+│   Allocatable:  CPU: 32 Cores   │   Memory: 30.97Gi   │   Disk: 1.9TB  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                  Aggregates Fleet Demand & Headroom
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                      vCOp Capacity Accounting Engine                   │
+│                                                                        │
+│   • VirtualCluster A (large):   16 Cores req  /  32Gi RAM              │
+│   • VirtualCluster B (medium):   4 Cores req  /   8Gi RAM              │
+│   ------------------------------------------------------------------   │
+│   Fleet Total Requested:        20 Cores req  /  40Gi RAM              │
+│   Host Headroom Remaining:      12 Cores rem  /   0Gi RAM (Overbooked) │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+       ┌────────────────────────────┴───────────────────────────┐
+       ▼                                                        ▼
+┌──────────────────────────────┐        ┌──────────────────────────────┐
+│  Admission Webhook / UI API  │        │   Operator Controller Status │
+│                              │        │                              │
+│  Blocks new provisioning or  │        │  Sets Condition:             │
+│  quota hikes that exceed     │        │  CapacityAvailable: False    │
+│  remaining host headroom.    │        │  Reason: HostCapacityExceeded│
+└──────────────────────────────┘        └──────────────────────────────┘
+```
+
+### 1. Quota Calculation Model
+
+The requested resources and limits for a virtual cluster are computed according to this deterministic hierarchy:
+
+1. **Explicit ResourceQuota Policies (`spec.policies.resourceQuota`):**
+   - If `requestsCPU`, `requestsMemory`, or `requestsStorage` are defined in the governance policies, they take highest precedence.
+2. **Custom Resources (`spec.customResources`):**
+   - If specified, custom CPU, Memory, or Ephemeral Storage limits are applied.
+3. **Size Presets (`spec.sizePreset`):**
+   - `small` / `normal`: 1 Core req / 2Gi RAM req / 10Gi Storage req (Limit: 2 Cores, 4Gi RAM)
+   - `medium`: 4 Cores req / 8Gi RAM req / 25Gi Storage req (Limit: 8 Cores, 16Gi RAM)
+   - `large` / `ha`: 8 Cores req / 16Gi RAM req / 50Gi Storage req (Limit: 16 Cores, 32Gi RAM)
+
+### 2. Deterministic Overallocation Prevention
+
+- **Pre-Flight UI Guardrails:** When attempting to provision a virtual cluster in the UI Wizard or increasing tenant quota in the Quota Modal, vCOp evaluates the remaining host headroom. If the requested delta exceeds available host capacity, the operation is blocked with a clear warning:
+  ```
+  Host overallocation prevented: Requesting 2Gi Memory exceeds available cluster headroom (0B remaining of 30.97Gi allocatable).
+  ```
+- **Admission Webhook Validation:** If applying a `VirtualCluster` manifest directly via `kubectl` or GitOps (ArgoCD/Flux), the validating admission webhook (`pkg/webhook/validator.go`) intercepts the request and rejects any creation or update that breaches host allocatable resources.
+- **Dynamic CR Condition:** If the host node allocatable capacity shrinks (e.g. node drain or cordon), the operator sets:
+  ```yaml
+  status:
+    conditions:
+      - type: CapacityAvailable
+        status: "False"
+        reason: HostCapacityExceeded
+        message: "Memory overallocation: requesting 32Gi, but host cluster only has 30.97Gi available"
+  ```
+- **Administrator Bypass:** Platform administrators can intentionally oversubscribe host resources by supplying the annotation:
+  ```yaml
+  metadata:
+    annotations:
+      vops.gitops.io/ignore-capacity-check: "true"
+  ```
+  Or checking the **"Override Host Capacity Guardrail"** checkbox in the Operations Center UI.
+
+### 3. Dedicated Capacity Telemetry Dashboard
+
+Visit `/capacity` in the Operations Center UI to view:
+- **Visual Progress Gauges:** Total vs Allocatable vs Requested vs Available for CPU, RAM, and Storage.
+- **Overcommit Banners:** High-visibility alerts displaying exactly which resource is approaching or exceeding physical capacity.
+- **Granular Fleet Breakdown:** Table listing all virtual clusters, their requested quotas, maximum limits, actual used resources, and overall host share percentage.
+
+### 4. Telemetry REST API
+
+vCOp exposes a real-time capacity API for platform automation and monitoring scripts:
+
+```bash
+# Query live host capacity, fleet requests, and available headroom
+curl -s http://localhost:4321/api/cluster/capacity | jq .
+
+# Test if a planned virtual cluster size fits within current cluster headroom
+curl -s -X POST http://localhost:4321/api/cluster/capacity \
+  -H "Content-Type: application/json" \
+  -d '{"preset": "medium"}' | jq .
+```
 
 ---
 

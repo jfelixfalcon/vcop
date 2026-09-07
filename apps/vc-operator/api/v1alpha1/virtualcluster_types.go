@@ -44,6 +44,7 @@ const (
 	ConditionRBACReady           = "RBACReady"
 	ConditionIstioReady          = "IstioReady"
 	ConditionCertificateReady    = "CertificateReady"
+	ConditionCapacityAvailable   = "CapacityAvailable"
 )
 
 // CoreDNSComponent configures CoreDNS add-on inside vCluster
