@@ -267,6 +267,28 @@ spec:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
                   description: Direct passthrough to the official vCluster v0.36 vcluster.yaml configuration schema.
+                disasterRecovery:
+                  type: object
+                  description: Automated etcd backup and disaster recovery configuration.
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: true
+                    schedule:
+                      type: string
+                      default: "daily"
+                    cronExpression:
+                      type: string
+                    retentionCount:
+                      type: integer
+                      default: 7
+                    storageSize:
+                      type: string
+                      default: "10Gi"
+                    initialBackupRestore:
+                      type: string
+                    restoreSnapshotName:
+                      type: string
                 helmValues:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
@@ -275,6 +297,10 @@ spec:
               type: object
               description: Observed state of the virtual cluster.
               properties:
+                disasterRecovery:
+                  type: object
+                  description: Observed backup and disaster recovery state.
+                  x-kubernetes-preserve-unknown-fields: true
                 phase:
                   type: string
                   description: Current lifecycle phase.

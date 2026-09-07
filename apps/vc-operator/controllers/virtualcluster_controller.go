@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -46,6 +47,7 @@ type VirtualClusterReconciler struct {
 	QuotaReconciler      *QuotaReconciler
 	RBACReconciler       *RBACReconciler
 	IstioReconciler      *IstioReconciler
+	DisasterRecoveryReconciler *DisasterRecoveryReconciler
 }
 
 // +kubebuilder:rbac:groups=vops.gitops.io,resources=virtualclusters,verbs=get;list;watch;create;update;patch;delete
@@ -93,6 +95,9 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if r.IstioReconciler == nil {
 		r.IstioReconciler = NewIstioReconciler(r.Client, r.AddonsReconciler)
 	}
+	if r.DisasterRecoveryReconciler == nil {
+		r.DisasterRecoveryReconciler = NewDisasterRecoveryReconciler(r.Client)
+	}
 
 	// 1. Handle Finalizer & Deletion
 	if !vc.DeletionTimestamp.IsZero() {
@@ -130,6 +135,16 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	} else {
 		r.setCondition(&vc, v1alpha1.ConditionCapacityAvailable, metav1.ConditionTrue, "CapacityAvailable", "Host cluster has sufficient allocatable compute and storage for requested quota")
+	}
+
+	// 2.8 Reconcile Disaster Recovery Storage & Automated Backups
+	if err := r.DisasterRecoveryReconciler.ReconcileDisasterRecovery(ctx, &vc); err != nil {
+		log.Error(err, "failed reconciling disaster recovery backups")
+		r.setCondition(&vc, v1alpha1.ConditionDisasterRecoveryReady, metav1.ConditionFalse, "DisasterRecoveryFailed", err.Error())
+	} else if vc.Spec.DisasterRecovery != nil && vc.Spec.DisasterRecovery.Enabled {
+		r.setCondition(&vc, v1alpha1.ConditionDisasterRecoveryReady, metav1.ConditionTrue, "BackupsConfigured", fmt.Sprintf("Automated etcd backups configured with %s schedule", vc.Spec.DisasterRecovery.Schedule))
+	} else {
+		r.setCondition(&vc, v1alpha1.ConditionDisasterRecoveryReady, metav1.ConditionTrue, "DisasterRecoveryDisabled", "Automated backups disabled")
 	}
 
 	// 3 & 4. Reconcile HA etcd Backing Store & vCluster Syncer
@@ -285,7 +300,6 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			}
 		}
 	}
-
 	log.Info("Component status", "cluster", vc.Name, "etcd", etcdReady, "syncer", syncerReady, "kubeconfig", kubeconfigReady, "addons", addonsReady, "quota", quotaReady, "rbac", rbacReady, "istio", istioReady)
 
 	// 10. Update Observed Versions & Final Phase
@@ -599,6 +613,7 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.QuotaReconciler = NewQuotaReconciler(mgr.GetClient())
 	r.RBACReconciler = NewRBACReconciler(mgr.GetClient())
 	r.IstioReconciler = NewIstioReconciler(mgr.GetClient(), r.AddonsReconciler)
+	r.DisasterRecoveryReconciler = NewDisasterRecoveryReconciler(mgr.GetClient())
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.VirtualCluster{}).
@@ -609,6 +624,7 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Secret{}).
 		Owns(&corev1.ResourceQuota{}).
 		Owns(&corev1.LimitRange{}).
+		Owns(&batchv1.CronJob{}).
 		Complete(r)
 }
 

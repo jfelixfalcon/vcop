@@ -110,6 +110,14 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 - **Administrator Bypass:** For non-production oversubscription testbeds, platform operators can bypass capacity validation via the annotation `vops.gitops.io/ignore-capacity-check: "true"` or the UI override toggle.
 - **Dedicated Capacity Dashboard (`/capacity`):** Full telemetry dashboard showing host allocatable vs requested gauges, overcommit alert badges, and a granular tenant breakdown table.
 
+### 10. etcd Disaster Recovery (DR) & Point-in-Time Backup/Restore Engine
+- **Automated Granular Scheduling:** Configure backup cadences (`daily`, `weekly`, `monthly`, `custom`, or `disabled`) per virtual cluster via CRD or UI. The operator reconciles an automated Kubernetes `CronJob` (`<clusterName>-etcd-backup`) that executes live, consistent etcd snapshots.
+- **Dedicated Safe Storage PVC Isolation:** Snapshots are written to a dedicated PersistentVolumeClaim (`<clusterName>-etcd-backups`) completely isolated from active etcd runtime volumes, with configurable PVC storage size (default 10Gi) and automatic retention count pruning (default 7 snapshots).
+- **On-Demand "Backup Now":** Instant manual snapshot triggers via the Operations Center UI or REST API before risky migrations or schema modifications.
+- **Deploying New Clusters Restored from Backup:** When provisioning a new virtual cluster via the UI Provisioning Wizard or GitOps, users can select any existing snapshot in the fleet (`spec.disasterRecovery.initialBackupRestore`) to initialize an exact clone.
+- **Point-in-Time Rolling Restore on Existing Clusters:** Seamless cluster rollback support (`spec.disasterRecovery.restoreSnapshotName`). The operator mounts an `etcd-restore-init` container powered by `vops/etcd-dr-runner:v1.3.0` running `etcdutl snapshot restore` across all StatefulSet replicas with strict Raft log invariance and member identity integrity.
+- **Disaster Recovery UI Tab:** Dedicated tab in Cluster Details with live vault metrics, snapshot history table, schedule modal, and a safe confirmation modal with destructive rollback warnings.
+
 ---
 
 ## Helm Deployment & Automated Istio Management
@@ -303,6 +311,108 @@ curl -s -X POST http://localhost:4321/api/cluster/capacity \
 
 ---
 
+## etcd Disaster Recovery (DR) & Backup / Restore System
+
+The virtual cluster etcd backing store holds all tenant Kubernetes state (Deployments, Services, Secrets, CRDs). vCOp provides an automated, enterprise-ready Disaster Recovery engine to ensure zero data loss.
+
+### Architecture & Backup Flow
+
+```mermaid
+flowchart TD
+    subgraph Host["Host Kubernetes Cluster"]
+        Cron["Backup CronJob / Manual Job (<cluster>-etcd-backup)"]
+        Runner["Runner: vops/etcd-dr-runner:v1.3.0"]
+        PVC["Dedicated Safe PVC (<cluster>-etcd-backups)"]
+        SharedVault["Fleet Cross-Cluster Vault (/tmp/vcop-dr-backups)"]
+        Operator["vCOp DisasterRecoveryReconciler"]
+    end
+
+    subgraph Guest["Virtual Cluster StatefulSet (<cluster>-etcd)"]
+        Init["InitContainer: etcd-restore-init"]
+        Pod0["etcd-0"]
+        Pod1["etcd-1"]
+        Pod2["etcd-2"]
+    end
+
+    Operator -->|"1. Reconciles CronJob & PVC"| Cron
+    Cron --> Runner
+    Runner -->|"2. etcdctl snapshot save (Live Quorum)"| PVC
+    Runner -->|"3. Mirrors snapshot & JSON index"| SharedVault
+    Runner -->|"4. Prunes snapshots > retentionCount"| PVC
+    SharedVault -.->|"Restore Snapshot for Clones"| Init
+    PVC -->|"Point-in-Time Restore"| Init
+    Init -->|"etcdutl snapshot restore"| Pod0
+    Init -->|"etcdutl snapshot restore"| Pod1
+    Init -->|"etcdutl snapshot restore"| Pod2
+```
+
+### 1. Granular Backup Scheduling
+Backups can be scheduled automatically or configured on demand:
+- **`daily`**: Runs every day at 02:00 UTC (`0 2 * * *`)
+- **`weekly`**: Runs every Sunday at 02:00 UTC (`0 2 * * 0`)
+- **`monthly`**: Runs on the 1st of every month at 02:00 UTC (`0 2 1 * *`)
+- **`custom`**: User-defined 5-part cron expression (e.g. `*/30 * * * *` for every 30 minutes)
+- **`disabled`**: Disables automated cron executions while retaining manual backup capability
+
+### 2. Isolated Safe Storage on Dedicated PVC
+- Backups are stored on a dedicated `PersistentVolumeClaim` named `<clusterName>-etcd-backups` (default `10Gi`), completely isolated from active etcd data volumes (`data-<clusterName>-etcd-<N>`).
+- If an etcd pod crashes, is corrupted, or has its local volume wiped, your backup snapshots remain safe and untouched.
+- Configurable `retentionCount` automatically rotates older snapshots, preventing PVC capacity exhaustion.
+
+### 3. Deploying a New VirtualCluster from Backup
+In the **Operations Center UI Provisioning Wizard**:
+1. In **Step 1 (Basics)**, switch **Deployment Mode** from "Clean Instance" to **"Restore from Backup"**.
+2. Select any snapshot from the aggregated fleet backup history dropdown.
+3. Finish the wizard. The operator initializes the new cluster StatefulSet mounting the snapshot, bootstrapping the new cluster pre-populated with all tenant workloads.
+
+Declarative YAML configuration:
+```yaml
+apiVersion: vops.gitops.io/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: team-sandbox-clone
+  namespace: default
+spec:
+  clusterName: team-sandbox-clone
+  disasterRecovery:
+    enabled: true
+    schedule: daily
+    initialBackupRestore: "vc-dev-snapshot-latest.db"
+```
+
+### 4. Point-in-Time Restore on Existing Clusters
+In the **Operations Center UI**:
+1. Open the virtual cluster detail page and navigate to the **Disaster Recovery** tab.
+2. Select any point-in-time snapshot from the table and click **Restore**.
+3. Review the destructive rollback impact modal and confirm the operation.
+4. The operator mounts `vops/etcd-dr-runner:v1.3.0` as an `etcd-restore-init` initContainer, performs an `etcdutl snapshot restore`, and rolls the etcd StatefulSet with consistent Raft log state.
+
+### 5. Disaster Recovery REST API
+```bash
+# Get backup status and snapshot history for a cluster
+curl -s http://localhost:4321/api/vclusters/vc-dev/dr | jq .
+
+# Trigger an immediate on-demand backup ("Backup Now")
+curl -s -X POST http://localhost:4321/api/vclusters/vc-dev/dr \
+  -H "Content-Type: application/json" \
+  -d '{"action": "backup-now"}' | jq .
+
+# Update automated backup schedule
+curl -s -X POST http://localhost:4321/api/vclusters/vc-dev/dr \
+  -H "Content-Type: application/json" \
+  -d '{"action": "update-schedule", "schedule": "weekly", "retentionCount": 14}' | jq .
+
+# Restore an existing cluster to a specific snapshot
+curl -s -X POST http://localhost:4321/api/vclusters/vc-dev/dr \
+  -H "Content-Type: application/json" \
+  -d '{"action": "restore", "snapshotName": "vc-dev-snapshot-20260907-221440.db"}' | jq .
+
+# List all available snapshots across the entire fleet
+curl -s http://localhost:4321/api/backups | jq .
+```
+
+---
+
 ## Directory Layout
 
 ```
@@ -331,17 +441,19 @@ vc-operator/
 ├── apps/
 │   ├── vc-operator/                    # Go Kubernetes Operator
 │   │   ├── api/v1alpha1/               # Go CRD type definitions & deepcopy
-│   │   ├── controllers/                # Master reconciler, etcd, syncer, upgrades, istio
+│   │   ├── controllers/                # Master reconciler, DR reconciler, etcd, syncer, istio
+│   │   ├── dr-runner/                  # DR backup runner container (etcdctl / etcdutl scripts)
+│   │   ├── pkg/capacity/               # Host capacity tracking & accounting engine
 │   │   ├── pkg/vcluster/               # vCluster 0.36 vcluster.yaml generator & presets
-│   │   ├── pkg/webhook/                # Admission webhook validation logic
+│   │   ├── pkg/webhook/                # Admission webhook validation & guardrails
 │   │   ├── main.go                     # Operator entrypoint
 │   │   ├── Makefile                    # Go build and test targets
 │   │   └── Dockerfile                  # Multi-stage distroless build
 │   └── ui/                             # Astro SSR Operations Center Dashboard
 │       ├── src/
-│       │   ├── components/             # React islands (Dashboard, Wizard, Modals, IstioModal)
+│       │   ├── components/             # React islands (Dashboard, DR Tab, Wizard, Modals)
 │       │   ├── layouts/                # Astro base cybernetic layout
-│       │   ├── pages/                  # SSR pages and REST API routes
+│       │   ├── pages/                  # SSR pages and REST API routes (/api/vclusters/*/dr, /api/backups)
 │       │   └── lib/                    # K8s client, metrics-collector & metrics-db
 │       ├── astro.config.mjs            # Astro SSR Node configuration
 │       ├── tailwind.config.mjs         # Cybernetic dark palette & glow utilities
@@ -395,7 +507,7 @@ make deploy
 
 ## Custom Resource Definition (`VirtualCluster`)
 
-Example configuration with Opinionated Core Stack (CoreDNS, Metrics-Server, Istio Entrypoint, Cert-Manager TLS):
+Example configuration with Opinionated Core Stack (CoreDNS, Metrics-Server, Istio Entrypoint, Cert-Manager TLS, and Disaster Recovery):
 
 ```yaml
 apiVersion: vops.gitops.io/v1alpha1
@@ -412,6 +524,13 @@ spec:
   etcdVersion: "3.6.8-0"
   sizePreset: normal # small | normal | medium | large | ha
   highAvailability: false
+  disasterRecovery:
+    enabled: true
+    schedule: daily # daily | weekly | monthly | custom | disabled
+    retentionCount: 7
+    storageSize: 10Gi
+    # restoreSnapshotName: "vc-dev-snapshot-latest.db" # Point-in-time restore
+    # initialBackupRestore: "vc-dev-snapshot-latest.db" # Clone from existing backup
   components:
     coreDNS:
       enabled: true

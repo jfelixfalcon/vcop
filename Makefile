@@ -6,8 +6,9 @@ DEPLOY_DIR = deploy
 CHART_DIR = charts/vcop
 KIND_CLUSTER ?= kind
 
-OPERATOR_IMG ?= vops/vc-operator:v0.36.0
-UI_IMG ?= vops/vc-operations-center:v0.36.0
+OPERATOR_IMG ?= vops/vc-operator:v1.3.0
+UI_IMG ?= vops/vc-operations-center:v1.3.0
+DR_RUNNER_IMG ?= vops/etcd-dr-runner:v1.3.0
 
 .PHONY: all
 all: build test
@@ -48,7 +49,7 @@ build-ui:
 	cd $(UI_DIR) && npm run build
 
 .PHONY: docker-build
-docker-build: docker-build-operator docker-build-ui ## Build Docker images for Operator and UI
+docker-build: docker-build-operator docker-build-ui docker-build-dr-runner ## Build Docker images for Operator, UI, and DR runner
 
 .PHONY: docker-build-operator
 docker-build-operator:
@@ -60,6 +61,11 @@ docker-build-ui:
 	@echo "=== Building UI Docker Image: $(UI_IMG) ==="
 	docker build -t $(UI_IMG) $(UI_DIR)
 
+.PHONY: docker-build-dr-runner
+docker-build-dr-runner:
+	@echo "=== Building DR Runner Docker Image: $(DR_RUNNER_IMG) ==="
+	docker build -t $(DR_RUNNER_IMG) $(OPERATOR_DIR)/dr-runner
+
 ##@ Kind (Local Cluster Image Caching)
 
 .PHONY: kind-load
@@ -67,6 +73,7 @@ kind-load: ## Cache and load built Docker images directly into Kind cluster
 	@echo "=== Loading container images into Kind cluster ($(KIND_CLUSTER)) ==="
 	kind load docker-image $(OPERATOR_IMG) --name $(KIND_CLUSTER)
 	kind load docker-image $(UI_IMG) --name $(KIND_CLUSTER)
+	kind load docker-image $(DR_RUNNER_IMG) --name $(KIND_CLUSTER)
 	@echo "=== Container images cached in Kind containerd! ==="
 
 ##@ Helm Chart Management

@@ -45,6 +45,7 @@ const (
 	ConditionIstioReady          = "IstioReady"
 	ConditionCertificateReady    = "CertificateReady"
 	ConditionCapacityAvailable   = "CapacityAvailable"
+	ConditionDisasterRecoveryReady = "DisasterRecoveryReady"
 )
 
 // CoreDNSComponent configures CoreDNS add-on inside vCluster
@@ -283,6 +284,78 @@ type PoliciesSpec struct {
 	LimitRange *LimitRangePolicy `json:"limitRange,omitempty"`
 }
 
+// DisasterRecoverySchedule defines preset backup intervals
+type DisasterRecoverySchedule string
+
+const (
+	ScheduleDaily    DisasterRecoverySchedule = "daily"
+	ScheduleWeekly   DisasterRecoverySchedule = "weekly"
+	ScheduleMonthly  DisasterRecoverySchedule = "monthly"
+	ScheduleCustom   DisasterRecoverySchedule = "custom"
+	ScheduleDisabled DisasterRecoverySchedule = "disabled"
+)
+
+// DisasterRecoverySpec defines etcd backup and disaster recovery configuration
+type DisasterRecoverySpec struct {
+	// Enabled toggles automated backups for the backing store
+	// +kubebuilder:default=true
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Schedule defines backup frequency: daily, weekly, monthly, custom, or disabled
+	// +kubebuilder:default="daily"
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// CronExpression defines custom cron schedule (e.g. "0 2 * * *")
+	// +optional
+	CronExpression string `json:"cronExpression,omitempty"`
+
+	// RetentionCount defines how many backups to keep before pruning (default: 7)
+	// +kubebuilder:default=7
+	// +optional
+	RetentionCount int `json:"retentionCount,omitempty"`
+
+	// StorageSize defines the PVC storage size allocated for backups (default: "10Gi")
+	// +kubebuilder:default="10Gi"
+	// +optional
+	StorageSize string `json:"storageSize,omitempty"`
+
+	// InitialBackupRestore specifies a snapshot identifier to seed etcd on provisioning
+	// +optional
+	InitialBackupRestore string `json:"initialBackupRestore,omitempty"`
+
+	// RestoreSnapshotName specifies an existing snapshot to restore onto this cluster
+	// +optional
+	RestoreSnapshotName string `json:"restoreSnapshotName,omitempty"`
+}
+
+// BackupItem represents a recorded etcd snapshot
+type BackupItem struct {
+	Name          string      `json:"name"`
+	Filename      string      `json:"filename"`
+	Timestamp     metav1.Time `json:"timestamp"`
+	Size          string      `json:"size"`
+	SizeBytes     int64       `json:"sizeBytes"`
+	Status        string      `json:"status"` // Completed, Failed, InProgress
+	ClusterOrigin string      `json:"clusterOrigin"`
+	EtcdVersion   string      `json:"etcdVersion,omitempty"`
+}
+
+// DisasterRecoveryStatus reflects the observed backup and restore state
+type DisasterRecoveryStatus struct {
+	Enabled        bool         `json:"enabled"`
+	Schedule       string       `json:"schedule,omitempty"`
+	CronExpression string       `json:"cronExpression,omitempty"`
+	LastBackupTime *metav1.Time `json:"lastBackupTime,omitempty"`
+	NextBackupTime *metav1.Time `json:"nextBackupTime,omitempty"`
+	BackupsCount   int          `json:"backupsCount"`
+	TotalSizeBytes int64        `json:"totalSizeBytes"`
+	TotalSizeStr   string       `json:"totalSizeStr,omitempty"`
+	BackupsPvcName string       `json:"backupsPvcName,omitempty"`
+	RecentBackups  []BackupItem `json:"recentBackups,omitempty"`
+}
+
 // QuotaStatus tracks observed hard limits and current resource usage
 type QuotaStatus struct {
 	Hard map[string]string `json:"hard,omitempty"`
@@ -347,6 +420,10 @@ type VirtualClusterSpec struct {
 	// Policies controls governance policies (ResourceQuota, LimitRange)
 	// +optional
 	Policies *PoliciesSpec `json:"policies,omitempty"`
+
+	// DisasterRecovery controls automated etcd backups and recovery
+	// +optional
+	DisasterRecovery *DisasterRecoverySpec `json:"disasterRecovery,omitempty"`
 
 	// RawConfig provides direct passthrough overrides into the vCluster 0.36 vcluster.yaml schema
 	// +optional
@@ -414,6 +491,10 @@ type VirtualClusterStatus struct {
 	// ComponentVersions reflects the active versions of core infrastructure and add-ons
 	// +optional
 	ComponentVersions *ComponentVersionsStatus `json:"componentVersions,omitempty"`
+
+	// DisasterRecovery reflects the observed backup and restore state
+	// +optional
+	DisasterRecovery *DisasterRecoveryStatus `json:"disasterRecovery,omitempty"`
 
 	// ObservedGeneration is the most recent generation observed by the controller
 	// +optional

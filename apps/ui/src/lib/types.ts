@@ -109,6 +109,40 @@ export interface OidcRegistry {
   groups: Record<string, OidcProfile>;
 }
 
+export interface DisasterRecoverySpec {
+  enabled?: boolean;
+  schedule?: 'daily' | 'weekly' | 'monthly' | 'custom' | 'disabled' | string;
+  cronExpression?: string;
+  retentionCount?: number;
+  storageSize?: string;
+  initialBackupRestore?: string;
+  restoreSnapshotName?: string;
+}
+
+export interface BackupItem {
+  name: string;
+  filename: string;
+  timestamp: string;
+  size: string;
+  sizeBytes: number;
+  status: 'Completed' | 'InProgress' | 'Failed' | string;
+  clusterOrigin: string;
+  etcdVersion?: string;
+}
+
+export interface DisasterRecoveryStatus {
+  enabled: boolean;
+  schedule?: string;
+  cronExpression?: string;
+  lastBackupTime?: string;
+  nextBackupTime?: string;
+  backupsCount: number;
+  totalSizeBytes: number;
+  totalSizeStr?: string;
+  backupsPvcName?: string;
+  recentBackups: BackupItem[];
+}
+
 export interface VirtualCluster {
   name: string;
   namespace: string;
@@ -153,6 +187,7 @@ export interface VirtualCluster {
       memory?: string;
       storage?: string;
     };
+    disasterRecovery?: DisasterRecoverySpec;
     rawConfig?: any;
     helmValues?: any;
     customEndpoint?: string;
@@ -174,8 +209,9 @@ export interface VirtualCluster {
       metricsServer?: string;
       istio?: string;
     };
+    disasterRecovery?: DisasterRecoveryStatus;
   };
-    metadata?: {
+  metadata?: {
     owner?: string;
     allowedGroups?: string[];
     allowedEmails?: string[];

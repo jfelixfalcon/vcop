@@ -26,8 +26,12 @@ import {
   Globe,
   AlertOctagon,
   ShieldCheck,
+  ShieldAlert,
+  RotateCcw,
+  History,
+  HardDriveDownload,
 } from 'lucide-react';
-import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry, ClusterCapacityData } from '../lib/types';
+import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry, ClusterCapacityData, BackupItem } from '../lib/types';
 import { PRESETS } from '../lib/presets';
 import { parseCpuMillis, parseMemoryBytes, formatCpuMillis, formatMemoryBytes } from '../lib/metrics-utils';
 
@@ -96,6 +100,33 @@ export const ProvisioningWizard: React.FC = () => {
 
   const [clusterCapacity, setClusterCapacity] = useState<ClusterCapacityData | null>(null);
   const [ignoreCapacityCheck, setIgnoreCapacityCheck] = useState<boolean>(false);
+
+  // Disaster Recovery & Restore on Provisioning
+  const [deploymentMode, setDeploymentMode] = useState<'clean' | 'restore'>('clean');
+  const [availableBackups, setAvailableBackups] = useState<BackupItem[]>([]);
+  const [loadingBackups, setLoadingBackups] = useState<boolean>(false);
+  const [selectedRestoreSnapshot, setSelectedRestoreSnapshot] = useState<string>('');
+  const [enableBackup, setEnableBackup] = useState<boolean>(true);
+  const [backupSchedule, setBackupSchedule] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [backupRetention, setBackupRetention] = useState<number>(7);
+
+  useEffect(() => {
+    if (deploymentMode === 'restore') {
+      setLoadingBackups(true);
+      fetch('/api/backups')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && Array.isArray(data.data)) {
+            setAvailableBackups(data.data);
+            if (data.data.length > 0 && !selectedRestoreSnapshot) {
+              setSelectedRestoreSnapshot(data.data[0].filename || data.data[0].name);
+            }
+          }
+        })
+        .catch((e) => console.warn('Failed loading backups in wizard:', e))
+        .finally(() => setLoadingBackups(false));
+    }
+  }, [deploymentMode]);
 
   useEffect(() => {
     fetch('/api/cluster/capacity')
@@ -297,6 +328,14 @@ export const ProvisioningWizard: React.FC = () => {
         customYaml: customYaml.trim() ? customYaml : undefined,
         customCaCert: customCaCert.trim() || undefined,
         customCaSecret: customCaSecret.trim() || undefined,
+        disasterRecovery: {
+          enabled: enableBackup,
+          schedule: backupSchedule,
+          retentionCount: backupRetention,
+          storageSize: '10Gi',
+          initialBackupRestore: deploymentMode === 'restore' ? (selectedRestoreSnapshot.trim() || undefined) : undefined,
+        },
+        initialBackupRestore: deploymentMode === 'restore' ? (selectedRestoreSnapshot.trim() || undefined) : undefined,
         istio: enableIstio
           ? {
               enabled: true,
@@ -480,6 +519,106 @@ policies:
               <p className="text-xs text-slate-400 mt-1">
                 Name your isolated virtual Kubernetes environment and specify team ownership.
               </p>
+            </div>
+
+            {/* Deployment Mode: Clean Instance vs Restore from DR Backup */}
+            <div className="p-4 bg-cyber-950/70 border border-cyber-850 rounded-2xl space-y-3">
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                Deployment Mode
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeploymentMode('clean')}
+                  className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 ${
+                    deploymentMode === 'clean'
+                      ? 'bg-cyber-500/10 border-cyber-accent text-white shadow-sm'
+                      : 'bg-cyber-900/60 border-cyber-800 text-slate-400 hover:text-slate-200 hover:border-cyber-700'
+                  }`}
+                >
+                  <div className={`p-2 rounded-lg ${deploymentMode === 'clean' ? 'bg-cyber-accent/20 text-cyber-accent' : 'bg-slate-800 text-slate-400'}`}>
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center justify-between">
+                      Clean Instance
+                      {deploymentMode === 'clean' && <Check className="w-3.5 h-3.5 text-cyber-accent" />}
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                      Deploy a brand-new vcluster with fresh etcd state
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeploymentMode('restore')}
+                  className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 ${
+                    deploymentMode === 'restore'
+                      ? 'bg-amber-500/10 border-amber-500 text-white shadow-sm'
+                      : 'bg-cyber-900/60 border-cyber-800 text-slate-400 hover:text-slate-200 hover:border-cyber-700'
+                  }`}
+                >
+                  <div className={`p-2 rounded-lg ${deploymentMode === 'restore' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-400'}`}>
+                    <RotateCcw className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center justify-between">
+                      Restore from Backup
+                      {deploymentMode === 'restore' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                      Seed cluster state from verified disaster recovery snapshot
+                    </p>
+                  </div>
+                </button>
+              </div>
+
+              {deploymentMode === 'restore' && (
+                <div className="mt-3 p-3.5 bg-cyber-900/80 border border-amber-500/30 rounded-xl space-y-2.5 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5 font-mono">
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Select Snapshot to Restore
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {loadingBackups ? 'Querying fleet backups...' : `${availableBackups.length} snapshots available`}
+                    </span>
+                  </div>
+
+                  {availableBackups.length > 0 ? (
+                    <div className="space-y-2">
+                      <select
+                        value={selectedRestoreSnapshot}
+                        onChange={(e) => setSelectedRestoreSnapshot(e.target.value)}
+                        className="w-full bg-cyber-950 border border-cyber-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
+                      >
+                        {availableBackups.map((b) => (
+                          <option key={b.filename || b.name} value={b.filename || b.name}>
+                            {b.filename || b.name} — ({b.clusterOrigin}, {b.size || '5.8 MB'}, {new Date(b.timestamp).toLocaleDateString()})
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        The new cluster will initialize its etcd backing store from this snapshot before serving API requests.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={selectedRestoreSnapshot}
+                        onChange={(e) => setSelectedRestoreSnapshot(e.target.value)}
+                        placeholder="e.g. vc-dev-snapshot-latest.db or specific-snapshot.db"
+                        className="w-full bg-cyber-950 border border-cyber-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
+                      />
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        Specify snapshot file name to restore from shared DR storage.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="space-y-4">
@@ -1416,6 +1555,62 @@ policies:
                     </span>
                   </div>
                 </div>
+              </div>
+
+              {/* Disaster Recovery & Automated Backups */}
+              <div className="p-4 bg-cyber-950/70 border border-cyber-800 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    Disaster Recovery & Backup Protection
+                  </span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enableBackup}
+                      onChange={(e) => setEnableBackup(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                  </label>
+                </div>
+
+                {enableBackup ? (
+                  <div className="space-y-3 pt-1">
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { id: 'daily', label: 'Daily (02:00 UTC)' },
+                        { id: 'weekly', label: 'Weekly (Sunday)' },
+                        { id: 'monthly', label: 'Monthly (1st)' },
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setBackupSchedule(item.id as any)}
+                          className={`py-2 px-2.5 rounded-xl text-xs font-mono border text-center transition-all ${
+                            backupSchedule === item.id
+                              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 font-semibold'
+                              : 'bg-cyber-900 border-cyber-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-400 pt-1 border-t border-cyber-850">
+                      <span>Safe PVC: <strong className="text-purple-300">{clusterName ? `${clusterName.trim().toLowerCase()}-etcd-backups` : 'cluster-etcd-backups'} (10Gi)</strong></span>
+                      <span>Retention: <strong className="text-cyan-300">Keep {backupRetention} snapshots</strong></span>
+                      {deploymentMode === 'restore' && selectedRestoreSnapshot && (
+                        <span className="w-full text-amber-300 bg-amber-500/10 border border-amber-500/30 p-1.5 rounded-lg">
+                          Initial Restore: <strong className="font-mono">{selectedRestoreSnapshot}</strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 italic">Automated backups disabled. Cluster will run without scheduled snapshots.</p>
+                )}
               </div>
             </div>
 

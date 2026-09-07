@@ -60,6 +60,20 @@ rules:
       - patch
       - update
       - watch
+  # Batch resources (Jobs & CronJobs for etcd Disaster Recovery backups)
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
   # RBAC management for managed vClusters
   - apiGroups:
       - rbac.authorization.k8s.io

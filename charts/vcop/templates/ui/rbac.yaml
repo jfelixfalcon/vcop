@@ -20,7 +20,7 @@ rules:
       - patch
       - update
       - watch
-  # Core resources for reading secrets (kubeconfigs), configmaps, pods, services, nodes
+  # Core resources for reading secrets (kubeconfigs), configmaps, pods, services, nodes, PVCs
   - apiGroups:
       - ""
     resources:
@@ -29,9 +29,27 @@ rules:
       - pods
       - services
       - nodes
+      - persistentvolumeclaims
     verbs:
+      - create
+      - delete
       - get
       - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
       - watch
   - apiGroups:
       - ""

@@ -2,7 +2,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig, K8sEvent, ClusterCapacityData, VClusterCapacityItem } from './types';
+import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig, K8sEvent, ClusterCapacityData, VClusterCapacityItem, DisasterRecoverySpec, DisasterRecoveryStatus, BackupItem } from './types';
 import { getAppStoreCatalog } from './appstore';
 import { PRESETS } from './presets';
 import { syncGuestClusterRBAC } from './cluster-rbac';
@@ -313,6 +313,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       },
       policies: spec.policies,
       customResources: spec.customResources,
+      disasterRecovery: spec.disasterRecovery,
       rawConfig: spec.rawConfig,
       helmValues: spec.helmValues,
       customEndpoint,
@@ -333,6 +334,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
         memPercent,
       },
       quota: status.quota,
+      disasterRecovery: status.disasterRecovery,
       observedGeneration: status.observedGeneration,
       createdAt: item.metadata?.creationTimestamp,
     },
@@ -462,6 +464,8 @@ export async function createVirtualCluster(data: {
   policies?: PoliciesSpec;
   customResources?: { cpu?: string; memory?: string; storage?: string };
   ignoreCapacityCheck?: boolean;
+  disasterRecovery?: DisasterRecoverySpec;
+  initialBackupRestore?: string;
   customYaml?: string;
   installedApps?: Array<{ appId: string; customValues?: string }>;
   customEndpoint?: string;
@@ -564,6 +568,9 @@ export async function createVirtualCluster(data: {
     annotations['vops.gitops.io/allowed-emails'] = data.allowedEmails.join(',');
   }
 
+  if (data.initialBackupRestore) {
+    annotations['vops.gitops.io/restored-from'] = data.initialBackupRestore;
+  }
   if (data.customEndpoint) {
     annotations['vops.gitops.io/custom-endpoint'] = data.customEndpoint.trim();
   }
@@ -665,8 +672,19 @@ export async function createVirtualCluster(data: {
         ttlHours: data.ttlHours ?? 0,
       },
       policies: data.policies,
+      disasterRecovery: data.disasterRecovery || {
+        enabled: true,
+        schedule: 'daily',
+        retentionCount: 7,
+        storageSize: '10Gi',
+        initialBackupRestore: data.initialBackupRestore,
+      },
     },
   };
+
+  if (data.initialBackupRestore && body.spec.disasterRecovery) {
+    body.spec.disasterRecovery.initialBackupRestore = data.initialBackupRestore;
+  }
 
   if (data.customYaml && data.customYaml.trim()) {
     try {
@@ -1837,6 +1855,225 @@ export async function getHostClusterCapacity(): Promise<ClusterCapacityData> {
     isStorageOverallocated: requestedStorageBytes > allocatableStorageBytes,
     vclusters,
   };
+}
+
+export async function triggerEtcdBackup(clusterName: string, namespace?: string): Promise<{ success: boolean; jobName: string }> {
+  const all = await listVirtualClusters();
+  const cluster = all.find((c) => c.name === clusterName);
+  const targetNs = namespace || (cluster ? cluster.namespace : (clusterName === 'team-alpha-dev' ? 'default' : clusterName));
+  const jobName = `${clusterName}-etcd-backup-manual-${Date.now()}`;
+  const retentionCount = cluster?.spec?.disasterRecovery?.retentionCount || 7;
+
+  const jobManifest = {
+    apiVersion: 'batch/v1',
+    kind: 'Job',
+    metadata: {
+      name: jobName,
+      namespace: targetNs,
+      labels: {
+        'app.kubernetes.io/name': 'vcluster-etcd-backup',
+        'app.kubernetes.io/instance': clusterName,
+        'app.kubernetes.io/managed-by': 'vc-operator',
+        'vops.gitops.io/cluster': clusterName,
+        'vops.gitops.io/backup-type': 'manual',
+      },
+    },
+    spec: {
+      backoffLimit: 2,
+      ttlSecondsAfterFinished: 86400,
+      template: {
+        metadata: {
+          labels: {
+            'app.kubernetes.io/name': 'vcluster-etcd-backup',
+            'app.kubernetes.io/instance': clusterName,
+            'app.kubernetes.io/managed-by': 'vc-operator',
+            'vops.gitops.io/cluster': clusterName,
+          },
+        },
+        spec: {
+          restartPolicy: 'Never',
+          containers: [
+            {
+              name: 'etcd-backup',
+              image: 'vops/etcd-dr-runner:v1.3.0',
+              imagePullPolicy: 'IfNotPresent',
+              command: ['/scripts/backup.sh'],
+              env: [
+                { name: 'CLUSTER_NAME', value: clusterName },
+                { name: 'ETCD_ENDPOINT', value: `https://${clusterName}-etcd:2379` },
+                { name: 'CACERT', value: '/run/config/pki/etcd-ca.crt' },
+                { name: 'CERT', value: '/run/config/pki/etcd-server.crt' },
+                { name: 'KEY', value: '/run/config/pki/etcd-server.key' },
+                { name: 'RETENTION_COUNT', value: String(retentionCount) },
+              ],
+              volumeMounts: [
+                { name: 'backups', mountPath: '/backup' },
+                { name: 'shared-backups', mountPath: '/shared-backups' },
+                { name: 'certs', mountPath: '/run/config/pki', readOnly: true },
+              ],
+            },
+          ],
+          volumes: [
+            {
+              name: 'backups',
+              persistentVolumeClaim: { claimName: `${clusterName}-etcd-backups` },
+            },
+            {
+              name: 'shared-backups',
+              hostPath: { path: '/tmp/vcop-dr-backups', type: 'DirectoryOrCreate' },
+            },
+            {
+              name: 'certs',
+              secret: { secretName: `${clusterName}-certs` },
+            },
+          ],
+        },
+      },
+    },
+  };
+
+  const res = await k8sRequest<any>(
+    `/apis/batch/v1/namespaces/${targetNs}/jobs`,
+    'POST',
+    jobManifest
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    // Reconcile trigger
+    await k8sRequest<any>(
+      `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${clusterName}`,
+      'PATCH',
+      {
+        metadata: {
+          annotations: {
+            'vops.gitops.io/reconcile-trigger': Date.now().toString(),
+          },
+        },
+      },
+      'application/merge-patch+json'
+    ).catch(() => {});
+
+    return { success: true, jobName };
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to trigger backup job: HTTP ${res.statusCode}`);
+}
+
+export async function updateDisasterRecovery(
+  clusterName: string,
+  drSpec: DisasterRecoverySpec,
+  namespace?: string
+): Promise<VirtualCluster | null> {
+  const all = await listVirtualClusters();
+  const currentCluster = all.find((c) => c.name === clusterName);
+  const targetNs = namespace || (currentCluster ? currentCluster.namespace : (clusterName === 'team-alpha-dev' ? 'default' : clusterName));
+
+  const patch = {
+    metadata: {
+      annotations: {
+        'vops.gitops.io/reconcile-trigger': Date.now().toString(),
+      },
+    },
+    spec: {
+      disasterRecovery: drSpec,
+    },
+  };
+
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${clusterName}`,
+    'PATCH',
+    patch,
+    'application/merge-patch+json'
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to update disaster recovery spec: HTTP ${res.statusCode}`);
+}
+
+export async function restoreEtcdSnapshot(
+  clusterName: string,
+  snapshotName: string,
+  namespace?: string
+): Promise<VirtualCluster | null> {
+  const all = await listVirtualClusters();
+  const currentCluster = all.find((c) => c.name === clusterName);
+  const targetNs = namespace || (currentCluster ? currentCluster.namespace : (clusterName === 'team-alpha-dev' ? 'default' : clusterName));
+
+  const patch = {
+    metadata: {
+      annotations: {
+        'vops.gitops.io/reconcile-trigger': Date.now().toString(),
+        'vops.gitops.io/restore-snapshot': snapshotName,
+        'vops.gitops.io/restored-at': new Date().toISOString(),
+      },
+    },
+    spec: {
+      disasterRecovery: {
+        ...(currentCluster?.spec?.disasterRecovery || { enabled: true, schedule: 'daily' }),
+        restoreSnapshotName: snapshotName,
+      },
+    },
+  };
+
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${clusterName}`,
+    'PATCH',
+    patch,
+    'application/merge-patch+json'
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    // Also restart StatefulSet pods to initiate restore immediately
+    await k8sRequest<any>(
+      `/apis/apps/v1/namespaces/${targetNs}/statefulsets/${clusterName}-etcd`,
+      'PATCH',
+      {
+        spec: {
+          template: {
+            metadata: {
+              annotations: {
+                'kubectl.kubernetes.io/restartedAt': new Date().toISOString(),
+                'vops.gitops.io/restore-snapshot': snapshotName,
+              },
+            },
+          },
+        },
+      },
+      'application/merge-patch+json'
+    ).catch(() => {});
+
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to trigger snapshot restore: HTTP ${res.statusCode}`);
+}
+
+export async function listFleetBackups(): Promise<BackupItem[]> {
+  const all = await listVirtualClusters();
+  const backupsMap = new Map<string, BackupItem>();
+
+  for (const c of all) {
+    const clusterBackups = c.status?.disasterRecovery?.recentBackups || [];
+    for (const b of clusterBackups) {
+      const key = `${b.clusterOrigin || c.name}-${b.name || b.filename}`;
+      if (!backupsMap.has(key)) {
+        backupsMap.set(key, {
+          ...b,
+          clusterOrigin: b.clusterOrigin || c.name,
+          etcdVersion: b.etcdVersion || c.spec?.etcdVersion || '3.6.8-0',
+        });
+      }
+    }
+  }
+
+  return Array.from(backupsMap.values()).sort((a, b) => {
+    const tA = new Date(a.timestamp).getTime() || 0;
+    const tB = new Date(b.timestamp).getTime() || 0;
+    return tB - tA;
+  });
 }
 
 

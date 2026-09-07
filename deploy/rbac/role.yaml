@@ -79,6 +79,20 @@ rules:
       - get
       - list
       - watch
+  # Batch resources (Jobs & CronJobs for etcd Disaster Recovery backups)
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
   # Events
   - apiGroups:
       - ""
@@ -107,9 +121,23 @@ rules:
       - update
       - watch
   - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+      - jobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
       - ""
     resources:
       - configmaps
+      - persistentvolumeclaims
     verbs:
       - create
       - delete

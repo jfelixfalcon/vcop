@@ -157,6 +157,100 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 	}
 	etcdImage := fmt.Sprintf("registry.k8s.io/etcd:%s", etcdVer)
 
+	var volumes []corev1.Volume
+	volumes = append(volumes, corev1.Volume{
+		Name: "certs",
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: fmt.Sprintf("%s-certs", vc.Name),
+			},
+		},
+	})
+
+	var initContainers []corev1.Container
+	// If Backups PVC exists or disaster recovery is configured, attach backups volume and add restore initContainer
+	pvcName := fmt.Sprintf("%s-etcd-backups", vc.Name)
+	existingPvc := &corev1.PersistentVolumeClaim{}
+	pvcExists := r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: vc.Namespace}, existingPvc) == nil
+	drConfigured := vc.Spec.DisasterRecovery != nil && (vc.Spec.DisasterRecovery.Enabled || vc.Spec.DisasterRecovery.InitialBackupRestore != "")
+
+	if pvcExists || drConfigured {
+		hostPathDirOrCreate := corev1.HostPathDirectoryOrCreate
+		volumes = append(volumes,
+			corev1.Volume{
+				Name: "backups",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: pvcName,
+					},
+				},
+			},
+			corev1.Volume{
+				Name: "shared-backups",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: "/tmp/vcop-dr-backups",
+						Type: &hostPathDirOrCreate,
+					},
+				},
+			},
+		)
+
+		snapshotFile := ""
+		forceRestore := false
+		if vc.Spec.DisasterRecovery != nil {
+			if vc.Spec.DisasterRecovery.RestoreSnapshotName != "" {
+				snapshotFile = fmt.Sprintf("/backup/%s", vc.Spec.DisasterRecovery.RestoreSnapshotName)
+				forceRestore = true
+			} else if vc.Spec.DisasterRecovery.InitialBackupRestore != "" {
+				parts := strings.Split(vc.Spec.DisasterRecovery.InitialBackupRestore, "/")
+				snapshotFile = fmt.Sprintf("/backup/%s", parts[len(parts)-1])
+			}
+		}
+
+		initContainers = append(initContainers, corev1.Container{
+			Name:            "etcd-restore-init",
+			Image:           "vops/etcd-dr-runner:v1.3.0",
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Command:         []string{"/scripts/restore.sh"},
+			Env: []corev1.EnvVar{
+				{
+					Name: "MEMBER_NAME",
+					ValueFrom: &corev1.EnvVarSource{
+						FieldRef: &corev1.ObjectFieldSelector{
+							FieldPath: "metadata.name",
+						},
+					},
+				},
+				{Name: "CLUSTER_NAME", Value: vc.Spec.ClusterName},
+				{Name: "INITIAL_CLUSTER", Value: initialClusterStr},
+				{Name: "INITIAL_CLUSTER_TOKEN", Value: vc.Name},
+				{Name: "INITIAL_ADVERTISE_PEER_URLS", Value: fmt.Sprintf("https://$(MEMBER_NAME).%s.%s:2380", headlessSvc.Name, vc.Namespace)},
+				{Name: "SNAPSHOT_FILE", Value: snapshotFile},
+				{Name: "FORCE_RESTORE", Value: fmt.Sprintf("%t", forceRestore)},
+			},
+			VolumeMounts: []corev1.VolumeMount{
+				{
+					Name:      "data",
+					MountPath: "/var/lib/etcd",
+				},
+				{
+					Name:      "backups",
+					MountPath: "/backup",
+				},
+				{
+					Name:      "shared-backups",
+					MountPath: "/shared-backups",
+				},
+			},
+		})
+	}
+
+	podAnnotations := make(map[string]string)
+	if vc.Spec.DisasterRecovery != nil && vc.Spec.DisasterRecovery.RestoreSnapshotName != "" {
+		podAnnotations["vops.gitops.io/restore-snapshot"] = vc.Spec.DisasterRecovery.RestoreSnapshotName
+	}
+
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-etcd", vc.Name),
@@ -172,7 +266,8 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      labels,
+					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -272,16 +367,8 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 							},
 						},
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "certs",
-							VolumeSource: corev1.VolumeSource{
-								Secret: &corev1.SecretVolumeSource{
-									SecretName: fmt.Sprintf("%s-certs", vc.Name),
-								},
-							},
-						},
-					},
+					InitContainers: initContainers,
+					Volumes:        volumes,
 				},
 			},
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
@@ -330,6 +417,7 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 		needsUpdate = true
 	}
 	if !reflect.DeepEqual(existingSts.Spec.Template.Spec.Containers, sts.Spec.Template.Spec.Containers) ||
+		!reflect.DeepEqual(existingSts.Spec.Template.Spec.InitContainers, sts.Spec.Template.Spec.InitContainers) ||
 		!reflect.DeepEqual(existingSts.Spec.Template.Spec.Volumes, sts.Spec.Template.Spec.Volumes) {
 		existingSts.Spec.Template = sts.Spec.Template
 		needsUpdate = true

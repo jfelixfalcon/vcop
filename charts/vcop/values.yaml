@@ -162,3 +162,15 @@ metricsDb:
     user: "vcop"
     password: "vcop-metrics-db-pass-2026"
 
+# Disaster Recovery & Automated etcd Backup Engine
+disasterRecovery:
+  enabled: true
+  runnerImage:
+    repository: vops/etcd-dr-runner
+    tag: v1.3.0
+    pullPolicy: IfNotPresent
+  defaultSchedule: "daily"
+  defaultRetentionCount: 7
+  defaultStorageSize: "10Gi"
+
+
