@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
 	"time"
 
@@ -64,8 +65,21 @@ func (r *AddonsReconciler) GetVirtualClusterClients(ctx context.Context, vc *v1a
 		return nil, nil, fmt.Errorf("failed creating RESTConfig: %w", err)
 	}
 
-	// Route directly via Kubernetes internal cluster service
-	restConfig.Host = fmt.Sprintf("https://%s.%s.svc:443", vc.Name, vc.Namespace)
+	// Route directly via Kubernetes internal cluster service DNS
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		restConfig.Host = fmt.Sprintf("https://%s.%s.svc.cluster.local:443", vc.Name, vc.Namespace)
+	} else if len(cfgBytes) > 0 {
+		if rawCfg, err := clientcmd.Load(cfgBytes); err == nil {
+			for _, c := range rawCfg.Clusters {
+				if c.Server != "" {
+					restConfig.Host = c.Server
+					break
+				}
+			}
+		}
+	} else {
+		restConfig.Host = fmt.Sprintf("https://%s.%s.svc.cluster.local:443", vc.Name, vc.Namespace)
+	}
 	restConfig.Insecure = true
 	restConfig.CAData = nil
 	restConfig.CAFile = ""

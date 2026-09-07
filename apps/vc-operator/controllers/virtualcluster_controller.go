@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -32,8 +33,9 @@ const (
 // VirtualClusterReconciler reconciles a VirtualCluster object
 type VirtualClusterReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log      logr.Logger
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 
 	EtcdReconciler       *EtcdReconciler
 	SyncerReconciler     *SyncerReconciler
@@ -42,6 +44,7 @@ type VirtualClusterReconciler struct {
 	UpgradeManager       *UpgradeManager
 	QuotaReconciler      *QuotaReconciler
 	RBACReconciler       *RBACReconciler
+	IstioReconciler      *IstioReconciler
 }
 
 // +kubebuilder:rbac:groups=vops.gitops.io,resources=virtualclusters,verbs=get;list;watch;create;update;patch;delete
@@ -63,6 +66,8 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	log.Info("Starting reconciliation cycle", "cluster", vc.Name, "namespace", vc.Namespace, "currentPhase", vc.Status.Phase, "generation", vc.Generation)
+
 	if r.EtcdReconciler == nil {
 		r.EtcdReconciler = NewEtcdReconciler(r.Client)
 	}
@@ -83,6 +88,9 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	if r.RBACReconciler == nil {
 		r.RBACReconciler = NewRBACReconciler(r.Client)
+	}
+	if r.IstioReconciler == nil {
+		r.IstioReconciler = NewIstioReconciler(r.Client, r.AddonsReconciler)
 	}
 
 	// 1. Handle Finalizer & Deletion
@@ -232,16 +240,45 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			log.Error(err, "failed reconciling guest cluster RBAC")
 			r.setCondition(&vc, v1alpha1.ConditionRBACReady, metav1.ConditionFalse, "RBACReconcileFailed", err.Error())
 		} else {
+			rbacReady = true
 			r.setCondition(&vc, v1alpha1.ConditionRBACReady, metav1.ConditionTrue, "RBACConfigured", "Guest cluster RBAC role bindings successfully reconciled")
 		}
 	} else {
 		r.setCondition(&vc, v1alpha1.ConditionRBACReady, metav1.ConditionFalse, "WaitingForControlPlane", "RBAC delegation awaiting control plane and kubeconfig readiness")
 	}
 
-	// 9. Update Observed Versions & Final Phase
+	// 9. Reconcile Opinionated Application Entrypoint (Istio & TLS)
+	var istioReady bool = true
+	if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Enabled {
+		if !kubeconfigReady {
+			r.setCondition(&vc, v1alpha1.ConditionIstioReady, metav1.ConditionFalse, "WaitingForControlPlane", "Istio ingress awaiting control plane readiness")
+			istioReady = false
+		} else {
+			ready, err := r.IstioReconciler.ReconcileIstio(ctx, &vc)
+			if err != nil {
+				log.Error(err, "failed reconciling opinionated Istio entrypoint")
+				r.setCondition(&vc, v1alpha1.ConditionIstioReady, metav1.ConditionFalse, "IstioReconcileFailed", err.Error())
+				// Abort deployment and mark Degraded if issuer does not exist or validation failed
+				vc.Status.Phase = v1alpha1.PhaseDegraded
+				_ = r.Status().Update(ctx, &vc)
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+			}
+			istioReady = ready
+			if ready {
+				r.setCondition(&vc, v1alpha1.ConditionIstioReady, metav1.ConditionTrue, "IstioConfigured", "Istio control plane, ingress gateway, and VirtualService entrypoint are active")
+			} else {
+				r.setCondition(&vc, v1alpha1.ConditionIstioReady, metav1.ConditionFalse, "IstioStarting", "Istio ingress rollout in progress")
+			}
+		}
+	}
+
+	log.Info("Component status", "cluster", vc.Name, "etcd", etcdReady, "syncer", syncerReady, "kubeconfig", kubeconfigReady, "addons", addonsReady, "quota", quotaReady, "rbac", rbacReady, "istio", istioReady)
+
+	// 10. Update Observed Versions & Final Phase
+	previousPhase := vc.Status.Phase
 	if isSleeping {
 		vc.Status.Phase = v1alpha1.PhaseSleeping
-	} else if etcdReady && syncerReady && addonsReady && quotaReady && rbacReady {
+	} else if etcdReady && syncerReady && addonsReady && quotaReady && rbacReady && istioReady {
 		targetK8s := vc.Spec.KubernetesVersion
 		if targetK8s == "" {
 			targetK8s = "v1.31.0"
@@ -254,6 +291,33 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		vc.Status.VirtualK8sVersion = targetK8s
 		vc.Status.VClusterVersion = targetVCluster
 		vc.Status.Phase = v1alpha1.PhaseReady
+		if previousPhase != v1alpha1.PhaseReady {
+			log.Info("Virtual cluster transitioned to Ready", "cluster", vc.Name, "previousPhase", previousPhase)
+			if r.Recorder != nil {
+				r.Recorder.Event(&vc, corev1.EventTypeNormal, "ClusterReady", "VirtualCluster control plane, addons, governance, and ingress are Active and Ready")
+			}
+		}
+	} else {
+		var pending []string
+		if !etcdReady {
+			pending = append(pending, "etcd")
+		}
+		if !syncerReady {
+			pending = append(pending, "syncer")
+		}
+		if !addonsReady {
+			pending = append(pending, "addons")
+		}
+		if !quotaReady {
+			pending = append(pending, "quota")
+		}
+		if !rbacReady {
+			pending = append(pending, "rbac")
+		}
+		if !istioReady {
+			pending = append(pending, "istio")
+		}
+		log.Info("Virtual cluster components syncing / pending", "cluster", vc.Name, "phase", vc.Status.Phase, "pending", pending)
 	}
 
 	if !isSleeping {
@@ -275,7 +339,7 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	requeueDuration := 30 * time.Second
-	if !isSleeping && (!addonsReady || !quotaReady || !rbacReady) {
+	if !isSleeping && (!addonsReady || !quotaReady || !rbacReady || !istioReady) {
 		requeueDuration = 10 * time.Second
 	}
 
@@ -467,6 +531,7 @@ func (r *VirtualClusterReconciler) wakeVirtualWorkloads(ctx context.Context, vc 
 }
 
 func (r *VirtualClusterReconciler) setCondition(vc *v1alpha1.VirtualCluster, condType string, status metav1.ConditionStatus, reason, message string) {
+	existing := meta.FindStatusCondition(vc.Status.Conditions, condType)
 	meta.SetStatusCondition(&vc.Status.Conditions, metav1.Condition{
 		Type:               condType,
 		Status:             status,
@@ -474,10 +539,18 @@ func (r *VirtualClusterReconciler) setCondition(vc *v1alpha1.VirtualCluster, con
 		Message:            message,
 		LastTransitionTime: metav1.Now(),
 	})
+	if r.Recorder != nil && (existing == nil || existing.Status != status || existing.Reason != reason) {
+		eventType := corev1.EventTypeNormal
+		if status == metav1.ConditionFalse && reason != "ClusterAwake" && reason != "AddonsDisabled" {
+			eventType = corev1.EventTypeWarning
+		}
+		r.Recorder.Event(vc, eventType, reason, message)
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.Recorder = mgr.GetEventRecorderFor("virtualcluster-controller")
 	r.EtcdReconciler = NewEtcdReconciler(mgr.GetClient())
 	r.SyncerReconciler = NewSyncerReconciler(mgr.GetClient())
 	r.KubeconfigReconciler = NewKubeconfigReconciler(mgr.GetClient())
@@ -485,6 +558,7 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.UpgradeManager = NewUpgradeManager(mgr.GetClient())
 	r.QuotaReconciler = NewQuotaReconciler(mgr.GetClient())
 	r.RBACReconciler = NewRBACReconciler(mgr.GetClient())
+	r.IstioReconciler = NewIstioReconciler(mgr.GetClient(), r.AddonsReconciler)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.VirtualCluster{}).

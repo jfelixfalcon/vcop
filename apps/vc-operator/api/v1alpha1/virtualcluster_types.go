@@ -42,6 +42,8 @@ const (
 	ConditionQuotaReady          = "QuotaReady"
 	ConditionSleeping            = "Sleeping"
 	ConditionRBACReady           = "RBACReady"
+	ConditionIstioReady          = "IstioReady"
+	ConditionCertificateReady    = "CertificateReady"
 )
 
 // CoreDNSComponent configures CoreDNS add-on inside vCluster
@@ -56,6 +58,49 @@ type MetricsServerComponent struct {
 	Enabled bool `json:"enabled"`
 }
 
+// IstioGatewayConfig defines ingress gateway settings
+type IstioGatewayConfig struct {
+	// +kubebuilder:default=true
+	Enabled bool `json:"enabled"`
+	// ServiceType defines Kubernetes service type for the gateway (LoadBalancer, ClusterIP, NodePort)
+	// +kubebuilder:default="LoadBalancer"
+	// +optional
+	ServiceType string `json:"serviceType,omitempty"`
+}
+
+// IstioComponent configures the opinionated Istio entrypoint and mesh stack
+type IstioComponent struct {
+	// Enabled deploys Istio (istiod + ingress gateway) as the application entrypoint
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled"`
+
+	// MeshEnabled enables service mesh sidecar injection (disabled by default)
+	// +kubebuilder:default=false
+	// +optional
+	MeshEnabled bool `json:"meshEnabled,omitempty"`
+
+	// IngressGateway configuration
+	// +optional
+	IngressGateway *IstioGatewayConfig `json:"ingressGateway,omitempty"`
+
+	// CertificateIssuer defines the cert-manager Issuer or ClusterIssuer name on the host cluster
+	// +optional
+	CertificateIssuer string `json:"certificateIssuer,omitempty"`
+
+	// CertificateIssuerKind defines Issuer or ClusterIssuer (default: ClusterIssuer)
+	// +kubebuilder:default="ClusterIssuer"
+	// +optional
+	CertificateIssuerKind string `json:"certificateIssuerKind,omitempty"`
+
+	// Hosts are the external hostnames for the Gateway and default VirtualService (defaults to cluster FQDN)
+	// +optional
+	Hosts []string `json:"hosts,omitempty"`
+
+	// CertSecretName overrides the TLS secret name (defaults to <clusterName>-ingress-tls)
+	// +optional
+	CertSecretName string `json:"certSecretName,omitempty"`
+}
+
 // ComponentsSpec defines embedded add-ons for the virtual cluster
 type ComponentsSpec struct {
 	// +kubebuilder:default={enabled: true}
@@ -65,6 +110,10 @@ type ComponentsSpec struct {
 	// +kubebuilder:default={enabled: true}
 	// +optional
 	MetricsServer MetricsServerComponent `json:"metricsServer,omitempty"`
+
+	// Istio configures the opinionated application entrypoint and service mesh stack
+	// +optional
+	Istio *IstioComponent `json:"istio,omitempty"`
 }
 
 // SyncSpec configures resource synchronization from vcluster to host

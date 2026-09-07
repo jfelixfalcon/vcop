@@ -6,7 +6,10 @@ import (
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestValidator_ValidateCreate(t *testing.T) {
@@ -89,5 +92,82 @@ func TestValidator_ValidateUpdate_DowngradesAndJumps(t *testing.T) {
 	changedNameVC.Spec.ClusterName = "different-name"
 	if err := v.ValidateUpdate(ctx, oldVC, changedNameVC); err == nil {
 		t.Fatalf("Expected error on clusterName modification, got nil")
+	}
+}
+
+func TestValidator_ValidateCreate_IstioCertManager(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Invalid issuer kind
+	vOffline := NewVirtualClusterValidator()
+	invalidKindVC := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "test-cluster",
+			Components: v1alpha1.ComponentsSpec{
+				Istio: &v1alpha1.IstioComponent{
+					Enabled:               true,
+					CertificateIssuer:     "my-issuer",
+					CertificateIssuerKind: "UnknownKind",
+				},
+			},
+		},
+	}
+	if err := vOffline.ValidateCreate(ctx, invalidKindVC); err == nil {
+		t.Fatal("expected error on unsupported CertificateIssuerKind, got nil")
+	}
+
+	// 2. Issuer missing on host cluster
+	scheme := runtime.NewScheme()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	vOnline := NewVirtualClusterValidator(fakeClient)
+
+	missingIssuerVC := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "test-cluster",
+			Components: v1alpha1.ComponentsSpec{
+				Istio: &v1alpha1.IstioComponent{
+					Enabled:               true,
+					CertificateIssuer:     "non-existent-issuer",
+					CertificateIssuerKind: "ClusterIssuer",
+				},
+			},
+		},
+	}
+	if err := vOnline.ValidateCreate(ctx, missingIssuerVC); err == nil {
+		t.Fatal("expected error when cert-manager issuer does not exist on host cluster, got nil")
+	}
+
+	// 3. Issuer exists on host cluster
+	issuerObj := &unstructured.Unstructured{}
+	issuerObj.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "cert-manager.io",
+		Version: "v1",
+		Kind:    "ClusterIssuer",
+	})
+	issuerObj.SetName("letsencrypt-prod")
+
+	fakeClientWithIssuer := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(issuerObj).
+		Build()
+	vOnlineValid := NewVirtualClusterValidator(fakeClientWithIssuer)
+
+	validIssuerVC := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "test-cluster",
+			Components: v1alpha1.ComponentsSpec{
+				Istio: &v1alpha1.IstioComponent{
+					Enabled:               true,
+					CertificateIssuer:     "letsencrypt-prod",
+					CertificateIssuerKind: "ClusterIssuer",
+				},
+			},
+		},
+	}
+	if err := vOnlineValid.ValidateCreate(ctx, validIssuerVC); err != nil {
+		t.Fatalf("expected valid issuer to pass, got: %v", err)
 	}
 }

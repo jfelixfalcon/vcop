@@ -1,0 +1,36 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: {{ .Values.gateway.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "vcluster-istio.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: istio-ingressgateway
+    istio: ingressgateway
+  servers:
+    # HTTP Port 80: Upgrade/Redirect to HTTPS 443
+    - port:
+        number: {{ .Values.gateway.http.port }}
+        name: http
+        protocol: HTTP
+      hosts:
+        {{- toYaml .Values.gateway.hosts | nindent 8 }}
+      {{- if .Values.gateway.http.upgradeToHttps }}
+      tls:
+        httpsRedirect: true
+      {{- end }}
+
+    # HTTPS Port 443: Terminate TLS using the Cert-Manager Secret
+    - port:
+        number: {{ .Values.gateway.https.port }}
+        name: https
+        protocol: HTTPS
+      hosts:
+        {{- toYaml .Values.gateway.hosts | nindent 8 }}
+      tls:
+        mode: SIMPLE
+        credentialName: {{ default .Values.certManager.secretName .Values.gateway.https.tlsSecretName }}
+{{- end }}

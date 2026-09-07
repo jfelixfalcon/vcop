@@ -1,0 +1,22 @@
+{{- if .Values.ingressGateway.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: istio-ingressgateway
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "vcluster-istio.labels" . | nindent 4 }}
+    app: istio-ingressgateway
+    istio: ingressgateway
+  {{- with .Values.ingressGateway.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.ingressGateway.service.type }}
+  selector:
+    app: istio-ingressgateway
+    istio: ingressgateway
+  ports:
+    {{- toYaml .Values.ingressGateway.service.ports | nindent 4 }}
+{{- end }}

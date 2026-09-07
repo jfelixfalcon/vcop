@@ -1,0 +1,24 @@
+{{- if and .Values.certManager.enabled .Values.certManager.issuerName }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ default "default-gateway-cert" .Values.certManager.secretName }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "vcluster-istio.labels" . | nindent 4 }}
+spec:
+  secretName: {{ default "default-gateway-cert" .Values.certManager.secretName }}
+  issuerRef:
+    name: {{ .Values.certManager.issuerName }}
+    kind: {{ default "ClusterIssuer" .Values.certManager.issuerKind }}
+  dnsNames:
+    {{- if .Values.certManager.dnsNames }}
+    {{- toYaml .Values.certManager.dnsNames | nindent 4 }}
+    {{- else }}
+    {{- range .Values.gateway.hosts }}
+    {{- if ne . "*" }}
+    - {{ . }}
+    {{- end }}
+    {{- end }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,83 @@
+{{- if .Values.ingressGateway.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: istio-ingressgateway
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "vcluster-istio.labels" . | nindent 4 }}
+    app: istio-ingressgateway
+    istio: ingressgateway
+spec:
+  replicas: {{ .Values.ingressGateway.replicaCount }}
+  selector:
+    matchLabels:
+      app: istio-ingressgateway
+      istio: ingressgateway
+  template:
+    metadata:
+      labels:
+        app: istio-ingressgateway
+        istio: ingressgateway
+        sidecar.istio.io/inject: "false"
+    spec:
+      serviceAccountName: istio-ingressgateway
+      containers:
+        - name: istio-proxy
+          image: "{{ .Values.ingressGateway.image.repository }}:{{ .Values.ingressGateway.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - "proxy"
+            - "router"
+            - "--domain"
+            - "$(POD_NAMESPACE).svc.cluster.local"
+            - "--proxyLogLevel=warning"
+            - "--proxyComponentLogLevel=misc:error"
+            - "--log_output_level=default:info"
+          ports:
+            - name: status-port
+              containerPort: 15021
+              protocol: TCP
+            - name: http2
+              containerPort: 8080
+              protocol: TCP
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          env:
+            - name: JWT_POLICY
+              value: third-party-jwt
+            - name: PILOT_CERT_PROVIDER
+              value: istiod
+            - name: CA_ADDR
+              value: istiod.{{ .Values.global.namespace }}.svc:15012
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: INSTANCE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SERVICE_ACCOUNT
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.serviceAccountName
+            - name: ISTIO_META_WORKLOAD_NAME
+              value: istio-ingressgateway
+            - name: ISTIO_META_OWNER
+              value: kubernetes://apis/apps/v1/namespaces/{{ .Values.global.namespace }}/deployments/istio-ingressgateway
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: 15021
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.ingressGateway.resources | nindent 12 }}
+{{- end }}

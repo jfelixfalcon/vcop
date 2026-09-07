@@ -1,0 +1,90 @@
+# Default values for vcluster-istio.
+# Opinionated Istio Ingress Gateway & Service Mesh entrypoint stack for vCluster.
+
+global:
+  hub: docker.io/istio
+  tag: 1.24.2
+  imagePullPolicy: IfNotPresent
+  namespace: istio-system
+
+# Service Mesh sidecar injection (disabled by default, option available)
+mesh:
+  enabled: false
+  autoInject: disabled
+  enableNamespacesByDefault: false
+
+# Istio Control Plane (istiod / pilot)
+istiod:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: docker.io/istio/pilot
+    tag: 1.24.2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+
+# Istio Ingress Gateway
+ingressGateway:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: docker.io/istio/proxyv2
+    tag: 1.24.2
+  service:
+    type: LoadBalancer
+    annotations: {}
+    ports:
+      - name: status-port
+        port: 15021
+        targetPort: 15021
+      - name: http2
+        port: 80
+        targetPort: 8080
+      - name: https
+        port: 443
+        targetPort: 8443
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+# Cert-Manager TLS Certificate integration
+certManager:
+  enabled: true
+  # Name of the ClusterIssuer or Issuer on the host cluster
+  issuerName: ""
+  issuerKind: ClusterIssuer # ClusterIssuer or Issuer
+  secretName: default-gateway-cert
+  dnsNames: []
+
+# Istio Gateway (HTTP 80 -> HTTPS 443 redirect, HTTPS 443 TLS)
+gateway:
+  enabled: true
+  name: default-gateway
+  hosts:
+    - "*"
+  http:
+    port: 80
+    upgradeToHttps: true
+  https:
+    port: 443
+    tlsSecretName: default-gateway-cert
+
+# Default VirtualService for the main entrypoint
+virtualService:
+  enabled: true
+  name: main-entrypoint
+  hosts:
+    - "*"
+  gateways:
+    - istio-system/default-gateway
+  defaultRoute:
+    enabled: true

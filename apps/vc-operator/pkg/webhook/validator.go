@@ -10,8 +10,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
 )
@@ -72,9 +75,14 @@ func CompareVersions(v1, v2 *ParsedVersion) int {
 }
 
 // VirtualClusterValidator validates VirtualCluster create and update requests
-type VirtualClusterValidator struct{}
+type VirtualClusterValidator struct {
+	Client client.Client
+}
 
-func NewVirtualClusterValidator() *VirtualClusterValidator {
+func NewVirtualClusterValidator(c ...client.Client) *VirtualClusterValidator {
+	if len(c) > 0 {
+		return &VirtualClusterValidator{Client: c[0]}
+	}
 	return &VirtualClusterValidator{}
 }
 
@@ -123,6 +131,31 @@ func (v *VirtualClusterValidator) ValidateCreate(ctx context.Context, vc *v1alph
 		errYAML := yaml.Unmarshal(vc.Spec.HelmValues.Raw, &dummy)
 		if (errJSON != nil && errYAML != nil) || dummy == nil {
 			allErrs = append(allErrs, field.Invalid(fldPath.Child("helmValues"), string(vc.Spec.HelmValues.Raw), "must be a valid JSON or YAML object mapping"))
+		}
+	}
+	// Validate Istio opinionated component & cert-manager issuer
+	if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Enabled {
+		istioPath := fldPath.Child("components", "istio")
+		issuerKind := vc.Spec.Components.Istio.CertificateIssuerKind
+		if issuerKind != "" && issuerKind != "ClusterIssuer" && issuerKind != "Issuer" {
+			allErrs = append(allErrs, field.NotSupported(istioPath.Child("certificateIssuerKind"), issuerKind, []string{"ClusterIssuer", "Issuer"}))
+		}
+
+		issuerName := strings.TrimSpace(vc.Spec.Components.Istio.CertificateIssuer)
+		if issuerName != "" && v.Client != nil {
+			u := &unstructured.Unstructured{}
+			var targetNamespace string
+			if strings.EqualFold(issuerKind, "Issuer") {
+				u.SetGroupVersionKind(schema.GroupVersionKind{Group: "cert-manager.io", Version: "v1", Kind: "Issuer"})
+				targetNamespace = vc.Namespace
+			} else {
+				u.SetGroupVersionKind(schema.GroupVersionKind{Group: "cert-manager.io", Version: "v1", Kind: "ClusterIssuer"})
+				targetNamespace = ""
+			}
+			err := v.Client.Get(ctx, types.NamespacedName{Name: issuerName, Namespace: targetNamespace}, u)
+			if err != nil {
+				allErrs = append(allErrs, field.Invalid(istioPath.Child("certificateIssuer"), issuerName, fmt.Sprintf("cert-manager %s %q does not exist on host cluster", issuerKind, issuerName)))
+			}
 		}
 	}
 

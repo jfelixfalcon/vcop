@@ -130,6 +130,36 @@ spec:
                         enabled:
                           type: boolean
                           default: true
+                    istio:
+                      type: object
+                      description: Opinionated Istio entrypoint and mesh stack.
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        meshEnabled:
+                          type: boolean
+                          default: false
+                        ingressGateway:
+                          type: object
+                          properties:
+                            enabled:
+                              type: boolean
+                              default: true
+                            serviceType:
+                              type: string
+                              default: LoadBalancer
+                        certificateIssuer:
+                          type: string
+                        certificateIssuerKind:
+                          type: string
+                          default: ClusterIssuer
+                        hosts:
+                          type: array
+                          items:
+                            type: string
+                        certSecretName:
+                          type: string
                 sync:
                   type: object
                   description: Resource boundary synchronization into host cluster.

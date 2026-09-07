@@ -1,0 +1,23 @@
+{{- if .Values.virtualService.enabled }}
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ .Values.virtualService.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "vcluster-istio.labels" . | nindent 4 }}
+spec:
+  hosts:
+    {{- toYaml .Values.virtualService.hosts | nindent 4 }}
+  gateways:
+    {{- toYaml .Values.virtualService.gateways | nindent 4 }}
+  http:
+    - name: "default-entrypoint-route"
+      match:
+        - uri:
+            prefix: "/"
+      directResponse:
+        status: 200
+        body:
+          string: "vCOp Platform: Virtual Cluster Application Entrypoint is Healthy and Ready.\n"
+{{- end }}
