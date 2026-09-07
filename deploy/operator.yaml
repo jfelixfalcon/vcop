@@ -19,7 +19,7 @@ spec:
       serviceAccountName: vc-operator-controller-manager
       containers:
         - name: manager
-          image: vops/vc-operator:v1.2.0
+          image: vops/vc-operator:v1.3.0
           command:
             - /manager
           args:
