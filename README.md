@@ -245,7 +245,7 @@ spec:
 - **Juan Felix-Falcon** ([@jfelixfalcon](https://github.com/jfelixfalcon)) — *Creator & Lead Maintainer*
 - **vCOp Authors & Open Source Community**
 
-See [CONTRIBUTORS.md](CONTRIBUTORS.md) for contributor details. We welcome community pull requests, bug fixes, and feature proposals!
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local development, testing, and pull request guidelines, and [CONTRIBUTORS.md](CONTRIBUTORS.md) for contributor recognition. We warmly welcome community pull requests, bug fixes, and feature proposals!
 
 ---
 

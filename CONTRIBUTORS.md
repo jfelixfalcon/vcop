@@ -9,4 +9,4 @@ Thank you to everyone who has contributed to the vCOp (Virtual Cluster Operation
 - **vCOp Authors & Open Source Community**
 
 ---
-*Contributions of all forms are welcome: code, bug reports, feature requests, documentation, and architectural discussions!*
+*Contributions of all forms are welcome! Check out [CONTRIBUTING.md](CONTRIBUTING.md) to get started with local development, testing, and pull requests.*
