@@ -4,6 +4,8 @@ description: Cloud-Native Virtual Cluster Operator & Operations Center (vCluster
 type: application
 version: 1.2.0
 appVersion: "v1.2.0"
+annotations:
+  artifacthub.io/license: Apache-2.0
 icon: https://raw.githubusercontent.com/loft-sh/vcluster/main/docs/static/media/vcluster-logo.svg
 keywords:
   - vcluster

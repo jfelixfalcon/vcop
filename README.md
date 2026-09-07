@@ -240,5 +240,16 @@ spec:
 
 ---
 
-## License
-Apache 2.0. Copyright 2026 vCOp Authors.
+## License & Open Source Freedom
+
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+This project is truly open-source software licensed under the **[Apache License, Version 2.0](LICENSE)**.
+
+### What does this mean?
+- **Freedom to Use**: Anyone is free to deploy, run, and integrate vCOp commercially or privately with zero royalties.
+- **Freedom to Modify**: You can adapt, refactor, fork, and enhance any part of the operator, UI, and Helm charts.
+- **Freedom to Distribute**: You can redistribute original or modified versions of the codebase.
+- **Patent Protection**: Includes an explicit patent grant protecting contributors and downstream users alike.
+
+Copyright 2026 vCOp Authors (Juan Felix-Falcon). See [LICENSE](LICENSE) and [NOTICE](NOTICE) for full license terms.
