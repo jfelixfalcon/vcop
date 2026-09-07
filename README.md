@@ -153,20 +153,20 @@ flowchart TD
     subgraph Host["Host Kubernetes Cluster"]
         CM["cert-manager"]
         CI["ClusterIssuer / Issuer"]
-        Operator["vCOp Operator"]
+        Operator["vCOp Operator (IstioReconciler)"]
         HostCert["Certificate & Secret (vc-dev-tls)"]
     end
 
     subgraph Guest["Virtual Cluster (Guest)"]
         NS["Namespace: istio-system"]
         TLS["Synced TLS Secret"]
-        Istiod["istiod (Control Plane)"]
-        GW["istio-ingressgateway (ClusterIP)"]
+        Istiod["istiod (3x Replicas in HA / 1x in Non-HA)"]
+        GW["istio-ingressgateway (3x Replicas in HA / 1x in Non-HA)"]
         CRD["Istio CRDs (Gateway, VirtualService)"]
         Route["Default Gateway: Port 80 (Redirect) + 443 (TLS)"]
     end
 
-    Operator -->|"1. Pre-flight Validation"| CI
+    Operator -->|"1. Pre-flight Issuer Check"| CI
     Operator -->|"2. Create Certificate"| HostCert
     CM -->|"Issues TLS"| HostCert
     Operator -->|"3. Mirror TLS Secret"| TLS
@@ -177,7 +177,7 @@ flowchart TD
     CRD --> Route
 ```
 
-#### Step-by-Step Lifecycle:
+#### Step-by-Step Reconciliation Pipeline
 
 1. **Pre-Flight Cert-Manager Validation (Fail-Closed):**
    - The operator inspects the host cluster to verify that the configured `ClusterIssuer` or `Issuer` exists.
@@ -189,8 +189,10 @@ flowchart TD
    - Connects to the guest API server and ensures the `istio-system` namespace exists.
    - Deploys `istiod` (`docker.io/istio/pilot:<version>`) along with its ServiceAccount, ClusterRole, and ClusterRoleBindings.
    - Configures Pilot discovery and optional sidecar injection (`istio-injection: enabled/disabled`).
+   - Automatically scales to **3 replicas** if the cluster has `highAvailability: true` (or `ha` preset) for multi-replica active-active xDS serving, or 1 replica for standalone dev clusters.
 4. **Ingress Gateway (`istio-ingressgateway`):**
    - Deploys the Envoy-based ingress gateway proxy (`docker.io/istio/proxyv2:<version>`).
+   - Automatically scales to **3 replicas** in HA mode for fault-tolerant ingress routing, or 1 replica in non-HA mode.
    - Configures a **`ClusterIP`** Service exposing port 80 (HTTP) and port 443 (HTTPS), avoiding expensive cloud load balancers and keeping traffic routing lean.
 5. **CRDs, Gateway, & Routing:**
    - Installs Istio networking CRDs (`Gateways`, `VirtualServices`) inside the guest cluster.
@@ -198,6 +200,181 @@ flowchart TD
    - Generates the default `VirtualService` routing traffic to your application services.
 6. **Zero-Downtime Rolling Upgrades:**
    - Whenever you upgrade Istio in the UI or update `spec.components.istio.version`, the operator rolls out new container images with zero downtime and reports the active version in `status.componentVersions`.
+
+---
+
+### How to Add New Istio Versions & Manage Upgrades
+
+vCOp treats Istio as a first-class, dynamic component. You can add new versions of Istio at any time and roll them out across your virtual clusters with zero downtime.
+
+#### 1. How Istio Version Strings Map to Container Images
+
+When you specify an Istio version (such as `1.24.2`, `1.24.3`, or `1.25.0`), the operator constructs the official container images automatically:
+
+| Istio Component | Container Image Reference | Role in Virtual Cluster |
+|---|---|---|
+| **Control Plane** | `docker.io/istio/pilot:<version>` | In-cluster pilot xDS discovery, config validation, and routing |
+| **Ingress Gateway** | `docker.io/istio/proxyv2:<version>` | Envoy edge proxy terminating port 80 & 443 |
+
+Any release tag published by the Istio project (or your internal mirrored registry) can be used directly.
+
+---
+
+#### 2. Methods to Add and Register New Istio Versions
+
+##### Method A: Via the Operations Center UI Version Registry (Recommended)
+
+Platform administrators can register new Istio versions dynamically without restarting the operator or editing YAML:
+
+1. Open the **Operations Center UI** and navigate to **Settings -> Version Registry** (`/settings/versions`).
+2. Click the **Istio** tab.
+3. Click **"+ Add Version"**:
+   - **Version String**: Enter the image tag, e.g. `1.25.0` or `1.24.3`.
+   - **Display Label**: Friendly label shown to developers, e.g. `1.25.0 (Latest Stable)`.
+   - **Channel Tag**: Select `stable`, `lts`, `preview`, or `default`.
+   - **Release Notes**: Optional summary (e.g., security patches, Envoy upgrades).
+4. Click **"Save Version"**.
+
+> [!NOTE]
+> The UI persists the registry to the Kubernetes ConfigMap `vcop-version-registry` in the `vcop-system` namespace. Once saved, the new version is immediately available in both the **1-Click Provisioning Wizard** and the **Upgrade Modal** for existing clusters.
+
+##### Method B: Via Custom Resource Manifest (CRD / GitOps)
+
+If you manage virtual clusters declaratively using Argo CD, Flux, or `kubectl`, specify the `version` field directly under `spec.components.istio`:
+
+```yaml
+apiVersion: vops.gitops.io/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: team-prod
+  namespace: default
+spec:
+  clusterName: team-prod
+  highAvailability: true # Automatically provisions 3 gateways and 3 istiod pods
+  components:
+    istio:
+      enabled: true
+      version: "1.25.0" # <-- Specify the new Istio version here
+      certificateIssuer: "vcluster-ca-issuer"
+      certificateIssuerKind: "ClusterIssuer"
+      hosts:
+        - "team-prod.apps.example.com"
+```
+
+##### Method C: Private / Air-Gapped Registries & Custom Image Mirrors
+
+In enterprise air-gapped environments where `docker.io` is restricted:
+
+1. Mirror the two required Istio container images to your internal registry:
+   ```bash
+   # Pull from public registry
+   docker pull docker.io/istio/pilot:1.25.0
+   docker pull docker.io/istio/proxyv2:1.25.0
+
+   # Tag for internal registry
+   docker tag docker.io/istio/pilot:1.25.0 myregistry.internal.net/istio/pilot:1.25.0
+   docker tag docker.io/istio/proxyv2:1.25.0 myregistry.internal.net/istio/proxyv2:1.25.0
+
+   # Push to internal registry
+   docker push myregistry.internal.net/istio/pilot:1.25.0
+   docker push myregistry.internal.net/istio/proxyv2:1.25.0
+   ```
+2. Configure your internal registry in `charts/vcop/values.yaml`:
+   ```yaml
+   global:
+     imageRegistry: "myregistry.internal.net"
+   ```
+
+---
+
+#### 3. How the Operator Deploys and Upgrades an Istio Version
+
+When the operator detects that `spec.components.istio.version` has been updated (or during initial cluster provisioning), the `IstioReconciler` performs the following sequence:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Developer / GitOps
+    participant CR as VirtualCluster CR
+    participant Op as IstioReconciler
+    participant K8s as Guest Kubernetes API
+    participant Dep as Deployments (istiod / ingressgateway)
+
+    Dev->>CR: Patch version: "1.25.0"
+    Op->>CR: Detects spec change during reconciliation
+    Op->>K8s: Inspects existing Deployment templates
+    Op->>Dep: Updates container image to docker.io/istio/pilot:1.25.0
+    Op->>Dep: Updates container image to docker.io/istio/proxyv2:1.25.0
+    Dep->>Dep: Executes Kubernetes RollingUpdate (zero downtime)
+    Dep-->>Op: Readiness probes pass (15021 & 15014)
+    Op->>CR: Updates status.componentVersions.istio = "1.25.0"
+    Op->>CR: Sets Condition: IstioReady = True
+```
+
+##### Detailed Mechanics of the Rolling Upgrade:
+
+1. **Change Detection:**
+   During each reconciliation pass, the operator compares the running Deployment container image with the target version:
+   ```go
+   if existingDep.Spec.Template.Spec.Containers[0].Image != dep.Spec.Template.Spec.Containers[0].Image {
+       existingDep.Spec.Template = dep.Spec.Template
+       vClient.Update(ctx, existingDep)
+   }
+   ```
+2. **Zero-Downtime Rolling Update Strategy:**
+   - Both `istiod` and `istio-ingressgateway` Deployments use Kubernetes `RollingUpdate` with health gating.
+   - For HA clusters running **3 replicas**, Kubernetes starts a new pod with the upgraded image and waits for its readiness probe (`/healthz/ready` on port `15021` for the gateway; `:15014` for `istiod`) to report healthy before terminating an older replica.
+   - Ingress traffic continues flowing uninterrupted through active replicas during the rollout.
+3. **Status Reporting & Verification:**
+   - The operator verifies that pods reach `Ready` state.
+   - It records the active version in `status.componentVersions.istio: "<new-version>"`.
+   - The UI reflects the active version in the Cluster Detail view with a green health indicator.
+
+---
+
+#### 4. Managing High Availability (HA) for Istio
+
+When you configure High Availability on a virtual cluster:
+
+- **Automatic HA Sizing:**
+  If `spec.highAvailability: true` (or `spec.sizePreset: ha`), vCOp automatically sets:
+  - **3 `istiod` control plane replicas** (active-active multi-replica discovery).
+  - **3 `istio-ingressgateway` edge replicas** (load-balanced behind the ClusterIP service).
+- **Non-HA Sizing:**
+  If `spec.highAvailability: false` (e.g. `normal` or `small` presets), it deploys **1 `istiod` replica** and **1 `istio-ingressgateway` replica** to conserve cluster resources.
+- **Granular Replica Overrides:**
+  If your production team needs custom replica counts, you can specify them explicitly in the CRD:
+  ```yaml
+  spec:
+    components:
+      istio:
+        enabled: true
+        version: "1.24.2"
+        replicas: 5               # Custom replica count for istiod
+        ingressGateway:
+          enabled: true
+          serviceType: ClusterIP
+          replicas: 5             # Custom replica count for ingress gateway
+  ```
+
+---
+
+#### 5. Operational Commands & Inspection Snippets
+
+```bash
+# Check running Istio version across your fleet
+kubectl get vc -A -o custom-columns=NAME:.metadata.name,HA:.spec.highAvailability,ISTIO_VER:.status.componentVersions.istio,PHASE:.status.phase
+
+# Upgrade a virtual cluster's Istio version via kubectl
+kubectl patch vc vc-dev -n vc-dev --type='merge' -p '{"spec":{"components":{"istio":{"version":"1.25.0"}}}}'
+
+# Inspect the guest Istio pods running inside a virtual cluster from the host
+kubectl get pods -n vc-dev --show-labels | grep istio
+
+# Verify Istio endpoint health inside the virtual cluster
+kubectl exec -n vc-dev -c istio-proxy $(kubectl get pods -n vc-dev -l app=istio-ingressgateway -o jsonpath='{.items[0].metadata.name}') -- \
+  pilot-agent request GET /healthz/ready
+```
 
 ---
 
