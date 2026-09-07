@@ -40,7 +40,7 @@ import {
   Globe,
   Settings,
 } from 'lucide-react';
-import type { VirtualCluster, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition } from '../lib/types';
+import type { VirtualCluster, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition, K8sEvent } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
 import { MetricSparkline } from './MetricSparkline';
 import { KubeconfigModal } from './KubeconfigModal';
@@ -52,6 +52,7 @@ import { RbacModal } from './RbacModal';
 import { InstallAppModal } from './InstallAppModal';
 import { ClusterGroupModal } from './ClusterGroupModal';
 import { WorkloadMetricsView } from './WorkloadMetricsView';
+import { IstioModal } from './IstioModal';
 
 function parseK8sQuantity(val?: string): number {
   if (!val) return 0;
@@ -93,12 +94,14 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [cluster, setCluster] = useState<VirtualCluster | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'telemetry' | 'workloads' | 'quota' | 'access' | 'apps' | 'yaml'>('telemetry');
-  const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'quota' | 'sleep' | 'rbac' | 'install-app' | 'group' | null>(null);
+  const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'quota' | 'sleep' | 'rbac' | 'install-app' | 'group' | 'istio' | null>(null);
   const [kubeconfigInitialTab, setKubeconfigInitialTab] = useState<'admin' | 'oidc' | 'endpoint' | 'settings'>('admin');
   const [installAppTab, setInstallAppTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>('catalog');
   const [catalog, setCatalog] = useState<AppStoreCatalog | null>(null);
   const [inspectedApp, setInspectedApp] = useState<InstalledApp | null>(null);
   const [syncingApps, setSyncingApps] = useState<boolean>(false);
+  const [events, setEvents] = useState<K8sEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState<boolean>(false);
 
   const openKubeconfigModal = (tab: 'admin' | 'oidc' | 'endpoint' | 'settings' = 'admin') => {
     setKubeconfigInitialTab(tab);
@@ -116,6 +119,21 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
       console.error('Error fetching cluster detail:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchEvents = async () => {
+    try {
+      setEventsLoading(true);
+      const res = await fetch(`/api/vclusters/${clusterName}/events`);
+      const data = await res.json();
+      if (data.success && data.events) {
+        setEvents(data.events);
+      }
+    } catch (err) {
+      console.error('Error fetching cluster events:', err);
+    } finally {
+      setEventsLoading(false);
     }
   };
 
@@ -154,9 +172,11 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
     }
     fetchCluster();
     fetchCatalog();
+    fetchEvents();
     const interval = setInterval(() => {
       if (!activeModalRef.current) {
         fetchCluster();
+        fetchEvents();
       }
     }, 3000);
     return () => clearInterval(interval);
@@ -299,6 +319,15 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               </button>
 
               <button
+                onClick={() => setActiveModal('istio')}
+                className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+                title="Manage Opinionated Istio Ingress Entrypoint & TLS Certificates"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                Ingress & Istio
+              </button>
+
+              <button
                 onClick={() => setActiveModal('upgrade')}
                 className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-purple-300 border border-purple-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
               >
@@ -373,6 +402,30 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               Wake Up Cluster
             </button>
           )}
+        </div>
+      )}
+
+      {/* Syncing / Provisioning Banner with live event */}
+      {cluster.status.phase === 'Provisioning' && (
+        <div className="bg-amber-950/40 border border-amber-500/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl shrink-0">
+              <RefreshCw className="w-5 h-5 animate-spin" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                Virtual Cluster Syncing & Provisioning In Progress
+                <span className="text-[10px] font-mono text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30">
+                  Phase: Provisioning
+                </span>
+              </h4>
+              <p className="text-xs text-slate-300 mt-0.5">
+                {events.length > 0
+                  ? `Latest operator event: [${events[0].reason}] ${events[0].message}`
+                  : 'The operator is bootstrapping control plane components, reconciling guest RBAC, and waiting for health checks.'}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -509,6 +562,122 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             </div>
           </div>
 
+          {/* Opinionated Core Stack & App Entrypoint */}
+          <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 shadow-glow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-cyan-400" />
+                  Opinionated Core Stack & Application Entrypoint
+                  <span className="text-[10px] font-mono uppercase bg-cyan-950 text-cyan-400 px-2 py-0.5 rounded border border-cyan-800 font-bold">
+                    vCluster Core
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  CoreDNS, Metrics-Server, and Istio Ingress with Cert-Manager TLS termination.
+                </p>
+              </div>
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveModal('istio')}
+                  className="px-3 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all self-start sm:self-auto"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  Configure Ingress
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* CoreDNS */}
+              <div className="p-3.5 bg-cyber-950/70 border border-cyber-800 rounded-xl space-y-1">
+                <span className="text-[10px] font-mono text-slate-500 uppercase block">DNS Resolver</span>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-white">CoreDNS</span>
+                </div>
+                <span className="text-[11px] text-slate-400 font-mono block">kube-dns.kube-system</span>
+              </div>
+
+              {/* Metrics Server */}
+              <div className="p-3.5 bg-cyber-950/70 border border-cyber-800 rounded-xl space-y-1">
+                <span className="text-[10px] font-mono text-slate-500 uppercase block">Cluster Telemetry</span>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-white">Metrics Server</span>
+                </div>
+                <span className="text-[11px] text-slate-400 font-mono block">metrics.k8s.io active</span>
+              </div>
+
+              {/* Istio Gateway */}
+              <div className="p-3.5 bg-cyber-950/70 border border-cyber-800 rounded-xl space-y-1">
+                <span className="text-[10px] font-mono text-slate-500 uppercase block">Ingress Entrypoint</span>
+                <div className="flex items-center gap-2">
+                  {cluster.spec.components?.istio?.enabled ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-cyan-400" />
+                      <span className="text-xs font-bold text-cyan-300">Istio Ingressgateway</span>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="w-4 h-4 text-slate-500" />
+                      <span className="text-xs font-semibold text-slate-500">Not Configured</span>
+                    </>
+                  )}
+                </div>
+                <span className="text-[11px] text-slate-400 font-mono block">
+                  {cluster.spec.components?.istio?.enabled ? 'Port 80 (HTTPS redirect) & 443' : 'Disabled'}
+                </span>
+              </div>
+
+              {/* Cert-Manager TLS */}
+              <div className="p-3.5 bg-cyber-950/70 border border-cyber-800 rounded-xl space-y-1">
+                <span className="text-[10px] font-mono text-slate-500 uppercase block">TLS Certificate</span>
+                <div className="flex items-center gap-2">
+                  {cluster.spec.components?.istio?.certificateIssuer ? (
+                    <>
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-bold text-white font-mono truncate">
+                        {cluster.spec.components.istio.certificateIssuer}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Shield className="w-4 h-4 text-slate-500" />
+                      <span className="text-xs font-semibold text-slate-500">No Issuer Set</span>
+                    </>
+                  )}
+                </div>
+                <span className="text-[11px] text-slate-400 font-mono block truncate">
+                  {cluster.spec.components?.istio?.certificateIssuer
+                    ? `${cluster.spec.components.istio.certificateIssuerKind || 'ClusterIssuer'} (Host)`
+                    : 'Unencrypted HTTP'}
+                </span>
+              </div>
+            </div>
+
+            {/* Gateway & VirtualService Live Link */}
+            {cluster.spec.components?.istio?.enabled && (
+              <div className="mt-3 pt-3 border-t border-cyber-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 text-slate-300">
+                  <span className="font-semibold">Main Entrypoint VirtualService:</span>
+                  <a
+                    href={`https://${cluster.spec.components?.istio?.hosts?.[0] || cluster.spec.customEndpoint || `${cluster.name}.example.com`}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono text-cyan-400 hover:text-cyan-300 underline flex items-center gap-1"
+                  >
+                    https://{cluster.spec.components?.istio?.hosts?.[0] || cluster.spec.customEndpoint || `${cluster.name}.example.com`}
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+                <span className="text-[11px] font-mono text-slate-500">
+                  Service Mesh: {cluster.spec.components?.istio?.meshEnabled ? 'Active (mTLS auto-injection)' : 'Disabled (Gateway only)'}
+                </span>
+              </div>
+            )}
+          </div>
+
           {/* Condition Timeline */}
           <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5">
             <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
@@ -543,6 +712,84 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Cluster Lifecycle & Operator Event Logs */}
+          <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Activity className="w-4 h-4 text-cyan-400" />
+                Cluster Lifecycle & Operator Event Logs
+                <span className="text-[10px] font-mono text-slate-400 bg-cyber-950 px-2 py-0.5 rounded border border-cyber-800">
+                  Real-time Status Events
+                </span>
+              </h3>
+              <button
+                onClick={fetchEvents}
+                disabled={eventsLoading}
+                className="text-xs font-mono text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
+                title="Refresh events"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${eventsLoading ? 'animate-spin text-cyan-400' : ''}`} />
+                <span>Refresh</span>
+              </button>
+            </div>
+
+            {events.length === 0 ? (
+              <div className="p-6 text-center text-slate-500 font-mono text-xs bg-cyber-950/40 rounded-xl border border-cyber-800/60">
+                No recent operator events recorded for this virtual cluster.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead>
+                    <tr className="border-b border-cyber-800 text-slate-400 text-[10px] uppercase">
+                      <th className="pb-2 font-semibold">Type</th>
+                      <th className="pb-2 font-semibold">Reason</th>
+                      <th className="pb-2 font-semibold">Message</th>
+                      <th className="pb-2 font-semibold">Component</th>
+                      <th className="pb-2 font-semibold text-right">Age / Count</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-cyber-800/50 text-slate-300">
+                    {events.map((ev, idx) => {
+                      const isWarn = ev.type === 'Warning';
+                      return (
+                        <tr key={ev.name || idx} className="hover:bg-cyber-800/30 transition-colors">
+                          <td className="py-2.5 pr-3 whitespace-nowrap">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                isWarn
+                                  ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                                  : 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                              }`}
+                            >
+                              {isWarn ? <AlertTriangle className="w-2.5 h-2.5" /> : <CheckCircle2 className="w-2.5 h-2.5" />}
+                              {ev.type}
+                            </span>
+                          </td>
+                          <td className="py-2.5 pr-3 font-semibold text-white whitespace-nowrap">
+                            {ev.reason}
+                          </td>
+                          <td className="py-2.5 pr-3 font-sans text-xs text-slate-300 max-w-md break-words">
+                            {ev.message}
+                          </td>
+                          <td className="py-2.5 pr-3 text-slate-400 whitespace-nowrap text-[11px]">
+                            {ev.sourceComponent || 'vc-operator'}
+                          </td>
+                          <td className="py-2.5 text-right text-slate-400 whitespace-nowrap text-[10px]">
+                            <div>{ev.lastTimestamp ? new Date(ev.lastTimestamp).toLocaleTimeString() : 'now'}</div>
+                            {ev.count && ev.count > 1 && (
+                              <div className="text-cyan-400 font-semibold">(x{ev.count})</div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1735,6 +1982,16 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         onSuccess={async () => {
           await fetchCluster();
           await fetchCatalog();
+        }}
+      />
+
+      <IstioModal
+        cluster={cluster}
+        isOpen={activeModal === 'istio'}
+        onClose={() => setActiveModal(null)}
+        onSuccess={(updated) => {
+          setCluster(updated);
+          fetchCluster();
         }}
       />
 

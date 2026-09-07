@@ -2,7 +2,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig } from './types';
+import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig, K8sEvent } from './types';
 import { getAppStoreCatalog } from './appstore';
 import { PRESETS } from './presets';
 import { syncGuestClusterRBAC } from './cluster-rbac';
@@ -419,6 +419,28 @@ export async function getVirtualCluster(name: string, namespace?: string): Promi
   }
 }
 
+export async function getVirtualClusterEvents(namespace: string, name: string): Promise<K8sEvent[]> {
+  try {
+    const res = await k8sRequest<any>(
+      `/api/v1/namespaces/${encodeURIComponent(namespace)}/events?fieldSelector=involvedObject.name=${encodeURIComponent(name)}`
+    );
+    if (res.statusCode === 200 && res.data?.items) {
+      return res.data.items.map((it: any) => ({
+        type: it.type || 'Normal',
+        reason: it.reason || '',
+        message: it.message || '',
+        count: it.count || 1,
+        firstTimestamp: it.firstTimestamp,
+        lastTimestamp: it.lastTimestamp || it.eventTime || it.metadata?.creationTimestamp,
+        source: it.source,
+      })).sort((a: any, b: any) => new Date(b.lastTimestamp || 0).getTime() - new Date(a.lastTimestamp || 0).getTime());
+    }
+  } catch (err) {
+    console.error('Failed fetching events for virtual cluster:', err);
+  }
+  return [];
+}
+
 export async function createVirtualCluster(data: {
   clusterName: string;
   preset: SizePreset;
@@ -441,6 +463,18 @@ export async function createVirtualCluster(data: {
   customCaCert?: string;
   customCaSecret?: string;
   customCaConfigMap?: string;
+  istio?: {
+    enabled: boolean;
+    meshEnabled?: boolean;
+    certificateIssuer?: string;
+    certificateIssuerKind?: string;
+    hosts?: string[];
+    certSecretName?: string;
+    ingressGateway?: {
+      enabled: boolean;
+      serviceType?: string;
+    };
+  };
 }): Promise<VirtualCluster> {
   const name = data.clusterName.trim().toLowerCase();
   let k8sVer = data.kubernetesVersion;
@@ -556,6 +590,7 @@ export async function createVirtualCluster(data: {
       components: {
         coreDNS: { enabled: data.enableMonitoringAndDNS ?? true },
         metricsServer: { enabled: data.enableMonitoringAndDNS ?? true },
+        ...(data.istio ? { istio: data.istio } : {}),
       },
       sync: { pods: true, services: true, ingresses: true },
       lifecycle: {
@@ -1382,3 +1417,58 @@ export async function updateVirtualClusterEndpointAndOidc(
 
   throw new Error((res.data as any)?.message || `Failed to update virtual cluster endpoint and OIDC: HTTP ${res.statusCode}`);
 }
+
+/**
+ * Updates or configures the opinionated Istio entrypoint & mesh settings on a VirtualCluster.
+ */
+export async function updateVirtualClusterIstio(
+  name: string,
+  istioConfig: {
+    enabled: boolean;
+    meshEnabled?: boolean;
+    certificateIssuer?: string;
+    certificateIssuerKind?: string;
+    hosts?: string[];
+  },
+  namespace?: string
+): Promise<VirtualCluster> {
+  const targetNs = namespace || (name === 'team-alpha-dev' ? 'default' : name);
+  const getRes = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`
+  );
+
+  if (getRes.statusCode !== 200 || !getRes.data) {
+    throw new Error(`Virtual cluster ${name} not found in namespace ${targetNs}`);
+  }
+
+  const existing = getRes.data;
+  const existingComponents = existing.spec?.components || {};
+
+  const patch = {
+    metadata: {
+      annotations: {
+        'vops.gitops.io/reconcile-trigger': Date.now().toString(),
+      },
+    },
+    spec: {
+      components: {
+        ...existingComponents,
+        istio: istioConfig,
+      },
+    },
+  };
+
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
+    'PATCH',
+    patch,
+    'application/merge-patch+json'
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to update virtual cluster Istio: HTTP ${res.statusCode}`);
+}
+

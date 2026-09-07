@@ -121,6 +121,18 @@ export interface VirtualCluster {
     components: {
       coreDNS: { enabled: boolean };
       metricsServer: { enabled: boolean };
+      istio?: {
+        enabled: boolean;
+        meshEnabled?: boolean;
+        ingressGateway?: {
+          enabled: boolean;
+          serviceType?: string;
+        };
+        certificateIssuer?: string;
+        certificateIssuerKind?: string;
+        hosts?: string[];
+        certSecretName?: string;
+      };
     };
     sync: {
       pods: boolean;
@@ -371,3 +383,12 @@ export interface ClusterMetricsResponse {
   historicalBuckets?: MetricTimeBucket[];
 }
 
+export interface K8sEvent {
+  type: 'Normal' | 'Warning';
+  reason: string;
+  message: string;
+  count: number;
+  firstTimestamp?: string;
+  lastTimestamp?: string;
+  source?: { component?: string };
+}
