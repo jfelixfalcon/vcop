@@ -811,19 +811,14 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         <div className="space-y-6 animate-in fade-in duration-150">
           {/* Header summary banner */}
           <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Gauge className="w-5 h-5 text-emerald-400" />
-                  Dynamic Resource Quotas & Tenant Policies
-                </h3>
-                <span className="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-mono text-[11px] font-semibold">
-                  Dual-Scope Enforced
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-1">
-                Live usage and hard limits synchronized between the host namespace ({cluster.namespace}) and the virtual cluster default namespace.
-              </p>
+            <div className="flex items-center gap-2.5">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Gauge className="w-5 h-5 text-emerald-400" />
+                Resource Quotas
+              </h3>
+              <span className="px-2.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-mono text-[11px] font-semibold">
+                Dual-Scope
+              </span>
             </div>
             {isAdmin && (
               <button
@@ -1031,18 +1026,15 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
 
           {/* LimitRange Policy Card */}
           <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5">
-            <div className="flex justify-between items-center mb-3">
+            <div className="flex justify-between items-center mb-4">
               <h4 className="text-sm font-bold text-white flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-purple-400" />
-                Container LimitRange Policy Defaults & Bounds
+                LimitRange Defaults
               </h4>
               <span className="text-[10px] font-mono text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
                 Namespace: default & host
               </span>
             </div>
-            <p className="text-xs text-slate-400 mb-4">
-              Standard requests and limits automatically injected by Kubernetes admission controllers into containers that do not specify their own resource constraints.
-            </p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
               <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800">
                 <span className="text-[10px] text-slate-500 block mb-1">DEFAULT REQUEST CPU</span>
@@ -1090,11 +1082,8 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <Users className="w-5 h-5 text-cyan-400" />
-                  Cluster Access & RBAC Delegation
+                  Access & RBAC Delegation
                 </h3>
-                <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-                  Fine-grained access control for this virtual cluster. Platform administrators can delegate viewing and kubeconfig retrieval privileges to specific users and OIDC/SSO groups.
-                </p>
               </div>
               {isAdmin && (
                 <button
@@ -1118,9 +1107,6 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 <div className="mt-2 font-mono text-sm text-white font-bold break-all">
                   {cluster.metadata?.owner || 'Platform User'}
                 </div>
-                <p className="text-[11px] text-slate-400 mt-2">
-                  Designated maintainer with dedicated viewing and kubeconfig access.
-                </p>
               </div>
 
               {/* Authorized Groups */}
@@ -1143,9 +1129,6 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                     <span className="text-slate-500 text-xs italic">No groups delegated (Admin-only)</span>
                   )}
                 </div>
-                <p className="text-[11px] text-slate-400 mt-2">
-                  Authenticated users matching any of these IdP groups can access this cluster.
-                </p>
               </div>
 
               {/* Authorized User Emails */}
@@ -1168,9 +1151,6 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                     <span className="text-slate-500 text-xs italic">No individual users delegated</span>
                   )}
                 </div>
-                <p className="text-[11px] text-slate-400 mt-2">
-                  Specific user email accounts granted view and kubeconfig permissions.
-                </p>
               </div>
             </div>
 
@@ -1181,7 +1161,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   <div className="flex items-center gap-2">
                     <Lock className="w-4 h-4 text-purple-400" />
                     <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                      Virtual Cluster OIDC Authentication & Endpoint
+                      OIDC Authentication & Endpoint
                     </h4>
                     {cluster.metadata?.oidc?.enabled ? (
                       <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-mono text-[10px]">
@@ -1208,9 +1188,6 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Secure developer access using OpenID Connect claims with PKCE. Tokens are validated by the API server against your Identity Provider.
-                  </p>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
@@ -1326,13 +1303,10 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
 
           {/* Permissions Matrix */}
           <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6">
-            <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+            <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
               <Lock className="w-4 h-4 text-cyan-400" />
               Role-Based Access Control Matrix
             </h4>
-            <p className="text-xs text-slate-400 mb-4">
-              Enforced at the edge via signed cryptographic sessions, Astro middleware, and Kubernetes API admission controls.
-            </p>
             <div className="overflow-x-auto">
               <table className="w-full text-left font-mono text-xs">
                 <thead>
@@ -1389,13 +1363,10 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
 
           {/* Kubernetes Metadata Storage Details */}
           <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6">
-            <h4 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+            <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              Kubernetes CR Storage & GitOps Metadata
+              GitOps Metadata
             </h4>
-            <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-              RBAC assignments are synchronized to the underlying <code className="text-cyan-400">VirtualCluster</code> custom resource metadata in Kubernetes. Changes are persistent and compatible with GitOps workflows.
-            </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
               <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800">
                 <span className="text-[10px] text-slate-500 block mb-1">METADATA ANNOTATION</span>
@@ -1432,11 +1403,8 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <Package className="w-5 h-5 text-cyan-400" />
-                  Deployed Applications 
+                  Applications
                 </h3>
-                <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-                  Helm chart releases and Kubernetes manifests active inside this virtual cluster. Administrators can deploy additional applications or uninstall workloads dynamically.
-                </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -1542,9 +1510,9 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             <div className="bg-cyber-900/50 border border-cyber-800 rounded-3xl p-8 sm:p-10 text-center space-y-6">
               <div className="max-w-md mx-auto">
                 <Package className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <h4 className="text-base font-bold text-white">No Applications Deployed Yet</h4>
+                <h4 className="text-base font-bold text-white">No Applications Deployed</h4>
                 <p className="text-xs text-slate-400 mt-1">
-                  This virtual cluster currently has no additional application  or Helm charts installed. Choose an action below to deploy workloads or publish apps:
+                  Deploy Helm charts or Kubernetes manifests to this cluster.
                 </p>
               </div>
 
@@ -1559,14 +1527,14 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                       <Terminal className="w-5 h-5" />
                     </div>
                     <h5 className="text-xs font-bold text-white group-hover:text-cyan-300 transition-colors">
-                      Deploy Custom Workload
+                      Deploy Workload
                     </h5>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      Deploy any Helm chart repo or raw Kubernetes YAML manifest directly to this cluster right now.
+                      Deploy a Helm chart or YAML manifest directly.
                     </p>
                   </div>
                   <span className="text-[11px] font-mono text-cyan-400 flex items-center gap-1 mt-4 group-hover:translate-x-0.5 transition-transform">
-                    Deploy on the fly &rarr;
+                    Deploy &rarr;
                   </span>
                 </div>
 
@@ -1579,14 +1547,14 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                       <Plus className="w-5 h-5" />
                     </div>
                     <h5 className="text-xs font-bold text-white group-hover:text-blue-300 transition-colors">
-                      Add App to Catalog
+                      Add to Catalog
                     </h5>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      Register an application pack into the App Store catalog for easy reusability across all clusters.
+                      Register an application into the App Store catalog.
                     </p>
                   </div>
                   <span className="text-[11px] font-mono text-blue-400 flex items-center gap-1 mt-4 group-hover:translate-x-0.5 transition-transform">
-                    + Add to store &rarr;
+                    Add &rarr;
                   </span>
                 </div>
 
@@ -1599,14 +1567,14 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                       <Layers className="w-5 h-5" />
                     </div>
                     <h5 className="text-xs font-bold text-white group-hover:text-purple-300 transition-colors">
-                      Create App Group / Suite
+                      Create App Group
                     </h5>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      Bundle multiple microservices and utilities into a 1-click installable application pack.
+                      Bundle multiple services into a reusable application pack.
                     </p>
                   </div>
                   <span className="text-[11px] font-mono text-purple-400 flex items-center gap-1 mt-4 group-hover:translate-x-0.5 transition-transform">
-                    + Create group &rarr;
+                    Create &rarr;
                   </span>
                 </div>
               </div>
@@ -1772,11 +1740,8 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <div>
                 <h4 className="text-sm font-bold text-white flex items-center gap-2">
                   <Layers className="w-4 h-4 text-purple-400" />
-                  App Store Catalog & Group Suites
+                  App Catalog
                 </h4>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Pre-configured application  available for deployment to {cluster.name}.
-                </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1803,7 +1768,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <div className="p-6 rounded-2xl border border-dashed border-cyber-800 bg-cyber-950/40 text-center space-y-3">
                 <Package className="w-8 h-8 text-slate-600 mx-auto" />
                 <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  The App Store catalog is currently clean out of the box. Click below to add applications or bundle application groups.
+                  No applications or groups in catalog.
                 </p>
                 <div className="flex justify-center gap-2 pt-1">
                   <button

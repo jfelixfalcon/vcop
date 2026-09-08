@@ -514,11 +514,8 @@ policies:
             <div>
               <h3 className="text-xl font-bold text-white flex items-center gap-2.5">
                 <Sparkles className="w-5 h-5 text-cyber-accent" />
-                Cluster Identity & Purpose
+                Cluster Identity
               </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                Name your isolated virtual Kubernetes environment and specify team ownership.
-              </p>
             </div>
 
             {/* Deployment Mode: Clean Instance vs Restore from DR Backup */}
@@ -760,11 +757,8 @@ policies:
             <div>
               <h3 className="text-xl font-bold text-white flex items-center gap-2.5">
                 <Layers className="w-5 h-5 text-cyber-accent" />
-                Select Hardware & Topology Tier
+                Resource Tier & Sizing
               </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                Zero Kubernetes complexity: pick the capacity tier tailored to your workflow.
-              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -936,13 +930,10 @@ policies:
               {showQuotaOverrides && (
                 <div className="mt-4 p-5 bg-cyber-950 border border-cyber-800 rounded-2xl space-y-5 animate-in fade-in duration-150">
                   <div>
-                    <h4 className="text-xs font-bold text-white font-mono uppercase tracking-wider mb-1 flex items-center gap-2">
+                    <h4 className="text-xs font-bold text-white font-mono uppercase tracking-wider mb-2 flex items-center gap-2">
                       <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-                      Tenant ResourceQuota Bounds
+                      Resource Quota Bounds
                     </h4>
-                    <p className="text-[11px] text-slate-400">
-                      Tailor the compute, memory, storage limits and max objects for this virtual cluster.
-                    </p>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
@@ -1021,13 +1012,10 @@ policies:
                   </div>
 
                   <div className="pt-3 border-t border-cyber-800">
-                    <h4 className="text-xs font-bold text-white font-mono uppercase tracking-wider mb-1 flex items-center gap-2">
+                    <h4 className="text-xs font-bold text-white font-mono uppercase tracking-wider mb-3 flex items-center gap-2">
                       <Sliders className="w-3.5 h-3.5 text-purple-400" />
-                      Container LimitRange Defaults
+                      LimitRange Defaults
                     </h4>
-                    <p className="text-[11px] text-slate-400 mb-3">
-                      Defaults injected into tenant containers that omit resources.
-                    </p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
                       <div>
                         <label className="block text-slate-400 mb-1 text-[11px]">Default Req CPU:</label>
@@ -1080,11 +1068,8 @@ policies:
               <div>
                 <h3 className="text-xl font-bold text-white flex items-center gap-2.5">
                   <Package className="w-5 h-5 text-cyan-400" />
-                  App Store & Addon 
+                  App Store & Addons
                 </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Pre-install curated Helm releases, ingress controllers, databases, or microservice manifests into your virtual cluster.
-                </p>
               </div>
               <span className="text-xs font-mono text-cyan-400 bg-cyan-950/60 px-3 py-1 rounded-xl border border-cyan-800/80 self-start sm:self-auto">
                 {selectedAppIds.length} Application{selectedAppIds.length !== 1 ? 's' : ''} Selected
@@ -1439,11 +1424,8 @@ policies:
             <div>
               <h3 className="text-xl font-bold text-white flex items-center gap-2.5">
                 <Clock className="w-5 h-5 text-cyber-accent" />
-                Lifecycle Policies & Platform Add-ons
+                Lifecycle Policies
               </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                Configure auto-sleep to save cloud compute costs, review scheduled apps, and launch.
-              </p>
             </div>
 
             <div className="space-y-4">

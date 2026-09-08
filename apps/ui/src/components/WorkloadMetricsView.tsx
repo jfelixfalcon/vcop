@@ -322,15 +322,9 @@ export const WorkloadMetricsView: React.FC<Props> = ({ cluster }) => {
               <BarChart3 className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                Workload Observability & Pod Telemetry
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono border border-cyan-500/30">
-                  2026 Engine
-                </span>
+              <h2 className="text-lg font-bold text-white tracking-tight">
+                Workload Metrics
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Real-time container performance with historical workload continuity backed by PostgreSQL
-              </p>
             </div>
           </div>
         </div>

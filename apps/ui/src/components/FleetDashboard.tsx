@@ -297,7 +297,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                 </span>
               </h4>
               <p className="text-slate-300 mt-0.5">
-                Signed in as <strong className="text-white">{user.email || user.username}</strong>. Showing only virtual clusters assigned to you or your groups. You have full access to view clusters and download kubeconfig. Modifications require administrator privileges.
+                Signed in as <strong className="text-white">{user.email || user.username}</strong>. Showing assigned virtual clusters.
               </p>
             </div>
           </div>
@@ -401,18 +401,6 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                   </span>
                 )}
               </button>
-            )}
-
-            {/* OIDC Policy Governance (Admin) */}
-            {isAdmin && (
-              <a
-                href="/admin/oidc"
-                className="px-3 py-2 bg-cyber-800 hover:bg-cyber-750 text-purple-300 border border-purple-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-sm shrink-0"
-                title="Global & Group OIDC Policy Governance"
-              >
-                <Lock className="w-3.5 h-3.5 text-purple-400" />
-                <span>OIDC Policy</span>
-              </a>
             )}
 
             {/* Action button (Admins only) */}

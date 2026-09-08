@@ -71,12 +71,9 @@ export default function CapacityDashboard() {
               <BarChart3 className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+              <h1 className="text-2xl font-bold tracking-tight text-white">
                 Cluster Capacity & Overallocation Guard
               </h1>
-              <p className="text-xs text-slate-400 font-mono mt-0.5">
-                Host node resource ceilings, fleet quota allocations, and tenant admission guardrails
-              </p>
             </div>
           </div>
         </div>
@@ -334,31 +331,16 @@ export default function CapacityDashboard() {
         </div>
       </div>
 
-      {/* Guardrail Policy Architecture Callout */}
-      <div className="p-4 rounded-xl bg-cyber-900/50 border border-cyber-700/60 flex items-start gap-3">
-        <ShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
-        <div className="text-xs text-slate-300">
-          <strong className="text-emerald-400 font-semibold block mb-0.5">
-            Automated Quota & Headroom Admission Protection Active
-          </strong>
-          vCOp continuously tracks host cluster allocatable resources against aggregate virtual cluster quota demands.
-          Whenever a tenant or administrator attempts to provision a new cluster or scale up a ResourceQuota beyond host allocatable CPU, Memory, or Storage, the admission webhook and reconciler reject the change before node starvation can occur.
-        </div>
-      </div>
-
       {/* Virtual Cluster Quota Breakdown Table */}
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <span>Tenant Resource Demands & Allocation Share</span>
+              <span>Tenant Resource Demands</span>
               <span className="text-xs px-2 py-0.5 rounded-full bg-cyber-800 border border-cyber-700 font-mono text-slate-300">
-                {filteredClusters.length} Clusters
+                {filteredClusters.length}
               </span>
             </h2>
-            <p className="text-xs text-slate-400">
-              Detailed breakdown of requested guarantees, maximum limits, and live physical usage
-            </p>
           </div>
 
           <div className="relative w-full sm:w-64">

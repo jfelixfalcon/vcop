@@ -423,15 +423,9 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
               <Layers className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-                Version & Upgrade Registry
-                <span className="text-xs font-mono font-normal px-2.5 py-0.5 rounded-full bg-cyber-800 text-slate-300 border border-cyber-700">
-                  Full Stack Operator
-                </span>
+              <h1 className="text-2xl font-bold tracking-tight text-white">
+                Version Registry
               </h1>
-              <p className="text-xs font-mono text-slate-400 mt-1">
-                Central catalog of supported releases for Kubernetes, vCluster syncer, etcd backing store, CoreDNS, Metrics-Server, and Istio gateway.
-              </p>
             </div>
           </div>
         </div>

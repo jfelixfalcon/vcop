@@ -372,17 +372,9 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
             <Lock className="w-7 h-7" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-white tracking-wide">
-                Virtual Cluster OIDC Policy Governance
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                PKCE Identity
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 mt-1">
-              Configure global default OIDC parameters or assign distinct IdP providers to specific cluster groups with zero-secret PKCE authentication.
-            </p>
+            <h1 className="text-xl font-bold text-white tracking-wide">
+              OIDC Policies
+            </h1>
           </div>
         </div>
 

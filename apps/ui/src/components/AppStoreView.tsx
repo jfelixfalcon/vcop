@@ -333,18 +333,10 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-              DSO Catalog & Registry
-            </span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white flex items-center gap-2.5">
-            <Package className="w-8 h-8 text-cyan-400" />
-            DevOps Application Store 
+          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
+            <Package className="w-6 h-6 text-cyan-400" />
+            App Store
           </h1>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-3xl">
-            Curated Helm charts and Kubernetes manifests ready for one-click deployment to any virtual cluster. Group apps into application  or deploy individually.
-          </p>
         </div>
 
         {isAdmin && (
@@ -367,22 +359,19 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
         )}
       </div>
 
-      {/* App Groups /  Showcase Bar */}
+      {/* App Groups Showcase Bar */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 font-mono">
             <Layers className="w-3.5 h-3.5 text-purple-400" />
-            Curated Application  & Suites
+            Application Groups
           </h3>
-          <span className="text-[10px] font-mono text-slate-500">
-            Click a pack to filter catalog
-          </span>
         </div>
 
         {groups.length === 0 ? (
           <div className="p-4 rounded-2xl border border-dashed border-cyber-800 bg-cyber-950/40 text-center">
             <p className="text-xs text-slate-500 font-mono">
-              No application  defined yet. Click <span className="text-purple-400 font-semibold">+ Create App Group</span> above to bundle multiple apps into a 1-click deployment suite.
+              No application groups configured yet.
             </p>
           </div>
         ) : (
