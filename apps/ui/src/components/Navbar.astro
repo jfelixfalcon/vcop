@@ -364,8 +364,8 @@ if (pathname.startsWith('/clusters/')) {
           </a>
         )}
 
-        <!-- Quick Deploy: Provisioning -->
-        {user && (
+        <!-- Quick Deploy: Provisioning (Admins only) -->
+        {isAdmin && (
           <a
             href="/new"
             class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${

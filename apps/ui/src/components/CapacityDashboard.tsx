@@ -17,9 +17,14 @@ import {
   Info,
   SlidersHorizontal,
 } from 'lucide-react';
-import type { ClusterCapacityData, VClusterCapacityItem } from '../lib/types';
+import type { ClusterCapacityData, VClusterCapacityItem, UserSession } from '../lib/types';
 
-export default function CapacityDashboard() {
+interface Props {
+  currentUser?: UserSession | null;
+}
+
+export default function CapacityDashboard({ currentUser }: Props = {}) {
+  const isAdmin = currentUser?.role === 'admin';
   const [data, setData] = useState<ClusterCapacityData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,12 +98,14 @@ export default function CapacityDashboard() {
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-cyan-400' : ''}`} />
             <span>Refresh</span>
           </button>
-          <a
-            href="/new"
-            className="flex items-center gap-2 px-3.5 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm transition-all"
-          >
-            <span>+ Provision vCluster</span>
-          </a>
+          {isAdmin && (
+            <a
+              href="/new"
+              className="flex items-center gap-2 px-3.5 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm transition-all"
+            >
+              <span>+ Provision vCluster</span>
+            </a>
+          )}
         </div>
       </div>
 

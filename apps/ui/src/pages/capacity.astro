@@ -1,8 +1,9 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import CapacityDashboard from '../components/CapacityDashboard';
+const user = Astro.locals.user;
 ---
 
 <Layout title="Cluster Capacity & Headroom - vCOp">
-  <CapacityDashboard client:load />
+  <CapacityDashboard client:load currentUser={user} />
 </Layout>
