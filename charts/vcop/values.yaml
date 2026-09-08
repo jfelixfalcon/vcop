@@ -88,6 +88,8 @@ ui:
     METRICS_DB_NAME: "vcop_metrics"
     METRICS_DB_USER: "vcop"
     METRICS_DB_PASSWORD: "vcop-metrics-db-pass-2026"
+    DEBUG: "true"
+    NODE_TLS_REJECT_UNAUTHORIZED: "0"
 
   # Authentication & RBAC Governance
   auth:
@@ -97,15 +99,15 @@ ui:
       adminUsername: "admin"
       adminPassword: "vcop-breakglass-admin"
     oidc:
-      enabled: false
-      issuerUrl: "" # e.g. https://accounts.google.com or https://auth.corp.com/realms/cloud
-      clientId: ""
-      clientSecret: ""
+      enabled: true
+      issuerUrl: "https://keycloak.example.com:8443/realms/master"
+      clientId: "dso"
+      clientSecret: "8b71c15a8f5c4cf1934b951624ff85f3"
       redirectUri: ""
       scopes: "openid email profile groups"
-      providerName: "Single Sign-On (OIDC)"
-      adminGroups: "admins,vcluster-admins,platform-ops"
-      adminEmails: "admin@vops.local"
+      providerName: "Keycloak SSO"
+      adminGroups: "admins,vcluster-admins,platform-ops,default-roles-master"
+      adminEmails: "admin@vops.local,admin@example.com,dso@local"
 
   service:
     type: ClusterIP

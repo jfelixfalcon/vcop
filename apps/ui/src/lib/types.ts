@@ -91,6 +91,7 @@ export interface OidcProfile {
   enabled: boolean;
   issuerUrl: string;
   clientId: string;
+  clientSecret?: string;
   usernameClaim?: string;
   usernamePrefix?: string;
   groupsClaim?: string;

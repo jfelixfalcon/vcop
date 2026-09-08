@@ -1,5 +1,5 @@
 import { defineMiddleware } from 'astro:middleware';
-import { SESSION_COOKIE_NAME, verifySessionToken } from './lib/auth';
+import { SESSION_COOKIE_NAME, verifySessionToken, authLog, isAuthDebug } from './lib/auth';
 import { startMetricsDaemon } from './lib/metrics-collector';
 
 // Start continuous background telemetry & metrics collection to PostgreSQL
@@ -44,6 +44,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   const isPublicPath = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
+  if (isAuthDebug) {
+    authLog(`[Middleware] ${request.method} ${pathname} | hasSession: ${Boolean(sessionCookie)} | user: ${user?.username || 'anonymous'} | isPublic: ${isPublicPath}`);
+  }
+
   // 3. Handle unauthenticated access
   if (!user) {
     if (isPublicPath) {
@@ -51,6 +55,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
 
     if (pathname.startsWith('/api/')) {
+      authLog(`[Middleware] Unauthorized API call to ${pathname}`);
       return new Response(
         JSON.stringify({ success: false, error: 'Unauthorized: Authentication required' }),
         {
@@ -61,6 +66,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
 
     // Redirect browser to /login
+    authLog(`[Middleware] Redirecting unauthenticated browser from ${pathname} to /login?redirect=${encodeURIComponent(pathname)}`);
     return context.redirect(`/login?redirect=${encodeURIComponent(pathname)}`);
   }
 

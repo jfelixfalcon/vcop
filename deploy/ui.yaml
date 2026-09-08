@@ -43,17 +43,22 @@ spec:
               value: "vcop-metrics-db-pass-2026"
             - name: AI_SERVICE_URL
               value: "http://vcop-ai.vcop-system.svc:8080"
-            # Optional OIDC SSO Configuration:
-            # - name: OIDC_ENABLED
-            #   value: "true"
-            # - name: OIDC_ISSUER_URL
-            #   value: "https://auth.company.com/realms/corp"
-            # - name: OIDC_CLIENT_ID
-            #   value: "vcop-ui"
-            # - name: OIDC_CLIENT_SECRET
-            #   value: "..."
-            # - name: OIDC_ADMIN_GROUPS
-            #   value: "admins,vcluster-admins"
+            - name: DEBUG
+              value: "true"
+            - name: NODE_TLS_REJECT_UNAUTHORIZED
+              value: "0"
+            - name: OIDC_ENABLED
+              value: "true"
+            - name: OIDC_ISSUER_URL
+              value: "https://keycloak.example.com:8443/realms/master"
+            - name: OIDC_CLIENT_ID
+              value: "dso"
+            - name: OIDC_CLIENT_SECRET
+              value: "8b71c15a8f5c4cf1934b951624ff85f3"
+            - name: OIDC_ADMIN_EMAILS
+              value: "admin@vops.local,admin@example.com,dso@local"
+            - name: OIDC_ADMIN_GROUPS
+              value: "admins,vcluster-admins,platform-ops,default-roles-master"
           ports:
             - name: http
               containerPort: 4321

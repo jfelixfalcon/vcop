@@ -7,6 +7,7 @@ import {
   authenticateFromTokens,
   createSessionToken,
   getRequestOrigin,
+  authLog,
   type UserSession,
 } from '../../../lib/auth';
 
@@ -80,8 +81,18 @@ async function handleCallback(context: {
   }
 
   // 3. Handle explicit error from OIDC Provider
+  authLog('OIDC Callback request parsed:', {
+    method: request.method,
+    url: url.pathname + url.search,
+    hasCode: Boolean(code),
+    state,
+    error,
+    hasAccessToken: Boolean(accessToken),
+    hasIdToken: Boolean(idToken),
+  });
+
   if (error) {
-    console.error('OIDC provider returned error:', error, errorDesc);
+    console.error('[AUTH-DEBUG] OIDC provider returned error:', error, errorDesc);
     const errMessage = errorDesc || error;
     if (isJsonRequest) {
       return new Response(JSON.stringify({ success: false, error: errMessage }), {
@@ -95,6 +106,7 @@ async function handleCallback(context: {
   // 4. Handle Direct Token Authentication (Implicit Flow, Hybrid, or direct token grant)
   if (idToken || accessToken) {
     try {
+      authLog('Authenticating directly from received tokens...');
       const user = await authenticateFromTokens({
         id_token: idToken || undefined,
         access_token: accessToken || undefined,
@@ -109,6 +121,8 @@ async function handleCallback(context: {
         maxAge: 86400, // 24 hours
       });
 
+      authLog('Direct token authentication succeeded. User:', user.username, 'Role:', user.role);
+
       if (isJsonRequest) {
         return new Response(JSON.stringify({ success: true, user, redirect: '/' }), {
           status: 200,
@@ -118,7 +132,7 @@ async function handleCallback(context: {
 
       return redirect('/');
     } catch (err: any) {
-      console.error('Direct token authentication failed:', err);
+      console.error('[AUTH-DEBUG] Direct token authentication failed:', err);
       if (isJsonRequest) {
         return new Response(
           JSON.stringify({ success: false, error: err.message || 'token_authentication_failed' }),
@@ -137,9 +151,16 @@ async function handleCallback(context: {
     const codeVerifier = cookies.get(OIDC_VERIFIER_COOKIE_NAME)?.value;
     cookies.delete(OIDC_VERIFIER_COOKIE_NAME, { path: '/' });
 
+    authLog('Authorization code received, verifying state & verifier:', {
+      hasSavedState: Boolean(savedState),
+      receivedState: state,
+      stateMatched: !savedState || savedState === state,
+      hasCodeVerifier: Boolean(codeVerifier),
+    });
+
     // Validate state if previously generated
     if (savedState && state && savedState !== state) {
-      console.warn('OIDC state verification failed:', { savedState, receivedState: state });
+      console.warn('[AUTH-DEBUG] OIDC state verification failed:', { savedState, receivedState: state });
       if (isJsonRequest) {
         return new Response(JSON.stringify({ success: false, error: 'invalid_state' }), {
           status: 400,
@@ -150,9 +171,11 @@ async function handleCallback(context: {
     }
 
     try {
+      authLog('Invoking exchangeOidcCode with origin:', origin);
       const user = await exchangeOidcCode(code, origin, codeVerifier);
-      const sessionToken = createSessionToken(user);
+      authLog('OIDC exchange succeeded. Session user:', user.username, 'Role:', user.role);
 
+      const sessionToken = createSessionToken(user);
       cookies.set(SESSION_COOKIE_NAME, sessionToken, {
         path: '/',
         httpOnly: true,
@@ -168,9 +191,10 @@ async function handleCallback(context: {
         });
       }
 
+      authLog('Redirecting authenticated browser session to /');
       return redirect('/');
     } catch (err: any) {
-      console.error('OIDC code exchange failed:', err);
+      console.error('[AUTH-DEBUG] OIDC code exchange failed:', err);
       if (isJsonRequest) {
         return new Response(
           JSON.stringify({ success: false, error: err.message || 'oidc_exchange_failed' }),

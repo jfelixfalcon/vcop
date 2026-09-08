@@ -24,6 +24,24 @@ const BREAKGLASS_PASSWORD = process.env.ADMIN_PASSWORD || 'vcop-breakglass-admin
 const VIEWER_USERNAME = process.env.VIEWER_USERNAME || 'dev';
 const VIEWER_PASSWORD = process.env.VIEWER_PASSWORD || 'dev123';
 
+// Auto-allow custom CA / self-signed TLS certificates for internal cluster IdPs unless explicitly forbidden with '1'
+if (process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '1') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
+export const isAuthDebug =
+  process.env.DEBUG === 'true' ||
+  process.env.DEBUG === '1' ||
+  process.env.AUTH_DEBUG === 'true' ||
+  process.env.LOG_LEVEL === 'debug' ||
+  process.env.NODE_ENV !== 'production';
+
+export function authLog(message: string, ...args: any[]) {
+  if (isAuthDebug) {
+    console.log(`[AUTH-DEBUG ${new Date().toISOString()}] ${message}`, ...args);
+  }
+}
+
 export const OIDC_CONFIG = {
   enabled: process.env.OIDC_ENABLED === 'true' || Boolean(process.env.OIDC_ISSUER_URL),
   issuerUrl: process.env.OIDC_ISSUER_URL || '',
@@ -36,7 +54,7 @@ export const OIDC_CONFIG = {
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean),
-  adminEmails: (process.env.OIDC_ADMIN_EMAILS || 'admin@vops.local,admin@example.com')
+  adminEmails: (process.env.OIDC_ADMIN_EMAILS || 'admin@vops.local,admin@example.com,dso@local')
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean),
@@ -60,6 +78,12 @@ export function getRequestOrigin(request: Request, url: URL): string {
  */
 export async function getEffectiveOidcConfig() {
   if (OIDC_CONFIG.enabled && OIDC_CONFIG.issuerUrl) {
+    authLog('Effective OIDC config from ENV:', {
+      issuerUrl: OIDC_CONFIG.issuerUrl,
+      clientId: OIDC_CONFIG.clientId,
+      hasSecret: Boolean(OIDC_CONFIG.clientSecret),
+      redirectUri: OIDC_CONFIG.redirectUri,
+    });
     return OIDC_CONFIG;
   }
 
@@ -67,11 +91,11 @@ export async function getEffectiveOidcConfig() {
     const { getOidcRegistry } = await import('./oidc-registry');
     const reg = await getOidcRegistry();
     if (reg.global && reg.global.enabled && reg.global.issuerUrl) {
-      return {
+      const config = {
         enabled: true,
         issuerUrl: reg.global.issuerUrl,
         clientId: reg.global.clientId || 'vcop-ui',
-        clientSecret: '',
+        clientSecret: reg.global.clientSecret || OIDC_CONFIG.clientSecret || '',
         redirectUri: OIDC_CONFIG.redirectUri,
         scopes: reg.global.extraScopes?.length
           ? ['openid', ...reg.global.extraScopes].join(' ')
@@ -80,9 +104,16 @@ export async function getEffectiveOidcConfig() {
         adminGroups: OIDC_CONFIG.adminGroups,
         adminEmails: OIDC_CONFIG.adminEmails,
       };
+      authLog('Effective OIDC config from ConfigMap:', {
+        issuerUrl: config.issuerUrl,
+        clientId: config.clientId,
+        hasSecret: Boolean(config.clientSecret),
+        redirectUri: config.redirectUri,
+      });
+      return config;
     }
   } catch (e) {
-    // ConfigMap fallback error ignored
+    authLog('ConfigMap fallback error:', e);
   }
 
   return OIDC_CONFIG;
@@ -338,6 +369,7 @@ export async function authenticateFromTokens(
   }
 
   const role = resolveOidcRole(email, groups);
+  authLog(`Assigned role '${role}' to user '${username}' (${email}) with groups:`, groups);
 
   return {
     id: claims.sub || `oidc-${username}`,
@@ -371,31 +403,48 @@ export async function exchangeOidcCode(
     client_id: config.clientId,
   });
 
-  // Only attach client_secret if configured (never send empty string for public clients)
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    Accept: 'application/json',
+  };
+
+  // Attach client_secret in POST body and standard Basic Auth header if configured
   if (config.clientSecret && config.clientSecret.trim().length > 0) {
-    body.set('client_secret', config.clientSecret.trim());
+    const secret = config.clientSecret.trim();
+    body.set('client_secret', secret);
+    const basicAuth = Buffer.from(`${config.clientId}:${secret}`).toString('base64');
+    headers['Authorization'] = `Basic ${basicAuth}`;
   }
 
   if (codeVerifier) {
     body.set('code_verifier', codeVerifier);
   }
 
+  authLog(`Exchanging authorization code with token endpoint: ${discovery.token_endpoint}`, {
+    clientId: config.clientId,
+    redirectUri,
+    hasVerifier: Boolean(codeVerifier),
+    hasSecret: Boolean(config.clientSecret),
+  });
+
   const res = await fetch(discovery.token_endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
+    headers,
     body: body.toString(),
     signal: AbortSignal.timeout(10000),
   });
 
   if (!res.ok) {
     const errorText = await res.text();
+    console.error(`[AUTH-DEBUG] OIDC Token exchange failed HTTP ${res.status} at ${discovery.token_endpoint}:`, errorText);
     throw new Error(`OIDC Token exchange failed (HTTP ${res.status}): ${errorText}`);
   }
 
   const tokenData = (await res.json()) as { access_token?: string; id_token?: string };
+  authLog('OIDC Token exchange succeeded. Received tokens:', {
+    has_access_token: Boolean(tokenData.access_token),
+    has_id_token: Boolean(tokenData.id_token),
+  });
   return authenticateFromTokens(tokenData, discovery);
 }
 
