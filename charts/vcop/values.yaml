@@ -203,13 +203,22 @@ ai:
     requests:
       cpu: 200m
       memory: 512Mi
+      nvidia.com/gpu: "1"
     limits:
       cpu: 4000m
       memory: 4Gi
+      nvidia.com/gpu: "1"
   securityContext:
     privileged: true
   nodeSelector: {}
-  tolerations: []
+  tolerations:
+    - key: "nvidia.com/gpu"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "sku"
+      operator: "Equal"
+      value: "gpu"
+      effect: "NoSchedule"
   affinity: {}
 
 

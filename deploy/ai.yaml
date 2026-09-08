@@ -49,9 +49,11 @@ spec:
             requests:
               cpu: 200m
               memory: 512Mi
+              nvidia.com/gpu: "1"
             limits:
               cpu: 4000m
               memory: 4Gi
+              nvidia.com/gpu: "1"
           readinessProbe:
             httpGet:
               path: /v1/models
@@ -68,6 +70,14 @@ spec:
         - name: host-dev
           hostPath:
             path: /dev
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "sku"
+          operator: "Equal"
+          value: "gpu"
+          effect: "NoSchedule"
 ---
 apiVersion: v1
 kind: Service
