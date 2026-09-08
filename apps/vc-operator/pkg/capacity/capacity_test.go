@@ -2,6 +2,7 @@ package capacity
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -171,3 +172,66 @@ func TestGetClusterCapacity(t *testing.T) {
 		t.Errorf("Expected 1 vcluster, got %d", len(cap.VClusters))
 	}
 }
+
+func TestDetectHardware(t *testing.T) {
+	// Case 1: Node with NVIDIA A100 labels and allocatable GPUs
+	nodeNvidia := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "gpu-node-1",
+			Labels: map[string]string{
+				"nvidia.com/gpu.product": "NVIDIA-A100-SXM4-40GB",
+			},
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("2"),
+			},
+			Capacity: corev1.ResourceList{
+				corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("2"),
+			},
+		},
+	}
+
+	model, vendor, total, alloc, hwStr := DetectHardware([]corev1.Node{nodeNvidia})
+	if vendor != "NVIDIA" {
+		t.Errorf("Expected NVIDIA vendor, got: %s", vendor)
+	}
+	if !strings.Contains(model, "A100") {
+		t.Errorf("Expected model containing A100, got: %s", model)
+	}
+	if total != 2 || alloc != 2 {
+		t.Errorf("Expected 2 GPUs, got total=%d, alloc=%d", total, alloc)
+	}
+	if !strings.Contains(hwStr, "CUDA") {
+		t.Errorf("Expected CUDA in hardwareString, got: %s", hwStr)
+	}
+
+	// Case 2: Node without GPU (pure CPU cluster)
+	nodeCPU := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cpu-node-1",
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("8"),
+			},
+		},
+	}
+	modelCPU, vendorCPU, totalCPU, _, hwStrCPU := DetectHardware([]corev1.Node{nodeCPU})
+	// Note: if host machine has /proc/driver/nvidia, detectProcNvidiaGPU will find it.
+	// But if running in isolated environment, it will be None / CPU.
+	if totalCPU == 0 {
+		if vendorCPU != "None" || modelCPU != "None" {
+			t.Errorf("Expected None for CPU node, got vendor=%s, model=%s", vendorCPU, modelCPU)
+		}
+		if !strings.Contains(hwStrCPU, "CPU") {
+			t.Errorf("Expected CPU in hardware string, got: %s", hwStrCPU)
+		}
+	} else {
+		// Host GPU was detected via /proc
+		if !strings.Contains(hwStrCPU, "CUDA") {
+			t.Errorf("Expected CUDA in hardware string when host GPU is present, got: %s", hwStrCPU)
+		}
+	}
+}
+

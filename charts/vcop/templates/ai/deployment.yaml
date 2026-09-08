@@ -51,16 +51,8 @@ spec:
           {{- end }}
           {{- if .Values.ai.gpu.enabled }}
           volumeMounts:
-            - mountPath: /dev/nvidia0
-              name: dev-nvidia0
-            - mountPath: /dev/nvidiactl
-              name: dev-nvidiactl
-            - mountPath: /dev/nvidia-uvm
-              name: dev-nvidia-uvm
-            - mountPath: /dev/nvidia-uvm-tools
-              name: dev-nvidia-uvm-tools
-            - mountPath: /dev/nvidia-modeset
-              name: dev-nvidia-modeset
+            - mountPath: /dev
+              name: host-dev
           {{- end }}
           resources:
             {{- toYaml .Values.ai.resources | nindent 12 }}
@@ -78,21 +70,9 @@ spec:
             periodSeconds: 15
       {{- if .Values.ai.gpu.enabled }}
       volumes:
-        - name: dev-nvidia0
+        - name: host-dev
           hostPath:
-            path: /dev/nvidia0
-        - name: dev-nvidiactl
-          hostPath:
-            path: /dev/nvidiactl
-        - name: dev-nvidia-uvm
-          hostPath:
-            path: /dev/nvidia-uvm
-        - name: dev-nvidia-uvm-tools
-          hostPath:
-            path: /dev/nvidia-uvm-tools
-        - name: dev-nvidia-modeset
-          hostPath:
-            path: /dev/nvidia-modeset
+            path: /dev
       {{- end }}
       {{- with .Values.ai.nodeSelector }}
       nodeSelector:

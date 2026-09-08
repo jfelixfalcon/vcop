@@ -26,19 +26,19 @@ On a machine with internet access (or your continuous integration runner):
 make airgap-pack
 ```
 
-This generates `dist/vcop-airgap-bundle-v1.4.0.tar.gz` and its cryptographic `SHA256SUMS`.
+This generates `dist/vcop-airgap-bundle-v1.4.1.tar.gz` and its cryptographic `SHA256SUMS`.
 
 ### Bundle Structure
 
 When extracted, the air-gap bundle contains:
 
 ```
-vcop-airgap-bundle-v1.4.0/
+vcop-airgap-bundle-v1.4.1/
 ├── AIRGAP.md                        # Air-gap operational reference
 ├── CHECKSUMS.txt                    # SHA256 validation manifest
 ├── charts/
-│   ├── vcop-1.4.0.tgz               # Official vCOp Helm Chart
-│   └── vcluster-istio-1.4.0.tgz     # Istio Gateway & Ingress Add-on Chart
+│   ├── vcop-1.4.1.tgz               # Official vCOp Helm Chart
+│   └── vcluster-istio-1.4.1.tgz     # Istio Gateway & Ingress Add-on Chart
 ├── manifests/
 │   ├── crds/                        # Custom Resource Definitions (VirtualCluster)
 │   ├── rbac/                        # ServiceAccounts, Roles, and Bindings
@@ -46,14 +46,14 @@ vcop-airgap-bundle-v1.4.0/
 │   ├── metrics-db.yaml              # PostgreSQL Telemetry Database
 │   ├── operator.yaml                # vCOp Kubernetes Operator
 │   ├── ui.yaml                      # Operations Center Dashboard
-│   ├── ai.yaml                      # Embedded Gemma 3 Inference Engine
+│   ├── ai.yaml                      # Embedded Gemma 3 Inference Engine (Universal Hardware)
 │   └── vcop-install-all-in-one.yaml # Concatenated all-in-one manifest
 ├── images/
-│   └── vcop-airgap-images-v1.4.0.tar.gz # Saved container images:
-│                                        #   - vops/vc-operator:v1.4.0
-│                                        #   - vops/vc-operations-center:v1.4.0
-│                                        #   - vops/etcd-dr-runner:v1.4.0
-│                                        #   - vops/vc-ai:v1.4.0
+│   └── vcop-airgap-images-v1.4.1.tar.gz # Saved container images:
+│                                        #   - vops/vc-operator:v1.4.1
+│                                        #   - vops/vc-operations-center:v1.4.1
+│                                        #   - vops/etcd-dr-runner:v1.4.1
+│                                        #   - vops/vc-ai:v1.4.1
 │                                        #   - postgres:16-alpine
 └── scripts/
     ├── load-images.sh               # Image loader and private registry pusher
@@ -64,7 +64,7 @@ vcop-airgap-bundle-v1.4.0/
 
 ## 3. Transferring to the Air-Gapped Environment
 
-1. Copy `vcop-airgap-bundle-v1.4.0.tar.gz` and `SHA256SUMS` to your transfer media (bastion jump host, USB drive, or secure optical media).
+1. Copy `vcop-airgap-bundle-v1.4.1.tar.gz` and `SHA256SUMS` to your transfer media (bastion jump host, USB drive, or secure optical media).
 2. On your air-gapped target machine, verify file integrity:
 
 ```bash
@@ -74,8 +74,8 @@ sha256sum -c SHA256SUMS
 3. Extract the archive:
 
 ```bash
-tar -xzf vcop-airgap-bundle-v1.4.0.tar.gz
-cd vcop-airgap-bundle-v1.4.0
+tar -xzf vcop-airgap-bundle-v1.4.1.tar.gz
+cd vcop-airgap-bundle-v1.4.1
 ```
 
 ---
@@ -128,7 +128,7 @@ Run the included `install.sh` script:
 ### Method 2: Manual Helm Installation
 
 ```bash
-helm upgrade --install vcop ./charts/vcop-1.4.0.tgz \
+helm upgrade --install vcop ./charts/vcop-1.4.1.tgz \
   --namespace vcop-system \
   --create-namespace \
   --set global.imageRegistry="harbor.internal.corp/vops"

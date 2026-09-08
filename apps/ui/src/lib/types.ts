@@ -514,6 +514,21 @@ export interface ClusterCapacityData {
   isCpuOverallocated: boolean;
   isMemoryOverallocated: boolean;
   isStorageOverallocated: boolean;
+  totalGpus?: number;
+  allocatableGpus?: number;
+  gpuModel?: string;
+  gpuVendor?: string;
+  hardwareString?: string;
   vclusters: VClusterCapacityItem[];
 }
+
+export interface DetectedHardwareInfo {
+  isGpu: boolean;
+  vendor: string;
+  model: string;
+  hardwareString: string;
+  totalGpus: number;
+  allocatableGpus: number;
+}
+
 

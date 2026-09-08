@@ -2,8 +2,8 @@ apiVersion: v2
 name: vcop
 description: Cloud-Native Virtual Cluster Operator & Operations Center (vCluster OSS v0.36)
 type: application
-version: 1.4.0
-appVersion: "v1.4.0"
+version: 1.4.1
+appVersion: "v1.4.1"
 annotations:
   artifacthub.io/license: Apache-2.0
 icon: https://raw.githubusercontent.com/loft-sh/vcluster/main/docs/static/media/vcluster-logo.svg

@@ -137,6 +137,9 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		r.setCondition(&vc, v1alpha1.ConditionCapacityAvailable, metav1.ConditionTrue, "CapacityAvailable", "Host cluster has sufficient allocatable compute and storage for requested quota")
 	}
 
+	// 2.6 Synchronize Host Hardware Info ConfigMap (vcop-hardware-info)
+	_ = r.syncHardwareConfigMap(ctx)
+
 	// 2.8 Reconcile Disaster Recovery Storage & Automated Backups
 	if err := r.DisasterRecoveryReconciler.ReconcileDisasterRecovery(ctx, &vc); err != nil {
 		log.Error(err, "failed reconciling disaster recovery backups")
@@ -782,3 +785,35 @@ func (r *VirtualClusterReconciler) calculateMetrics(ctx context.Context, vc *v1a
 		CPUUsage:        cpuUsageStr,
 	}
 }
+
+func (r *VirtualClusterReconciler) syncHardwareConfigMap(ctx context.Context) error {
+	var nodeList corev1.NodeList
+	if err := r.List(ctx, &nodeList); err != nil {
+		return err
+	}
+
+	gpuModel, gpuVendor, totalGPUs, allocatableGPUs, hardwareStr := capacity.DetectHardware(nodeList.Items)
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vcop-hardware-info",
+			Namespace: "vcop-system",
+		},
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
+		if cm.Data == nil {
+			cm.Data = make(map[string]string)
+		}
+		cm.Data["gpuModel"] = gpuModel
+		cm.Data["gpuVendor"] = gpuVendor
+		cm.Data["totalGpus"] = fmt.Sprintf("%d", totalGPUs)
+		cm.Data["allocatableGpus"] = fmt.Sprintf("%d", allocatableGPUs)
+		cm.Data["hardwareString"] = hardwareStr
+		cm.Data["lastScanned"] = time.Now().UTC().Format(time.RFC3339)
+		return nil
+	})
+
+	return err
+}
+

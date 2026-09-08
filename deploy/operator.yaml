@@ -16,10 +16,10 @@ spec:
       labels:
         app.kubernetes.io/name: vcop-operator
     spec:
-      serviceAccountName: vc-operator-controller-manager
+      serviceAccountName: vcop-operator
       containers:
         - name: manager
-          image: vops/vc-operator:v1.4.0
+          image: vops/vc-operator:v1.4.1
           command:
             - /manager
           args:

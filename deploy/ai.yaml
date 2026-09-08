@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: gemma
-          image: vops/vc-ai:v1.4.0
+          image: vops/vc-ai:v1.4.1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -43,16 +43,8 @@ spec:
           securityContext:
             privileged: true
           volumeMounts:
-            - mountPath: /dev/nvidia0
-              name: dev-nvidia0
-            - mountPath: /dev/nvidiactl
-              name: dev-nvidiactl
-            - mountPath: /dev/nvidia-uvm
-              name: dev-nvidia-uvm
-            - mountPath: /dev/nvidia-uvm-tools
-              name: dev-nvidia-uvm-tools
-            - mountPath: /dev/nvidia-modeset
-              name: dev-nvidia-modeset
+            - mountPath: /dev
+              name: host-dev
           resources:
             requests:
               cpu: 200m
@@ -73,21 +65,9 @@ spec:
             initialDelaySeconds: 6
             periodSeconds: 15
       volumes:
-        - name: dev-nvidia0
+        - name: host-dev
           hostPath:
-            path: /dev/nvidia0
-        - name: dev-nvidiactl
-          hostPath:
-            path: /dev/nvidiactl
-        - name: dev-nvidia-uvm
-          hostPath:
-            path: /dev/nvidia-uvm
-        - name: dev-nvidia-uvm-tools
-          hostPath:
-            path: /dev/nvidia-uvm-tools
-        - name: dev-nvidia-modeset
-          hostPath:
-            path: /dev/nvidia-modeset
+            path: /dev
 ---
 apiVersion: v1
 kind: Service

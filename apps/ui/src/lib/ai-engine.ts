@@ -10,6 +10,7 @@ import {
   scaleWorkload,
   findWorkload,
   listAllDeployments,
+  getClusterHardware,
   type PodItem,
   type ClusterPodsSummary,
   type WorkloadRestartResult,
@@ -120,6 +121,10 @@ function getAiServiceUrl(): string {
 
 export async function checkAiServiceHealth(): Promise<{ online: boolean; model: string; hardware: string; url: string }> {
   const url = getAiServiceUrl();
+  const hw = await getClusterHardware().catch(() => ({
+    hardwareString: 'Host Hardware',
+  }));
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 1200);
@@ -129,7 +134,7 @@ export async function checkAiServiceHealth(): Promise<{ online: boolean; model: 
       return {
         online: true,
         model: 'Gemma 3 1B IT (Q4_K_M)',
-        hardware: 'NVIDIA RTX 4090 (CUDA 13.3)',
+        hardware: hw.hardwareString,
         url,
       };
     }
@@ -138,7 +143,7 @@ export async function checkAiServiceHealth(): Promise<{ online: boolean; model: 
   return {
     online: false,
     model: 'Gemma 3 1B IT (Standby)',
-    hardware: 'Local Node.js Engine',
+    hardware: hw.hardwareString,
     url,
   };
 }
@@ -729,11 +734,15 @@ Ground Truth Rules:
       `- **Virtual Clusters**: *"List all virtual clusters and their Istio status"*`;
   }
 
+  const hw = await getClusterHardware().catch(() => ({
+    hardwareString: 'Host Hardware',
+  }));
+
   return {
     role: 'assistant',
     content: responseText,
     model: 'Gemma 3 1B IT (Cyber Engine)',
-    hardware: 'NVIDIA RTX 4090 (CUDA 13.3)',
+    hardware: hw.hardwareString,
     toolData: toolPayload,
   };
 }

@@ -1,6 +1,6 @@
 # Master Makefile for vCluster Center of Operations (vCOp)
 
-VERSION ?= 1.4.0
+VERSION ?= 1.4.1
 
 OPERATOR_DIR = apps/vc-operator
 UI_DIR = apps/ui

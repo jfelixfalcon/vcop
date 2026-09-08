@@ -13,7 +13,7 @@ operator:
 
   image:
     repository: vops/vc-operator
-    tag: v1.4.0
+    tag: v1.4.1
     pullPolicy: IfNotPresent
 
   serviceAccount:
@@ -67,7 +67,7 @@ ui:
 
   image:
     repository: vops/vc-operations-center
-    tag: v1.4.0
+    tag: v1.4.1
     pullPolicy: IfNotPresent
 
   serviceAccount:
@@ -173,7 +173,7 @@ disasterRecovery:
   enabled: true
   runnerImage:
     repository: vops/etcd-dr-runner
-    tag: v1.4.0
+    tag: v1.4.1
     pullPolicy: IfNotPresent
   defaultSchedule: "daily"
   defaultRetentionCount: 7
@@ -185,7 +185,7 @@ ai:
   replicaCount: 1
   image:
     repository: vops/vc-ai
-    tag: v1.4.0
+    tag: v1.4.1
     pullPolicy: IfNotPresent
   service:
     type: ClusterIP

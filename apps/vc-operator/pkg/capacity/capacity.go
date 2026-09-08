@@ -3,6 +3,8 @@ package capacity
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -41,6 +43,13 @@ type ClusterCapacity struct {
 	TotalCPU           resource.Quantity         `json:"totalCpu"`
 	TotalMemory        resource.Quantity         `json:"totalMemory"`
 	TotalStorage       resource.Quantity         `json:"totalStorage"`
+
+	// Dynamic Hardware & Accelerator Recognition
+	TotalGPUs          int                       `json:"totalGpus"`
+	AllocatableGPUs    int                       `json:"allocatableGpus"`
+	GPUModel           string                    `json:"gpuModel"`
+	GPUVendor          string                    `json:"gpuVendor"`
+	HardwareString     string                    `json:"hardwareString"`
 
 	RequestedCPU       resource.Quantity         `json:"requestedCpu"`
 	RequestedMemory    resource.Quantity         `json:"requestedMemory"`
@@ -167,6 +176,9 @@ func GetClusterCapacity(ctx context.Context, c client.Client) (*ClusterCapacity,
 			capSummary.TotalStorage.Add(*storage)
 		}
 	}
+
+	// Dynamic hardware and accelerator recognition
+	capSummary.GPUModel, capSummary.GPUVendor, capSummary.TotalGPUs, capSummary.AllocatableGPUs, capSummary.HardwareString = DetectHardware(nodeList.Items)
 
 	var vcList v1alpha1.VirtualClusterList
 	if err := c.List(ctx, &vcList); err != nil {
@@ -347,3 +359,96 @@ func ValidateVirtualClusterCapacity(ctx context.Context, c client.Client, target
 
 	return nil
 }
+
+// DetectHardware inspects node attributes, labels, allocatable devices, and host kernel drivers
+func DetectHardware(nodes []corev1.Node) (gpuModel string, gpuVendor string, totalGPUs int, allocatableGPUs int, hardwareString string) {
+	for _, node := range nodes {
+		// Check allocatable GPUs
+		for resName, qty := range node.Status.Allocatable {
+			s := strings.ToLower(string(resName))
+			if strings.Contains(s, "gpu") {
+				val := int(qty.Value())
+				allocatableGPUs += val
+				if strings.Contains(s, "nvidia") {
+					gpuVendor = "NVIDIA"
+				} else if strings.Contains(s, "amd") {
+					gpuVendor = "AMD"
+				} else if strings.Contains(s, "intel") {
+					gpuVendor = "Intel"
+				}
+			}
+		}
+		for resName, qty := range node.Status.Capacity {
+			if strings.Contains(strings.ToLower(string(resName)), "gpu") {
+				totalGPUs += int(qty.Value())
+			}
+		}
+
+		// Check node labels for GPU model
+		for k, v := range node.Labels {
+			kLower := strings.ToLower(k)
+			if (strings.Contains(kLower, "gpu.product") ||
+				strings.Contains(kLower, "accelerator") ||
+				strings.Contains(kLower, "gpu-model") ||
+				strings.Contains(kLower, "gpu.family")) && v != "" {
+				if gpuModel == "" {
+					clean := strings.ReplaceAll(v, "-", " ")
+					clean = strings.ReplaceAll(clean, "_", " ")
+					gpuModel = clean
+				}
+			}
+		}
+	}
+
+	// Host kernel proc discovery (/proc/driver/nvidia/gpus/*/information) if not resolved from node labels
+	if gpuModel == "" {
+		if hostModel := detectProcNvidiaGPU(); hostModel != "" {
+			gpuModel = hostModel
+			gpuVendor = "NVIDIA"
+			if totalGPUs == 0 {
+				totalGPUs = 1
+				allocatableGPUs = 1
+			}
+		}
+	}
+
+	if gpuModel == "" {
+		gpuModel = "None"
+		gpuVendor = "None"
+		hardwareString = "CPU Engine (Host Multi-Threaded)"
+	} else {
+		if gpuVendor == "NVIDIA" {
+			if !strings.HasPrefix(strings.ToLower(gpuModel), "nvidia") {
+				gpuModel = "NVIDIA " + gpuModel
+			}
+			hardwareString = fmt.Sprintf("%s (CUDA)", gpuModel)
+		} else if gpuVendor == "AMD" {
+			hardwareString = fmt.Sprintf("%s (ROCm)", gpuModel)
+		} else if gpuVendor == "Intel" {
+			hardwareString = fmt.Sprintf("%s (oneAPI)", gpuModel)
+		} else {
+			hardwareString = gpuModel
+		}
+	}
+
+	return
+}
+
+func detectProcNvidiaGPU() string {
+	matches, err := filepath.Glob("/proc/driver/nvidia/gpus/*/information")
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "Model:") {
+			return strings.TrimSpace(strings.TrimPrefix(trimmed, "Model:"))
+		}
+	}
+	return ""
+}
+

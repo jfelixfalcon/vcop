@@ -116,11 +116,12 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 - **Dedicated Safe Storage PVC Isolation:** Snapshots are written to a dedicated PersistentVolumeClaim (`<clusterName>-etcd-backups`) completely isolated from active etcd runtime volumes, with configurable PVC storage size (default 10Gi) and automatic retention count pruning (default 7 snapshots).
 - **On-Demand "Backup Now":** Instant manual snapshot triggers via the Operations Center UI or REST API before risky migrations or schema modifications.
 - **Deploying New Clusters Restored from Backup:** When provisioning a new virtual cluster via the UI Provisioning Wizard or GitOps, users can select any existing snapshot in the fleet (`spec.disasterRecovery.initialBackupRestore`) to initialize an exact clone.
-- **Point-in-Time Rolling Restore on Existing Clusters:** Seamless cluster rollback support (`spec.disasterRecovery.restoreSnapshotName`). The operator mounts an `etcd-restore-init` container powered by `vops/etcd-dr-runner:v1.4.0` running `etcdutl snapshot restore` across all StatefulSet replicas with strict Raft log invariance and member identity integrity.
+- **Point-in-Time Rolling Restore on Existing Clusters:** Seamless cluster rollback support (`spec.disasterRecovery.restoreSnapshotName`). The operator mounts an `etcd-restore-init` container powered by `vops/etcd-dr-runner:v1.4.1` running `etcdutl snapshot restore` across all StatefulSet replicas with strict Raft log invariance and member identity integrity.
 - **Disaster Recovery UI Tab:** Dedicated tab in Cluster Details with live vault metrics, snapshot history table, schedule modal, and a safe confirmation modal with destructive rollback warnings.
 
 ### 11. Embedded Offline AI Copilot (Gemma 3) & Cluster Action Engine
 - **100% Sovereign & Offline Inference:** Powered by an in-cluster `llama.cpp` inference engine running Google's Gemma 3 1B IT model. Operates completely air-gapped without external API keys, tokens, or egress connections.
+- **Dynamic Hardware & GPU Accelerator Detection:** Automatically discovers underlying host and node hardware (NVIDIA RTX/GeForce/Tesla/A100/H100 via CUDA, AMD Radeon/Instinct via ROCm, Intel) or dynamically falls back to high-throughput CPU multi-threading. Hardware metadata is dynamically synchronized to `ConfigMap/vcop-hardware-info` in `vcop-system` with zero hardcoding.
 - **Real-Time Cluster Telemetry Querying:** Ask natural language questions regarding live Kubernetes cluster inventory, running pods, namespaces, node allocatable capacity, and virtual cluster health.
 - **Cluster Operational Action Execution:** Directly execute operational commands through chat (e.g. *"Can you restart the keycloak-operator deployment for me?"* or *"Scale vcop-operator to 2"*). The AI extracts target workloads, verifies state against the Kubernetes API, executes rolling restarts via strategic merge patches, and renders rich interactive Cybernetic Action Cards with live replica verification and quick follow-ups.
 - **Zero-Horizontal-Scroll Cybernetic Interface:** Built-in floating chat overlay at the bottom-right of the dashboard with instant suggestion chips, Markdown code rendering, and real-time streaming tokens.
@@ -164,13 +165,13 @@ For disconnected, classified, or air-gapped environments without outbound intern
 make airgap-pack
 ```
 
-This generates `dist/vcop-airgap-bundle-v1.4.0.tar.gz` (containing all container images including the pre-baked Gemma 3 inference engine, Helm charts, manifests, and loader scripts).
+This generates `dist/vcop-airgap-bundle-v1.4.1.tar.gz` (containing all container images including the pre-baked Gemma 3 inference engine, Helm charts, manifests, and loader scripts).
 
 In the air-gapped environment:
 ```bash
 # 2. Extract the bundle
-tar -xzf vcop-airgap-bundle-v1.4.0.tar.gz
-cd vcop-airgap-bundle-v1.4.0
+tar -xzf vcop-airgap-bundle-v1.4.1.tar.gz
+cd vcop-airgap-bundle-v1.4.1
 
 # 3. Load images into local runtime or push to your private enterprise registry
 ./scripts/load-images.sh --registry harbor.internal.corp/vops

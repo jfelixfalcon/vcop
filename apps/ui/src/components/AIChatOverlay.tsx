@@ -54,7 +54,7 @@ export default function AIChatOverlay() {
   const [status, setStatus] = useState<{ online: boolean; model: string; hardware: string }>({
     online: true,
     model: 'Gemma 3 1B (Q4)',
-    hardware: 'RTX 4090 (CUDA)',
+    hardware: 'Detecting...',
   });
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -70,7 +70,7 @@ export default function AIChatOverlay() {
           setStatus({
             online: data.ai.online,
             model: data.ai.model || 'Gemma 3 1B (Q4)',
-            hardware: data.ai.hardware || 'RTX 4090 (CUDA)',
+            hardware: data.ai.hardware || 'Host Hardware',
           });
         }
       })

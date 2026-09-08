@@ -167,7 +167,7 @@ fi
 
 for source_img in "${LOADED_IMAGES[@]}"; do
   # Determine destination name
-  # e.g., vops/vc-operator:v1.4.0 -> registry.example.com/vops/vc-operator:v1.4.0
+  # e.g., vops/vc-operator:v1.4.1 -> registry.example.com/vops/vc-operator:v1.4.1
   # or postgres:16-alpine -> registry.example.com/postgres:16-alpine
   clean_name="${source_img}"
   target_img="${REGISTRY}/${clean_name}"

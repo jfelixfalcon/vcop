@@ -2,7 +2,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig, K8sEvent, ClusterCapacityData, VClusterCapacityItem, DisasterRecoverySpec, DisasterRecoveryStatus, BackupItem } from './types';
+import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig, K8sEvent, ClusterCapacityData, VClusterCapacityItem, DisasterRecoverySpec, DisasterRecoveryStatus, BackupItem, DetectedHardwareInfo } from './types';
 import { getAppStoreCatalog } from './appstore';
 import { PRESETS } from './presets';
 import { syncGuestClusterRBAC } from './cluster-rbac';
@@ -1700,11 +1700,182 @@ export function getVClusterDemands(vc: {
   };
 }
 
+/**
+ * Dynamically detects cluster accelerator and host hardware.
+ * Probes:
+ * 1. vcop-system/vcop-hardware-info ConfigMap (published by the operator)
+ * 2. Host cluster nodes for allocatable GPUs and accelerator labels
+ * 3. Local host driver (/proc/driver/nvidia/gpus) if accessible
+ * 4. Falls back to host CPU architecture and thread capacity
+ */
+export async function getClusterHardware(): Promise<DetectedHardwareInfo> {
+  // 1. Check vcop-hardware-info ConfigMap (populated by vc-operator)
+  try {
+    const cmRes = await k8sRequest<any>('/api/v1/namespaces/vcop-system/configmaps/vcop-hardware-info');
+    if (cmRes.statusCode === 200 && cmRes.data?.data) {
+      const data = cmRes.data.data;
+      const totalGpus = parseInt(data.totalGpus || '0', 10);
+      const allocatableGpus = parseInt(data.allocatableGpus || '0', 10);
+      const vendor = data.gpuVendor || 'None';
+      const model = data.gpuModel || 'None';
+      const cpuCount = os.cpus ? os.cpus().length : 8;
+      const hardwareString = data.hardwareString || (vendor !== 'None' ? `${model} (${vendor})` : `CPU Engine (${cpuCount} Cores)`);
+      return {
+        isGpu: vendor !== 'None' && totalGpus > 0,
+        vendor,
+        model,
+        hardwareString,
+        totalGpus,
+        allocatableGpus,
+      };
+    }
+  } catch {}
+
+  // 2. Query cluster nodes directly from Kubernetes API
+  let totalGpus = 0;
+  let allocatableGpus = 0;
+  let vendor = 'None';
+  let model = '';
+
+  try {
+    const nodesRes = await k8sRequest<any>('/api/v1/nodes').catch(() => null);
+    const nodes = nodesRes?.data?.items || [];
+
+    for (const node of nodes) {
+      const alloc = node.status?.allocatable || {};
+      const cap = node.status?.capacity || {};
+      const labels = node.metadata?.labels || {};
+
+      for (const [key, val] of Object.entries(alloc)) {
+        const kLower = key.toLowerCase();
+        if (kLower.includes('gpu')) {
+          allocatableGpus += parseInt(String(val) || '0', 10);
+          if (kLower.includes('nvidia')) vendor = 'NVIDIA';
+          else if (kLower.includes('amd')) vendor = 'AMD';
+          else if (kLower.includes('intel')) vendor = 'Intel';
+        }
+      }
+
+      for (const [key, val] of Object.entries(cap)) {
+        if (key.toLowerCase().includes('gpu')) {
+          totalGpus += parseInt(String(val) || '0', 10);
+        }
+      }
+
+      for (const [key, val] of Object.entries(labels)) {
+        const kLower = key.toLowerCase();
+        if (
+          (kLower.includes('gpu.product') ||
+           kLower.includes('accelerator') ||
+           kLower.includes('gpu-model') ||
+           kLower.includes('gpu.family')) &&
+          val
+        ) {
+          if (!model) {
+            model = String(val).replace(/[-_]/g, ' ');
+          }
+        }
+      }
+    }
+  } catch {}
+
+  // 3. Check host kernel driver proc (/proc/driver/nvidia/gpus/*/information)
+  if (!model) {
+    try {
+      const nvidiaProcDir = '/proc/driver/nvidia/gpus';
+      if (fs.existsSync(nvidiaProcDir)) {
+        const entries = fs.readdirSync(nvidiaProcDir);
+        for (const entry of entries) {
+          const infoPath = path.join(nvidiaProcDir, entry, 'information');
+          if (fs.existsSync(infoPath)) {
+            const content = fs.readFileSync(infoPath, 'utf8');
+            const modelMatch = content.match(/Model:\s*([^\r\n]+)/i);
+            if (modelMatch && modelMatch[1]) {
+              model = modelMatch[1].trim();
+              vendor = 'NVIDIA';
+              if (totalGpus === 0) {
+                totalGpus = 1;
+                allocatableGpus = 1;
+              }
+              break;
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (model) {
+    if (vendor === 'NVIDIA') {
+      if (!model.toLowerCase().startsWith('nvidia')) {
+        model = 'NVIDIA ' + model;
+      }
+      return {
+        isGpu: true,
+        vendor,
+        model,
+        hardwareString: `${model} (CUDA)`,
+        totalGpus: totalGpus || 1,
+        allocatableGpus: allocatableGpus || 1,
+      };
+    } else if (vendor === 'AMD') {
+      return {
+        isGpu: true,
+        vendor,
+        model,
+        hardwareString: `${model} (ROCm)`,
+        totalGpus: totalGpus || 1,
+        allocatableGpus: allocatableGpus || 1,
+      };
+    } else if (vendor === 'Intel') {
+      return {
+        isGpu: true,
+        vendor,
+        model,
+        hardwareString: `${model} (oneAPI)`,
+        totalGpus: totalGpus || 1,
+        allocatableGpus: allocatableGpus || 1,
+      };
+    }
+    return {
+      isGpu: true,
+      vendor,
+      model,
+      hardwareString: model,
+      totalGpus: totalGpus || 1,
+      allocatableGpus: allocatableGpus || 1,
+    };
+  }
+
+  // 4. Default CPU fallback
+  const cpus = os.cpus ? os.cpus() : [];
+  const cpuCount = cpus.length || 8;
+  const cpuModel = cpus[0]?.model ? cpus[0].model.replace(/\s+/g, ' ').trim() : 'Host Multi-Threaded';
+  return {
+    isGpu: false,
+    vendor: 'None',
+    model: 'CPU',
+    hardwareString: `CPU Engine (${cpuCount} Cores • ${cpuModel.split(' ')[0]})`,
+    totalGpus: 0,
+    allocatableGpus: 0,
+  };
+}
+
 export async function getHostClusterCapacity(): Promise<ClusterCapacityData> {
-  const nodesRes = await k8sRequest<any>('/api/v1/nodes').catch((e) => {
-    console.warn('Failed listing nodes for capacity:', e);
-    return { statusCode: 500, data: { items: [] } };
-  });
+  const [nodesRes, hw] = await Promise.all([
+    k8sRequest<any>('/api/v1/nodes').catch((e) => {
+      console.warn('Failed listing nodes for capacity:', e);
+      return { statusCode: 500, data: { items: [] } };
+    }),
+    getClusterHardware().catch(() => ({
+      isGpu: false,
+      vendor: 'None',
+      model: 'CPU',
+      hardwareString: 'CPU Engine',
+      totalGpus: 0,
+      allocatableGpus: 0,
+    })),
+  ]);
 
   const nodes = nodesRes.data?.items || [];
   let allocatableCpuMillis = 0;
@@ -1853,6 +2024,11 @@ export async function getHostClusterCapacity(): Promise<ClusterCapacityData> {
     isCpuOverallocated: requestedCpuMillis > allocatableCpuMillis,
     isMemoryOverallocated: requestedMemoryBytes > allocatableMemoryBytes,
     isStorageOverallocated: requestedStorageBytes > allocatableStorageBytes,
+    totalGpus: hw.totalGpus,
+    allocatableGpus: hw.allocatableGpus,
+    gpuModel: hw.model,
+    gpuVendor: hw.vendor,
+    hardwareString: hw.hardwareString,
     vclusters,
   };
 }
