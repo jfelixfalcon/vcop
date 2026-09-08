@@ -7,6 +7,8 @@ startMetricsDaemon();
 
 const PUBLIC_PATHS = [
   '/login',
+  '/callback',
+  '/auth/callback',
   '/api/auth/login',
   '/api/auth/oidc',
   '/api/auth/callback',

@@ -2,7 +2,7 @@
 import { getAuthConfig } from '../lib/auth';
 import { Shield, KeyRound, Lock, User, AlertCircle, ArrowRight, Sparkles } from 'lucide-react';
 
-const config = getAuthConfig();
+const config = await getAuthConfig();
 const error = Astro.url.searchParams.get('error');
 const redirectUrl = Astro.url.searchParams.get('redirect') || '/';
 
@@ -11,8 +11,10 @@ const errorMessages: Record<string, string> = {
   missing_credentials: 'Please enter both username and password.',
   oidc_not_configured: 'OIDC Single Sign-On is not configured on this instance.',
   invalid_state: 'Security state verification failed during SSO callback. Please try again.',
-  missing_authorization_code: 'No authorization code received from identity provider.',
+  missing_authorization_code: 'No authorization code or token received from identity provider.',
   oidc_exchange_failed: 'Failed to exchange authorization code with identity provider.',
+  token_verification_failed: 'Failed to verify token returned by identity provider.',
+  token_authentication_failed: 'Token authentication failed. Please verify your identity provider credentials.',
 };
 
 const displayError = error ? (errorMessages[error] || decodeURIComponent(error)) : null;
@@ -160,5 +162,32 @@ const displayError = error ? (errorMessages[error] || decodeURIComponent(error))
         </div>
       </div>
     </div>
+
+    <!-- Implicit Flow & Token Hash Fragment Detector -->
+    <script is:inline>
+      (function() {
+        if (window.location.hash && window.location.hash.length > 1) {
+          try {
+            const params = new URLSearchParams(window.location.hash.substring(1));
+            const accessToken = params.get('access_token') || params.get('token');
+            const idToken = params.get('id_token');
+            const code = params.get('code');
+            const state = params.get('state');
+
+            if (accessToken || idToken || code) {
+              fetch('/api/auth/callback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ access_token: accessToken, id_token: idToken, code, state })
+              }).then(function(res) {
+                if (res.ok) {
+                  window.location.href = '/';
+                }
+              }).catch(function() {});
+            }
+          } catch (e) {}
+        }
+      })();
+    </script>
   </body>
 </html>

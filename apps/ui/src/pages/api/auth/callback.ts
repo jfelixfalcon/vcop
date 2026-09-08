@@ -2,48 +2,265 @@ import type { APIRoute } from 'astro';
 import {
   SESSION_COOKIE_NAME,
   OIDC_STATE_COOKIE_NAME,
+  OIDC_VERIFIER_COOKIE_NAME,
   exchangeOidcCode,
+  authenticateFromTokens,
   createSessionToken,
+  getRequestOrigin,
+  type UserSession,
 } from '../../../lib/auth';
 
-export const GET: APIRoute = async ({ url, cookies, redirect }) => {
-  const code = url.searchParams.get('code');
-  const state = url.searchParams.get('state');
-  const error = url.searchParams.get('error');
-  const errorDesc = url.searchParams.get('error_description');
+/**
+ * Universal OIDC Callback Handler
+ * Supports:
+ * - Authorization Code Flow (?code=...&state=...)
+ * - PKCE code verification
+ * - Direct Token Authentication (?access_token=... or ?id_token=...)
+ * - HTTP POST (OIDC response_mode=form_post and JSON from client-side script)
+ * - URL Hash Fragment Fallback (#access_token=... / #id_token=...) via interactive client-side handler
+ */
+async function handleCallback(context: {
+  request: Request;
+  url: URL;
+  cookies: any;
+  redirect: (path: string, status?: number) => Response;
+  isPost: boolean;
+}): Promise<Response> {
+  const { request, url, cookies, redirect, isPost } = context;
+  const origin = getRequestOrigin(request, url);
 
-  if (error) {
-    console.error('OIDC provider returned error:', error, errorDesc);
-    return redirect(`/login?error=${encodeURIComponent(errorDesc || error)}`);
+  let code: string | null = null;
+  let state: string | null = null;
+  let error: string | null = null;
+  let errorDesc: string | null = null;
+  let accessToken: string | null = null;
+  let idToken: string | null = null;
+  let isJsonRequest = false;
+
+  // 1. Parse incoming parameters from URL query string
+  code = url.searchParams.get('code');
+  state = url.searchParams.get('state');
+  error = url.searchParams.get('error');
+  errorDesc = url.searchParams.get('error_description');
+  accessToken = url.searchParams.get('access_token') || url.searchParams.get('token');
+  idToken = url.searchParams.get('id_token');
+
+  // 2. Parse incoming parameters from POST body (form_post or json)
+  if (isPost) {
+    const contentType = request.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      isJsonRequest = true;
+      try {
+        const body = await request.json();
+        code = body.code || code;
+        state = body.state || state;
+        error = body.error || error;
+        errorDesc = body.error_description || errorDesc;
+        accessToken = body.access_token || body.token || accessToken;
+        idToken = body.id_token || idToken;
+      } catch (e) {
+        console.warn('Failed parsing JSON body in OIDC callback:', e);
+      }
+    } else if (
+      contentType.includes('application/x-www-form-urlencoded') ||
+      contentType.includes('multipart/form-data')
+    ) {
+      try {
+        const formData = await request.formData();
+        code = (formData.get('code') as string) || code;
+        state = (formData.get('state') as string) || state;
+        error = (formData.get('error') as string) || error;
+        errorDesc = (formData.get('error_description') as string) || errorDesc;
+        accessToken = (formData.get('access_token') as string) || (formData.get('token') as string) || accessToken;
+        idToken = (formData.get('id_token') as string) || idToken;
+      } catch (e) {
+        console.warn('Failed parsing form data in OIDC callback:', e);
+      }
+    }
   }
 
-  if (!code) {
+  // 3. Handle explicit error from OIDC Provider
+  if (error) {
+    console.error('OIDC provider returned error:', error, errorDesc);
+    const errMessage = errorDesc || error;
+    if (isJsonRequest) {
+      return new Response(JSON.stringify({ success: false, error: errMessage }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return redirect(`/login?error=${encodeURIComponent(errMessage)}`);
+  }
+
+  // 4. Handle Direct Token Authentication (Implicit Flow, Hybrid, or direct token grant)
+  if (idToken || accessToken) {
+    try {
+      const user = await authenticateFromTokens({
+        id_token: idToken || undefined,
+        access_token: accessToken || undefined,
+      });
+
+      const sessionToken = createSessionToken(user);
+      cookies.set(SESSION_COOKIE_NAME, sessionToken, {
+        path: '/',
+        httpOnly: true,
+        secure: false,
+        sameSite: 'lax',
+        maxAge: 86400, // 24 hours
+      });
+
+      if (isJsonRequest) {
+        return new Response(JSON.stringify({ success: true, user, redirect: '/' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return redirect('/');
+    } catch (err: any) {
+      console.error('Direct token authentication failed:', err);
+      if (isJsonRequest) {
+        return new Response(
+          JSON.stringify({ success: false, error: err.message || 'token_authentication_failed' }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return redirect(`/login?error=${encodeURIComponent(err.message || 'token_authentication_failed')}`);
+    }
+  }
+
+  // 5. Handle Authorization Code Exchange (Standard Flow / PKCE)
+  if (code) {
+    const savedState = cookies.get(OIDC_STATE_COOKIE_NAME)?.value;
+    cookies.delete(OIDC_STATE_COOKIE_NAME, { path: '/' });
+
+    const codeVerifier = cookies.get(OIDC_VERIFIER_COOKIE_NAME)?.value;
+    cookies.delete(OIDC_VERIFIER_COOKIE_NAME, { path: '/' });
+
+    // Validate state if previously generated
+    if (savedState && state && savedState !== state) {
+      console.warn('OIDC state verification failed:', { savedState, receivedState: state });
+      if (isJsonRequest) {
+        return new Response(JSON.stringify({ success: false, error: 'invalid_state' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return redirect('/login?error=invalid_state');
+    }
+
+    try {
+      const user = await exchangeOidcCode(code, origin, codeVerifier);
+      const sessionToken = createSessionToken(user);
+
+      cookies.set(SESSION_COOKIE_NAME, sessionToken, {
+        path: '/',
+        httpOnly: true,
+        secure: false,
+        sameSite: 'lax',
+        maxAge: 86400, // 24 hours
+      });
+
+      if (isJsonRequest) {
+        return new Response(JSON.stringify({ success: true, user, redirect: '/' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return redirect('/');
+    } catch (err: any) {
+      console.error('OIDC code exchange failed:', err);
+      if (isJsonRequest) {
+        return new Response(
+          JSON.stringify({ success: false, error: err.message || 'oidc_exchange_failed' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return redirect(`/login?error=${encodeURIComponent(err.message || 'oidc_exchange_failed')}`);
+    }
+  }
+
+  // 6. If request is POST with missing parameters, return 400
+  if (isPost) {
+    if (isJsonRequest) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'missing_authorization_code_or_token' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
     return redirect('/login?error=missing_authorization_code');
   }
 
-  const savedState = cookies.get(OIDC_STATE_COOKIE_NAME)?.value;
-  cookies.delete(OIDC_STATE_COOKIE_NAME, { path: '/' });
+  // 7. On GET with no query parameters, render client-side hash fragment detector.
+  return new Response(
+    `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Authenticating - vCluster Operations Center</title>
+</head>
+<body style="background:#030712;color:#f8fafc;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+  <div style="text-align:center;max-width:420px;padding:32px 24px;border:1px solid #1e293b;border-radius:24px;background:#0f172a;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+    <div style="display:inline-block;width:36px;height:36px;border:3px solid #38bdf8;border-top-color:transparent;border-radius:50%;animation:spin 0.9s linear infinite;margin-bottom:16px;"></div>
+    <h2 style="font-size:16px;font-weight:600;margin:0 0 8px 0;letter-spacing:-0.025em;">Authenticating with Operations Center</h2>
+    <p style="color:#94a3b8;font-size:12px;margin:0;">Validating identity credentials & security tokens...</p>
+  </div>
+  <style>@keyframes spin { 100% { transform: rotate(360deg); } }</style>
+  <script>
+    (async function() {
+      const hash = window.location.hash ? window.location.hash.substring(1) : '';
+      if (hash && hash.length > 1) {
+        const params = new URLSearchParams(hash);
+        const accessToken = params.get('access_token') || params.get('token');
+        const idToken = params.get('id_token');
+        const code = params.get('code');
+        const state = params.get('state');
+        const error = params.get('error') || params.get('error_description');
 
-  if (!savedState || savedState !== state) {
-    console.warn('OIDC state verification failed:', { savedState, receivedState: state });
-    return redirect('/login?error=invalid_state');
-  }
+        if (error) {
+          window.location.href = '/login?error=' + encodeURIComponent(error);
+          return;
+        }
 
-  try {
-    const user = await exchangeOidcCode(code, url.origin);
-    const sessionToken = createSessionToken(user);
+        if (accessToken || idToken || code) {
+          try {
+            const res = await fetch('/api/auth/callback', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ access_token: accessToken, id_token: idToken, code, state })
+            });
+            if (res.ok) {
+              window.location.href = '/';
+              return;
+            }
+            const data = await res.json().catch(() => ({}));
+            window.location.href = '/login?error=' + encodeURIComponent(data.error || 'token_authentication_failed');
+            return;
+          } catch (e) {
+            window.location.href = '/login?error=token_verification_failed';
+            return;
+          }
+        }
+      }
 
-    cookies.set(SESSION_COOKIE_NAME, sessionToken, {
-      path: '/',
-      httpOnly: true,
-      secure: false,
-      sameSite: 'lax',
-      maxAge: 86400, // 24 hours
-    });
+      window.location.href = '/login?error=missing_authorization_code';
+    })();
+  </script>
+</body>
+</html>`,
+    {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    }
+  );
+}
 
-    return redirect('/');
-  } catch (err: any) {
-    console.error('OIDC code exchange failed:', err);
-    return redirect(`/login?error=${encodeURIComponent(err.message || 'oidc_exchange_failed')}`);
-  }
+export const GET: APIRoute = async ({ request, url, cookies, redirect }) => {
+  return handleCallback({ request, url, cookies, redirect, isPost: false });
+};
+
+export const POST: APIRoute = async ({ request, url, cookies, redirect }) => {
+  return handleCallback({ request, url, cookies, redirect, isPost: true });
 };

@@ -1,13 +1,23 @@
 import type { APIRoute } from 'astro';
 import crypto from 'node:crypto';
-import { OIDC_CONFIG, OIDC_STATE_COOKIE_NAME, getOidcAuthorizationUrl } from '../../../lib/auth';
+import {
+  getEffectiveOidcConfig,
+  OIDC_STATE_COOKIE_NAME,
+  OIDC_VERIFIER_COOKIE_NAME,
+  getRequestOrigin,
+  getOidcAuthorizationUrl,
+} from '../../../lib/auth';
 
-export const GET: APIRoute = async ({ url, cookies, redirect }) => {
-  if (!OIDC_CONFIG.enabled || !OIDC_CONFIG.issuerUrl) {
+export const GET: APIRoute = async ({ request, url, cookies, redirect }) => {
+  const config = await getEffectiveOidcConfig();
+  if (!config.enabled || !config.issuerUrl) {
     return redirect('/login?error=oidc_not_configured');
   }
 
+  const origin = getRequestOrigin(request, url);
   const state = crypto.randomBytes(16).toString('hex');
+  const codeVerifier = crypto.randomBytes(32).toString('base64url');
+
   cookies.set(OIDC_STATE_COOKIE_NAME, state, {
     path: '/',
     httpOnly: true,
@@ -16,8 +26,16 @@ export const GET: APIRoute = async ({ url, cookies, redirect }) => {
     maxAge: 600, // 10 minutes
   });
 
+  cookies.set(OIDC_VERIFIER_COOKIE_NAME, codeVerifier, {
+    path: '/',
+    httpOnly: true,
+    secure: false,
+    sameSite: 'lax',
+    maxAge: 600, // 10 minutes
+  });
+
   try {
-    const authUrl = await getOidcAuthorizationUrl(url.origin, state);
+    const authUrl = await getOidcAuthorizationUrl(origin, state, codeVerifier);
     return redirect(authUrl);
   } catch (err: any) {
     console.error('Failed to generate OIDC authorization URL:', err);

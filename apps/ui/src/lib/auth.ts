@@ -16,6 +16,7 @@ export interface UserSession {
 
 export const SESSION_COOKIE_NAME = 'vcop_session';
 export const OIDC_STATE_COOKIE_NAME = 'vcop_oidc_state';
+export const OIDC_VERIFIER_COOKIE_NAME = 'vcop_oidc_verifier';
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'vcop-super-secret-jwt-signing-key-2026';
 const BREAKGLASS_USERNAME = process.env.ADMIN_USERNAME || 'admin';
@@ -40,6 +41,52 @@ export const OIDC_CONFIG = {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean),
 };
+
+/**
+ * Accurately determines the public origin of an incoming request, accounting for
+ * reverse proxies, Ingress controllers, and TLS termination.
+ */
+export function getRequestOrigin(request: Request, url: URL): string {
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const host = forwardedHost || request.headers.get('host') || url.host;
+  const proto = forwardedProto || (url.protocol ? url.protocol.replace(':', '') : 'http');
+  return `${proto}://${host}`;
+}
+
+/**
+ * Resolves effective OIDC configuration, checking environment variables first
+ * and falling back to cluster ConfigMap/vcop-oidc-profiles if configured.
+ */
+export async function getEffectiveOidcConfig() {
+  if (OIDC_CONFIG.enabled && OIDC_CONFIG.issuerUrl) {
+    return OIDC_CONFIG;
+  }
+
+  try {
+    const { getOidcRegistry } = await import('./oidc-registry');
+    const reg = await getOidcRegistry();
+    if (reg.global && reg.global.enabled && reg.global.issuerUrl) {
+      return {
+        enabled: true,
+        issuerUrl: reg.global.issuerUrl,
+        clientId: reg.global.clientId || 'vcop-ui',
+        clientSecret: '',
+        redirectUri: OIDC_CONFIG.redirectUri,
+        scopes: reg.global.extraScopes?.length
+          ? ['openid', ...reg.global.extraScopes].join(' ')
+          : 'openid email profile groups',
+        providerName: reg.global.name || 'Single Sign-On (OIDC)',
+        adminGroups: OIDC_CONFIG.adminGroups,
+        adminEmails: OIDC_CONFIG.adminEmails,
+      };
+    }
+  } catch (e) {
+    // ConfigMap fallback error ignored
+  }
+
+  return OIDC_CONFIG;
+}
 
 /**
  * Creates a signed, base64url-encoded session token using HMAC-SHA256.
@@ -149,13 +196,16 @@ interface OidcDiscovery {
 
 let cachedDiscovery: { data: OidcDiscovery; timestamp: number } | null = null;
 
-async function getOidcDiscovery(): Promise<OidcDiscovery> {
+export async function getOidcDiscovery(customIssuerUrl?: string): Promise<OidcDiscovery> {
   const now = Date.now();
-  if (cachedDiscovery && now - cachedDiscovery.timestamp < 3600000) {
+  const config = await getEffectiveOidcConfig();
+  const rawIssuer = customIssuerUrl || config.issuerUrl || '';
+  const issuer = rawIssuer.replace(/\/$/, '');
+
+  if (cachedDiscovery && cachedDiscovery.data.issuer === issuer && now - cachedDiscovery.timestamp < 3600000) {
     return cachedDiscovery.data;
   }
 
-  const issuer = OIDC_CONFIG.issuerUrl.replace(/\/$/, '');
   const configUrl = `${issuer}/.well-known/openid-configuration`;
 
   try {
@@ -180,55 +230,49 @@ async function getOidcDiscovery(): Promise<OidcDiscovery> {
 
 /**
  * Generates the OIDC Authorization URL for redirecting the user to the IdP.
+ * Supports standard RFC 7636 PKCE S256 code challenge.
  */
-export async function getOidcAuthorizationUrl(origin: string, state: string): Promise<string> {
-  const discovery = await getOidcDiscovery();
-  const redirectUri = OIDC_CONFIG.redirectUri || `${origin}/api/auth/callback`;
+export async function getOidcAuthorizationUrl(
+  origin: string,
+  state: string,
+  codeVerifier?: string
+): Promise<string> {
+  const config = await getEffectiveOidcConfig();
+  const discovery = await getOidcDiscovery(config.issuerUrl);
+  const redirectUri = config.redirectUri || `${origin}/api/auth/callback`;
 
   const params = new URLSearchParams({
-    client_id: OIDC_CONFIG.clientId,
+    client_id: config.clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: OIDC_CONFIG.scopes,
+    scope: config.scopes,
     state,
   });
+
+  if (codeVerifier) {
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+    params.set('code_challenge', codeChallenge);
+    params.set('code_challenge_method', 'S256');
+  }
 
   return `${discovery.authorization_endpoint}?${params.toString()}`;
 }
 
 /**
- * Handles the authorization code exchange and claims extraction from IdP.
+ * Directly authenticates a user from an OIDC token payload (id_token and/or access_token).
+ * Extracts claims, queries userinfo endpoint if needed, and assigns roles.
  */
-export async function exchangeOidcCode(code: string, origin: string): Promise<UserSession> {
-  const discovery = await getOidcDiscovery();
-  const redirectUri = OIDC_CONFIG.redirectUri || `${origin}/api/auth/callback`;
-
-  const body = new URLSearchParams({
-    grant_type: 'authorization_code',
-    code,
-    redirect_uri: redirectUri,
-    client_id: OIDC_CONFIG.clientId,
-    client_secret: OIDC_CONFIG.clientSecret,
-  });
-
-  const res = await fetch(discovery.token_endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
-    body: body.toString(),
-    signal: AbortSignal.timeout(10000),
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`OIDC Token exchange failed (HTTP ${res.status}): ${errorText}`);
-  }
-
-  const tokenData = (await res.json()) as { access_token?: string; id_token?: string };
+export async function authenticateFromTokens(
+  tokenData: { id_token?: string; access_token?: string },
+  discovery?: OidcDiscovery
+): Promise<UserSession> {
   if (!tokenData.id_token && !tokenData.access_token) {
     throw new Error('OIDC provider returned neither id_token nor access_token');
+  }
+
+  const config = await getEffectiveOidcConfig();
+  if (!discovery && config.issuerUrl) {
+    discovery = await getOidcDiscovery(config.issuerUrl);
   }
 
   let claims: any = {};
@@ -241,8 +285,21 @@ export async function exchangeOidcCode(code: string, origin: string): Promise<Us
     }
   }
 
+  // If token is JWT access token, extract any additional claims
+  if (tokenData.access_token) {
+    try {
+      const accessParts = tokenData.access_token.split('.');
+      if (accessParts.length === 3) {
+        const accessClaims = JSON.parse(Buffer.from(accessParts[1], 'base64url').toString('utf8'));
+        claims = { ...accessClaims, ...claims };
+      }
+    } catch {
+      // not a JWT, opaque token
+    }
+  }
+
   // If userinfo endpoint exists and claims lack email or groups, fetch userinfo
-  if (discovery.userinfo_endpoint && tokenData.access_token && (!claims.email || !claims.groups)) {
+  if (discovery?.userinfo_endpoint && tokenData.access_token && (!claims.email || !claims.groups)) {
     try {
       const userinfoRes = await fetch(discovery.userinfo_endpoint, {
         headers: { Authorization: `Bearer ${tokenData.access_token}` },
@@ -263,7 +320,7 @@ export async function exchangeOidcCode(code: string, origin: string): Promise<Us
     claims.preferred_username || claims.nickname || claims.name || email.split('@')[0] || 'oidc-user';
   const name: string = claims.name || username;
 
-  // Extract groups from common claim names
+  // Extract groups and roles from common claim names across Keycloak, Okta, Dex, Authentik
   let groups: string[] = [];
   const rawGroups =
     claims.groups ||
@@ -271,6 +328,7 @@ export async function exchangeOidcCode(code: string, origin: string): Promise<Us
     claims['cognito:groups'] ||
     claims['roles_claim'] ||
     claims['memberOf'] ||
+    claims.realm_access?.roles ||
     [];
 
   if (Array.isArray(rawGroups)) {
@@ -291,6 +349,54 @@ export async function exchangeOidcCode(code: string, origin: string): Promise<Us
     method: 'oidc',
     expiresAt: Date.now() + 24 * 60 * 60 * 1000,
   };
+}
+
+/**
+ * Handles the authorization code exchange and claims extraction from IdP.
+ * Safely handles public clients (omits client_secret) and supports PKCE code_verifier.
+ */
+export async function exchangeOidcCode(
+  code: string,
+  origin: string,
+  codeVerifier?: string
+): Promise<UserSession> {
+  const config = await getEffectiveOidcConfig();
+  const discovery = await getOidcDiscovery(config.issuerUrl);
+  const redirectUri = config.redirectUri || `${origin}/api/auth/callback`;
+
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: redirectUri,
+    client_id: config.clientId,
+  });
+
+  // Only attach client_secret if configured (never send empty string for public clients)
+  if (config.clientSecret && config.clientSecret.trim().length > 0) {
+    body.set('client_secret', config.clientSecret.trim());
+  }
+
+  if (codeVerifier) {
+    body.set('code_verifier', codeVerifier);
+  }
+
+  const res = await fetch(discovery.token_endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: body.toString(),
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`OIDC Token exchange failed (HTTP ${res.status}): ${errorText}`);
+  }
+
+  const tokenData = (await res.json()) as { access_token?: string; id_token?: string };
+  return authenticateFromTokens(tokenData, discovery);
 }
 
 /**
@@ -348,11 +454,13 @@ export function canUserManageCluster(user: UserSession): boolean {
 /**
  * Exposes provider configuration to frontend.
  */
-export function getAuthConfig() {
+export async function getAuthConfig() {
+  const oidc = await getEffectiveOidcConfig();
   return {
     oidc: {
-      enabled: OIDC_CONFIG.enabled,
-      providerName: OIDC_CONFIG.providerName,
+      enabled: oidc.enabled,
+      providerName: oidc.providerName,
+      redirectUri: oidc.redirectUri || '/api/auth/callback',
     },
     breakglass: {
       enabled: true,
