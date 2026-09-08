@@ -2,7 +2,7 @@ apiVersion: v2
 name: vcluster-istio
 description: Opinionated Istio Ingress Gateway & Service Mesh entrypoint stack for vCluster
 type: application
-version: 1.3.0
+version: 1.4.0
 appVersion: "1.24.2"
 annotations:
   artifacthub.io/license: Apache-2.0

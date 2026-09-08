@@ -19,7 +19,7 @@ spec:
       serviceAccountName: vcop-ui
       containers:
         - name: ui
-          image: vops/vc-operations-center:v1.3.0
+          image: vops/vc-operations-center:v1.4.0
           env:
             - name: HOST
               value: "0.0.0.0"
@@ -41,6 +41,8 @@ spec:
               value: "vcop"
             - name: METRICS_DB_PASSWORD
               value: "vcop-metrics-db-pass-2026"
+            - name: AI_SERVICE_URL
+              value: "http://vcop-ai.vcop-system.svc:8080"
             # Optional OIDC SSO Configuration:
             # - name: OIDC_ENABLED
             #   value: "true"

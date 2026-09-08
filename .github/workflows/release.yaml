@@ -71,6 +71,14 @@ jobs:
           cat deploy/operator.yaml >> dist/vcop-install.yaml
           echo "---" >> dist/vcop-install.yaml
           cat deploy/ui.yaml >> dist/vcop-install.yaml
+          echo "---" >> dist/vcop-install.yaml
+          cat deploy/ai.yaml >> dist/vcop-install.yaml
+
+          # 3. Air-gap deployment guide and loader scripts
+          cp AIRGAP.md dist/AIRGAP.md
+          cp scripts/airgap/load-images.sh dist/load-images.sh
+          cp scripts/airgap/install.sh dist/install.sh
+          chmod +x dist/load-images.sh dist/install.sh
 
       - name: Generate Cryptographic SHA256 Checksums
         run: |
@@ -85,6 +93,9 @@ jobs:
             dist/*.tgz
             dist/vcop-install.yaml
             dist/crds.yaml
+            dist/AIRGAP.md
+            dist/load-images.sh
+            dist/install.sh
             dist/checksums.txt
           name: "Release ${{ github.ref_name }} - Virtual Cluster Operator & Operations Center"
           generate_release_notes: true

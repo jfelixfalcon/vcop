@@ -116,8 +116,19 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 - **Dedicated Safe Storage PVC Isolation:** Snapshots are written to a dedicated PersistentVolumeClaim (`<clusterName>-etcd-backups`) completely isolated from active etcd runtime volumes, with configurable PVC storage size (default 10Gi) and automatic retention count pruning (default 7 snapshots).
 - **On-Demand "Backup Now":** Instant manual snapshot triggers via the Operations Center UI or REST API before risky migrations or schema modifications.
 - **Deploying New Clusters Restored from Backup:** When provisioning a new virtual cluster via the UI Provisioning Wizard or GitOps, users can select any existing snapshot in the fleet (`spec.disasterRecovery.initialBackupRestore`) to initialize an exact clone.
-- **Point-in-Time Rolling Restore on Existing Clusters:** Seamless cluster rollback support (`spec.disasterRecovery.restoreSnapshotName`). The operator mounts an `etcd-restore-init` container powered by `vops/etcd-dr-runner:v1.3.0` running `etcdutl snapshot restore` across all StatefulSet replicas with strict Raft log invariance and member identity integrity.
+- **Point-in-Time Rolling Restore on Existing Clusters:** Seamless cluster rollback support (`spec.disasterRecovery.restoreSnapshotName`). The operator mounts an `etcd-restore-init` container powered by `vops/etcd-dr-runner:v1.4.0` running `etcdutl snapshot restore` across all StatefulSet replicas with strict Raft log invariance and member identity integrity.
 - **Disaster Recovery UI Tab:** Dedicated tab in Cluster Details with live vault metrics, snapshot history table, schedule modal, and a safe confirmation modal with destructive rollback warnings.
+
+### 11. Embedded Offline AI Copilot (Gemma 3) & Cluster Action Engine
+- **100% Sovereign & Offline Inference:** Powered by an in-cluster `llama.cpp` inference engine running Google's Gemma 3 1B IT model. Operates completely air-gapped without external API keys, tokens, or egress connections.
+- **Real-Time Cluster Telemetry Querying:** Ask natural language questions regarding live Kubernetes cluster inventory, running pods, namespaces, node allocatable capacity, and virtual cluster health.
+- **Cluster Operational Action Execution:** Directly execute operational commands through chat (e.g. *"Can you restart the keycloak-operator deployment for me?"* or *"Scale vcop-operator to 2"*). The AI extracts target workloads, verifies state against the Kubernetes API, executes rolling restarts via strategic merge patches, and renders rich interactive Cybernetic Action Cards with live replica verification and quick follow-ups.
+- **Zero-Horizontal-Scroll Cybernetic Interface:** Built-in floating chat overlay at the bottom-right of the dashboard with instant suggestion chips, Markdown code rendering, and real-time streaming tokens.
+
+### 12. 100% Air-Gapped & Sovereign Enterprise Distribution
+- **Self-Contained Typography & Icons:** Self-hosted `Inter` and `JetBrains Mono` WOFF2 fonts and inline vector SVG icons (`lucide-react`) are bundled directly within the container images. Zero external CDN calls (`fonts.googleapis.com`, `cdnjs`, etc.).
+- **Single-Command Airgap Packager:** `make airgap-pack` packages all container images (`vc-operator`, `vc-operations-center`, `etcd-dr-runner`, `vc-ai`, `postgres:16-alpine`), Helm charts, manifests, and loader scripts into a portable, verifiable `.tar.gz` bundle with cryptographic `SHA256SUMS`.
+- **Automated Air-Gap Loader & Installer:** Dedicated scripts (`load-images.sh` and `install.sh`) supporting direct node runtime loading (Docker, Podman, nerdctl, containerd) and automated retagging/pushing to private corporate registries (Harbor, Nexus, Artifactory).
 
 ---
 
@@ -141,6 +152,35 @@ helm install vcop charts/vcop \
 # 2. Access the Operations Center Dashboard (or configure ingress in values.yaml)
 kubectl port-forward -n vcop-system svc/vcop-ui 4321:80
 ```
+
+---
+
+### Air-Gapped & Disconnected Cluster Deployment
+
+For disconnected, classified, or air-gapped environments without outbound internet access, vCOp provides a dedicated single-command packaging pipeline:
+
+```bash
+# 1. Package the complete standalone distribution bundle (on connected build station)
+make airgap-pack
+```
+
+This generates `dist/vcop-airgap-bundle-v1.4.0.tar.gz` (containing all container images including the pre-baked Gemma 3 inference engine, Helm charts, manifests, and loader scripts).
+
+In the air-gapped environment:
+```bash
+# 2. Extract the bundle
+tar -xzf vcop-airgap-bundle-v1.4.0.tar.gz
+cd vcop-airgap-bundle-v1.4.0
+
+# 3. Load images into local runtime or push to your private enterprise registry
+./scripts/load-images.sh --registry harbor.internal.corp/vops
+
+# 4. Install vCOp (Helm or pure kubectl)
+./scripts/install.sh --registry harbor.internal.corp/vops
+```
+
+> [!TIP]
+> For detailed air-gap architecture guarantees, SHA256 verification steps, and pure manifest installation instructions, see the complete [AIRGAP.md Guide](AIRGAP.md).
 
 ---
 

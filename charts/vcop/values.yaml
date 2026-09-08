@@ -13,7 +13,7 @@ operator:
 
   image:
     repository: vops/vc-operator
-    tag: v1.3.0
+    tag: v1.4.0
     pullPolicy: IfNotPresent
 
   serviceAccount:
@@ -67,7 +67,7 @@ ui:
 
   image:
     repository: vops/vc-operations-center
-    tag: v1.3.0
+    tag: v1.4.0
     pullPolicy: IfNotPresent
 
   serviceAccount:
@@ -82,6 +82,12 @@ ui:
     HOST: "0.0.0.0"
     PORT: "4321"
     NODE_ENV: "production"
+    AI_SERVICE_URL: "http://vcop-ai:8080"
+    METRICS_DB_HOST: "vcop-metrics-db"
+    METRICS_DB_PORT: "5432"
+    METRICS_DB_NAME: "vcop_metrics"
+    METRICS_DB_USER: "vcop"
+    METRICS_DB_PASSWORD: "vcop-metrics-db-pass-2026"
 
   # Authentication & RBAC Governance
   auth:
@@ -167,10 +173,42 @@ disasterRecovery:
   enabled: true
   runnerImage:
     repository: vops/etcd-dr-runner
-    tag: v1.3.0
+    tag: v1.4.0
     pullPolicy: IfNotPresent
   defaultSchedule: "daily"
   defaultRetentionCount: 7
   defaultStorageSize: "10Gi"
+
+# Offline Embedded Cluster Assistant (Gemma 3 1B IT)
+ai:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: vops/vc-ai
+    tag: v1.4.0
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+  model:
+    path: "/models/gemma-3-1b-it-Q4_K_M.gguf"
+    gpuLayers: 99
+    contextSize: 4096
+    threads: 8
+  gpu:
+    enabled: true
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 4000m
+      memory: 4Gi
+  securityContext:
+    privileged: true
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
 
 

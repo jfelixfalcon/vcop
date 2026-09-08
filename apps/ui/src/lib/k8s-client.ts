@@ -2076,4 +2076,427 @@ export async function listFleetBackups(): Promise<BackupItem[]> {
   });
 }
 
+export interface PodItem {
+  name: string;
+  namespace: string;
+  phase: string;
+  ready: boolean;
+  readyContainers: number;
+  totalContainers: number;
+  restarts: number;
+  nodeName?: string;
+  ip?: string;
+  age: string;
+  creationTimestamp: string;
+}
+
+export interface ClusterPodsSummary {
+  total: number;
+  running: number;
+  pending: number;
+  failed: number;
+  completed: number;
+  byNamespace: Record<string, { total: number; running: number; failed: number }>;
+  items: PodItem[];
+}
+
+export async function listClusterPods(namespace?: string): Promise<ClusterPodsSummary> {
+  const reqUrl = namespace ? `/api/v1/namespaces/${namespace}/pods` : '/api/v1/pods';
+  const res = await k8sRequest<{ items: any[] }>(reqUrl);
+  const rawItems = res.data?.items || [];
+
+  const summary: ClusterPodsSummary = {
+    total: rawItems.length,
+    running: 0,
+    pending: 0,
+    failed: 0,
+    completed: 0,
+    byNamespace: {},
+    items: [],
+  };
+
+  for (const p of rawItems) {
+    const ns = p.metadata?.namespace || 'default';
+    const phase = p.status?.phase || 'Unknown';
+    const containerStatuses = p.status?.containerStatuses || [];
+    const readyContainers = containerStatuses.filter((c: any) => c.ready).length;
+    const totalContainers = containerStatuses.length || (p.spec?.containers?.length || 1);
+    const restarts = containerStatuses.reduce((acc: number, c: any) => acc + (c.restartCount || 0), 0);
+    const ready = readyContainers === totalContainers && totalContainers > 0 && phase === 'Running';
+
+    if (phase === 'Running') summary.running++;
+    else if (phase === 'Pending') summary.pending++;
+    else if (phase === 'Failed') summary.failed++;
+    else if (phase === 'Succeeded') summary.completed++;
+
+    if (!summary.byNamespace[ns]) {
+      summary.byNamespace[ns] = { total: 0, running: 0, failed: 0 };
+    }
+    summary.byNamespace[ns].total++;
+    if (phase === 'Running') summary.byNamespace[ns].running++;
+    if (phase === 'Failed') summary.byNamespace[ns].failed++;
+
+    const createdAt = p.metadata?.creationTimestamp ? new Date(p.metadata.creationTimestamp) : new Date();
+    const diffSec = Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / 1000));
+    let age = `${diffSec}s`;
+    if (diffSec >= 86400) age = `${Math.floor(diffSec / 86400)}d`;
+    else if (diffSec >= 3600) age = `${Math.floor(diffSec / 3600)}h`;
+    else if (diffSec >= 60) age = `${Math.floor(diffSec / 60)}m`;
+
+    summary.items.push({
+      name: p.metadata?.name || 'unknown',
+      namespace: ns,
+      phase,
+      ready,
+      readyContainers,
+      totalContainers,
+      restarts,
+      nodeName: p.spec?.nodeName,
+      ip: p.status?.podIP,
+      age,
+      creationTimestamp: p.metadata?.creationTimestamp || '',
+    });
+  }
+
+  return summary;
+}
+
+export async function listClusterNamespaces(): Promise<string[]> {
+  try {
+    const res = await k8sRequest<{ items: any[] }>('/api/v1/namespaces');
+    return (res.data?.items || []).map((ns: any) => ns.metadata?.name || '').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export interface WorkloadRestartResult {
+  success: boolean;
+  kind: 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'Pod';
+  name: string;
+  namespace: string;
+  message: string;
+  restartedAt: string;
+  cliCommand: string;
+  rolloutCommand?: string;
+  replicas?: {
+    desired: number;
+    ready: number;
+    updated: number;
+  };
+}
+
+export interface WorkloadScaleResult {
+  success: boolean;
+  kind: 'Deployment' | 'StatefulSet';
+  name: string;
+  namespace: string;
+  message: string;
+  previousReplicas: number;
+  newReplicas: number;
+  cliCommand: string;
+}
+
+export interface DeploymentSummary {
+  name: string;
+  namespace: string;
+  replicas: number;
+  readyReplicas: number;
+  updatedReplicas: number;
+  age: string;
+  images: string[];
+}
+
+export async function listAllDeployments(namespace?: string): Promise<DeploymentSummary[]> {
+  try {
+    const reqUrl = namespace ? `/apis/apps/v1/namespaces/${namespace}/deployments` : '/apis/apps/v1/deployments';
+    const res = await k8sRequest<{ items: any[] }>(reqUrl);
+    const items = res.data?.items || [];
+    return items.map((d: any) => {
+      const createdAt = d.metadata?.creationTimestamp ? new Date(d.metadata.creationTimestamp) : new Date();
+      const diffSec = Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / 1000));
+      let age = `${diffSec}s`;
+      if (diffSec >= 86400) age = `${Math.floor(diffSec / 86400)}d`;
+      else if (diffSec >= 3600) age = `${Math.floor(diffSec / 3600)}h`;
+      else if (diffSec >= 60) age = `${Math.floor(diffSec / 60)}m`;
+
+      const containers = d.spec?.template?.spec?.containers || [];
+      const images = containers.map((c: any) => c.image).filter(Boolean);
+
+      return {
+        name: d.metadata?.name || 'unknown',
+        namespace: d.metadata?.namespace || 'default',
+        replicas: d.spec?.replicas ?? 1,
+        readyReplicas: d.status?.readyReplicas ?? 0,
+        updatedReplicas: d.status?.updatedReplicas ?? 0,
+        age,
+        images,
+      };
+    });
+  } catch (err: any) {
+    console.warn('[k8s-client] listAllDeployments error:', err.message);
+    return [];
+  }
+}
+
+export async function findWorkload(
+  name: string,
+  namespace?: string
+): Promise<{ kind: 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'Pod'; name: string; namespace: string; raw: any } | null> {
+  const targetName = name.trim().toLowerCase();
+
+  // 1. Try finding in deployments
+  try {
+    const depUrl = namespace ? `/apis/apps/v1/namespaces/${namespace}/deployments` : '/apis/apps/v1/deployments';
+    const depRes = await k8sRequest<{ items: any[] }>(depUrl);
+    const deps = depRes.data?.items || [];
+    const matchedDep = deps.find((d: any) => {
+      const dName = (d.metadata?.name || '').toLowerCase();
+      return dName === targetName || dName.includes(targetName) || targetName.includes(dName);
+    });
+    if (matchedDep) {
+      return {
+        kind: 'Deployment',
+        name: matchedDep.metadata?.name,
+        namespace: matchedDep.metadata?.namespace || 'default',
+        raw: matchedDep,
+      };
+    }
+  } catch {}
+
+  // 2. Try finding in statefulsets
+  try {
+    const stsUrl = namespace ? `/apis/apps/v1/namespaces/${namespace}/statefulsets` : '/apis/apps/v1/statefulsets';
+    const stsRes = await k8sRequest<{ items: any[] }>(stsUrl);
+    const stss = stsRes.data?.items || [];
+    const matchedSts = stss.find((s: any) => {
+      const sName = (s.metadata?.name || '').toLowerCase();
+      return sName === targetName || sName.includes(targetName) || targetName.includes(sName);
+    });
+    if (matchedSts) {
+      return {
+        kind: 'StatefulSet',
+        name: matchedSts.metadata?.name,
+        namespace: matchedSts.metadata?.namespace || 'default',
+        raw: matchedSts,
+      };
+    }
+  } catch {}
+
+  // 3. Try finding in daemonsets
+  try {
+    const dsUrl = namespace ? `/apis/apps/v1/namespaces/${namespace}/daemonsets` : '/apis/apps/v1/daemonsets';
+    const dsRes = await k8sRequest<{ items: any[] }>(dsUrl);
+    const dss = dsRes.data?.items || [];
+    const matchedDs = dss.find((ds: any) => {
+      const dsName = (ds.metadata?.name || '').toLowerCase();
+      return dsName === targetName || dsName.includes(targetName) || targetName.includes(dsName);
+    });
+    if (matchedDs) {
+      return {
+        kind: 'DaemonSet',
+        name: matchedDs.metadata?.name,
+        namespace: matchedDs.metadata?.namespace || 'default',
+        raw: matchedDs,
+      };
+    }
+  } catch {}
+
+  // 4. Try finding in pods
+  try {
+    const podSummary = await listClusterPods(namespace);
+    const matchedPod = podSummary.items.find((p) => {
+      const pName = p.name.toLowerCase();
+      return pName === targetName || pName.includes(targetName);
+    });
+    if (matchedPod) {
+      return {
+        kind: 'Pod',
+        name: matchedPod.name,
+        namespace: matchedPod.namespace,
+        raw: matchedPod,
+      };
+    }
+  } catch {}
+
+  return null;
+}
+
+export async function restartWorkload(
+  name: string,
+  namespace?: string
+): Promise<WorkloadRestartResult> {
+  const found = await findWorkload(name, namespace);
+  if (!found) {
+    throw new Error(`Workload '${name}' not found${namespace ? ` in namespace '${namespace}'` : ' across the cluster'}`);
+  }
+
+  const restartedAt = new Date().toISOString();
+  const targetNs = found.namespace;
+  const targetName = found.name;
+
+  if (found.kind === 'Deployment') {
+    const patchBody = {
+      spec: {
+        template: {
+          metadata: {
+            annotations: {
+              'kubectl.kubernetes.io/restartedAt': restartedAt,
+            },
+          },
+        },
+      },
+    };
+
+    const patchUrl = `/apis/apps/v1/namespaces/${targetNs}/deployments/${targetName}`;
+    const patchRes = await k8sRequest<any>(patchUrl, 'PATCH', patchBody, 'application/strategic-merge-patch+json');
+
+    if (patchRes.statusCode >= 400) {
+      throw new Error(`Failed to restart deployment ${targetName}: HTTP ${patchRes.statusCode}`);
+    }
+
+    const updated = patchRes.data;
+    return {
+      success: true,
+      kind: 'Deployment',
+      name: targetName,
+      namespace: targetNs,
+      message: `Rollout restart successfully initiated for deployment '${targetName}' in namespace '${targetNs}'.`,
+      restartedAt,
+      cliCommand: `kubectl rollout restart deployment/${targetName} -n ${targetNs}`,
+      rolloutCommand: `kubectl rollout status deployment/${targetName} -n ${targetNs}`,
+      replicas: {
+        desired: updated?.spec?.replicas ?? 1,
+        ready: updated?.status?.readyReplicas ?? 0,
+        updated: updated?.status?.updatedReplicas ?? 0,
+      },
+    };
+  }
+
+  if (found.kind === 'StatefulSet') {
+    const patchBody = {
+      spec: {
+        template: {
+          metadata: {
+            annotations: {
+              'kubectl.kubernetes.io/restartedAt': restartedAt,
+            },
+          },
+        },
+      },
+    };
+
+    const patchUrl = `/apis/apps/v1/namespaces/${targetNs}/statefulsets/${targetName}`;
+    const patchRes = await k8sRequest<any>(patchUrl, 'PATCH', patchBody, 'application/strategic-merge-patch+json');
+
+    if (patchRes.statusCode >= 400) {
+      throw new Error(`Failed to restart statefulset ${targetName}: HTTP ${patchRes.statusCode}`);
+    }
+
+    return {
+      success: true,
+      kind: 'StatefulSet',
+      name: targetName,
+      namespace: targetNs,
+      message: `Rollout restart successfully initiated for statefulset '${targetName}' in namespace '${targetNs}'.`,
+      restartedAt,
+      cliCommand: `kubectl rollout restart statefulset/${targetName} -n ${targetNs}`,
+      rolloutCommand: `kubectl rollout status statefulset/${targetName} -n ${targetNs}`,
+    };
+  }
+
+  if (found.kind === 'DaemonSet') {
+    const patchBody = {
+      spec: {
+        template: {
+          metadata: {
+            annotations: {
+              'kubectl.kubernetes.io/restartedAt': restartedAt,
+            },
+          },
+        },
+      },
+    };
+
+    const patchUrl = `/apis/apps/v1/namespaces/${targetNs}/daemonsets/${targetName}`;
+    const patchRes = await k8sRequest<any>(patchUrl, 'PATCH', patchBody, 'application/strategic-merge-patch+json');
+
+    if (patchRes.statusCode >= 400) {
+      throw new Error(`Failed to restart daemonset ${targetName}: HTTP ${patchRes.statusCode}`);
+    }
+
+    return {
+      success: true,
+      kind: 'DaemonSet',
+      name: targetName,
+      namespace: targetNs,
+      message: `Rollout restart successfully initiated for daemonset '${targetName}' in namespace '${targetNs}'.`,
+      restartedAt,
+      cliCommand: `kubectl rollout restart daemonset/${targetName} -n ${targetNs}`,
+      rolloutCommand: `kubectl rollout status daemonset/${targetName} -n ${targetNs}`,
+    };
+  }
+
+  if (found.kind === 'Pod') {
+    const deleteUrl = `/api/v1/namespaces/${targetNs}/pods/${targetName}`;
+    const delRes = await k8sRequest<any>(deleteUrl, 'DELETE');
+    if (delRes.statusCode >= 400) {
+      throw new Error(`Failed to delete pod ${targetName}: HTTP ${delRes.statusCode}`);
+    }
+
+    return {
+      success: true,
+      kind: 'Pod',
+      name: targetName,
+      namespace: targetNs,
+      message: `Pod '${targetName}' deleted in namespace '${targetNs}' to initiate restart.`,
+      restartedAt,
+      cliCommand: `kubectl delete pod ${targetName} -n ${targetNs}`,
+    };
+  }
+
+  throw new Error(`Unsupported workload kind: ${(found as any).kind}`);
+}
+
+export async function scaleWorkload(
+  name: string,
+  replicas: number,
+  namespace?: string
+): Promise<WorkloadScaleResult> {
+  const found = await findWorkload(name, namespace);
+  if (!found || (found.kind !== 'Deployment' && found.kind !== 'StatefulSet')) {
+    throw new Error(`Scalable workload '${name}' (Deployment or StatefulSet) not found`);
+  }
+
+  const targetNs = found.namespace;
+  const targetName = found.name;
+  const previousReplicas = found.raw?.spec?.replicas ?? 1;
+
+  const patchBody = {
+    spec: {
+      replicas,
+    },
+  };
+
+  const endpoint = found.kind === 'Deployment' ? 'deployments' : 'statefulsets';
+  const patchUrl = `/apis/apps/v1/namespaces/${targetNs}/${endpoint}/${targetName}`;
+  const patchRes = await k8sRequest<any>(patchUrl, 'PATCH', patchBody, 'application/strategic-merge-patch+json');
+
+  if (patchRes.statusCode >= 400) {
+    throw new Error(`Failed to scale ${found.kind.toLowerCase()} ${targetName}: HTTP ${patchRes.statusCode}`);
+  }
+
+  return {
+    success: true,
+    kind: found.kind,
+    name: targetName,
+    namespace: targetNs,
+    message: `Successfully scaled ${found.kind.toLowerCase()} '${targetName}' from ${previousReplicas} to ${replicas} replica(s).`,
+    previousReplicas,
+    newReplicas: replicas,
+    cliCommand: `kubectl scale ${found.kind.toLowerCase()} ${targetName} --replicas=${replicas} -n ${targetNs}`,
+  };
+}
+
+
 

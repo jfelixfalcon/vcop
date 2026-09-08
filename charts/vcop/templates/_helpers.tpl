@@ -86,3 +86,13 @@ app.kubernetes.io/name: {{ include "vcop.name" . }}-metrics-db
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: metrics-db
 {{- end }}
+
+{{/*
+AI Assistant selector labels
+*/}}
+{{- define "vcop.ai.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "vcop.name" . }}-ai
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: inference-engine
+{{- end }}
+

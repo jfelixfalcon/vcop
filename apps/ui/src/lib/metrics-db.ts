@@ -386,3 +386,193 @@ export async function getSparklineSeries(
     mem: recent.map((s) => s.memoryBytes),
   };
 }
+
+export interface AggregateMetricsQuery {
+  namespace?: string;
+  vcluster?: string;
+  hours?: number;
+  workloadName?: string;
+}
+
+export interface AggregateMetricsResult {
+  sampleCount: number;
+  avgCpuMillis: number;
+  maxCpuMillis: number;
+  minCpuMillis: number;
+  avgMemoryBytes: number;
+  avgMemoryMB: number;
+  maxMemoryBytes: number;
+  maxMemoryMB: number;
+  totalRestarts: number;
+  timeWindowHours: number;
+  targetNamespace?: string;
+  workloads: Array<{
+    workloadName: string;
+    workloadKind: string;
+    sampleCount: number;
+    avgCpuMillis: number;
+    maxCpuMillis: number;
+    avgMemoryMB: number;
+    maxMemoryMB: number;
+  }>;
+  availableNamespaces: Array<{
+    namespace: string;
+    sampleCount: number;
+    avgCpuMillis: number;
+    avgMemoryMB: number;
+  }>;
+}
+
+export async function getMetricsDbHealth(): Promise<{ connected: boolean; sampleCount?: number }> {
+  try {
+    const isReady = await initMetricsDb();
+    if (!isReady) return { connected: false };
+    const p = getPool();
+    const res = await p.query('SELECT count(*) FROM pod_metrics_samples');
+    return {
+      connected: true,
+      sampleCount: parseInt(res.rows?.[0]?.count || '0', 10),
+    };
+  } catch {
+    return { connected: false };
+  }
+}
+
+export async function queryAggregateMetrics(options: AggregateMetricsQuery): Promise<AggregateMetricsResult> {
+  const hours = options.hours && options.hours > 0 ? options.hours : 10;
+  const result: AggregateMetricsResult = {
+    sampleCount: 0,
+    avgCpuMillis: 0,
+    maxCpuMillis: 0,
+    minCpuMillis: 0,
+    avgMemoryBytes: 0,
+    avgMemoryMB: 0,
+    maxMemoryBytes: 0,
+    maxMemoryMB: 0,
+    totalRestarts: 0,
+    timeWindowHours: hours,
+    targetNamespace: options.namespace,
+    workloads: [],
+    availableNamespaces: [],
+  };
+
+  try {
+    const isReady = await initMetricsDb();
+    if (isReady) {
+      const p = getPool();
+
+      // 1. Fetch available namespaces with their stats
+      const nsRes = await p.query(`
+        SELECT 
+          namespace,
+          COUNT(*) as sample_count,
+          COALESCE(ROUND(AVG(cpu_millis), 1), 0) as avg_cpu_m,
+          COALESCE(ROUND(AVG(memory_bytes)/(1024*1024), 1), 0) as avg_mem_mb
+        FROM pod_metrics_samples
+        WHERE timestamp >= NOW() - ($1 || ' hours')::interval
+        GROUP BY namespace
+        ORDER BY avg_cpu_m DESC
+      `, [hours]);
+
+      result.availableNamespaces = (nsRes.rows || []).map((r) => ({
+        namespace: r.namespace,
+        sampleCount: parseInt(r.sample_count, 10),
+        avgCpuMillis: parseFloat(r.avg_cpu_m),
+        avgMemoryMB: parseFloat(r.avg_mem_mb),
+      }));
+
+      // 2. Fetch aggregate for target namespace (or all if omitted)
+      const params: any[] = [hours];
+      let whereClause = `WHERE timestamp >= NOW() - ($1 || ' hours')::interval`;
+      if (options.namespace) {
+        params.push(options.namespace);
+        whereClause += ` AND namespace = $${params.length}`;
+      }
+      if (options.vcluster) {
+        params.push(options.vcluster);
+        whereClause += ` AND vcluster = $${params.length}`;
+      }
+
+      const aggRes = await p.query(`
+        SELECT 
+          COUNT(*) as sample_count,
+          COALESCE(ROUND(AVG(cpu_millis), 2), 0) as avg_cpu_m,
+          COALESCE(MAX(cpu_millis), 0) as max_cpu_m,
+          COALESCE(MIN(cpu_millis), 0) as min_cpu_m,
+          COALESCE(ROUND(AVG(memory_bytes)), 0) as avg_mem_b,
+          COALESCE(MAX(memory_bytes), 0) as max_mem_b,
+          COALESCE(SUM(restarts), 0) as total_restarts
+        FROM pod_metrics_samples
+        ${whereClause}
+      `, params);
+
+      if (aggRes.rows && aggRes.rows.length > 0) {
+        const row = aggRes.rows[0];
+        result.sampleCount = parseInt(row.sample_count, 10);
+        result.avgCpuMillis = parseFloat(row.avg_cpu_m);
+        result.maxCpuMillis = parseInt(row.max_cpu_m, 10);
+        result.minCpuMillis = parseInt(row.min_cpu_m, 10);
+        result.avgMemoryBytes = parseInt(row.avg_mem_b, 10);
+        result.avgMemoryMB = Math.round(result.avgMemoryBytes / (1024 * 1024) * 10) / 10;
+        result.maxMemoryBytes = parseInt(row.max_mem_b, 10);
+        result.maxMemoryMB = Math.round(result.maxMemoryBytes / (1024 * 1024) * 10) / 10;
+        result.totalRestarts = parseInt(row.total_restarts, 10);
+      }
+
+      // 3. Workload breakdown
+      const wlRes = await p.query(`
+        SELECT 
+          workload_name,
+          workload_kind,
+          COUNT(*) as sample_count,
+          COALESCE(ROUND(AVG(cpu_millis), 1), 0) as avg_cpu_m,
+          COALESCE(MAX(cpu_millis), 0) as max_cpu_m,
+          COALESCE(ROUND(AVG(memory_bytes)/(1024*1024), 1), 0) as avg_mem_mb,
+          COALESCE(ROUND(MAX(memory_bytes)/(1024*1024), 1), 0) as max_mem_mb
+        FROM pod_metrics_samples
+        ${whereClause}
+        GROUP BY workload_name, workload_kind
+        ORDER BY avg_cpu_m DESC
+        LIMIT 10
+      `, params);
+
+      result.workloads = (wlRes.rows || []).map((r) => ({
+        workloadName: r.workload_name,
+        workloadKind: r.workload_kind,
+        sampleCount: parseInt(r.sample_count, 10),
+        avgCpuMillis: parseFloat(r.avg_cpu_m),
+        maxCpuMillis: parseInt(r.max_cpu_m, 10),
+        avgMemoryMB: parseFloat(r.avg_mem_mb),
+        maxMemoryMB: parseFloat(r.max_mem_mb),
+      }));
+
+      return result;
+    }
+  } catch (err: any) {
+    console.warn('[metrics-db] queryAggregateMetrics failed, fallback to memory:', err.message);
+  }
+
+  // In-memory fallback
+  const allSamples = Object.values(memoryFallbackBuffer).flat();
+  const filtered = allSamples.filter((s) => {
+    if (options.namespace && s.namespace !== options.namespace) return false;
+    if (options.vcluster && s.vcluster !== options.vcluster) return false;
+    return true;
+  });
+
+  if (filtered.length > 0) {
+    result.sampleCount = filtered.length;
+    const cpuSum = filtered.reduce((acc, s) => acc + s.cpuMillis, 0);
+    const memSum = filtered.reduce((acc, s) => acc + s.memoryBytes, 0);
+    result.avgCpuMillis = Math.round((cpuSum / filtered.length) * 10) / 10;
+    result.maxCpuMillis = Math.max(...filtered.map((s) => s.cpuMillis));
+    result.minCpuMillis = Math.min(...filtered.map((s) => s.cpuMillis));
+    result.avgMemoryBytes = Math.round(memSum / filtered.length);
+    result.avgMemoryMB = Math.round(result.avgMemoryBytes / (1024 * 1024) * 10) / 10;
+    result.maxMemoryBytes = Math.max(...filtered.map((s) => s.memoryBytes));
+    result.maxMemoryMB = Math.round(result.maxMemoryBytes / (1024 * 1024) * 10) / 10;
+    result.totalRestarts = filtered.reduce((acc, s) => acc + (s.restarts || 0), 0);
+  }
+
+  return result;
+}

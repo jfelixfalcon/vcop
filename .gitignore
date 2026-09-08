@@ -23,3 +23,8 @@ Thumbs.db
 
 # Release tarballs
 release-artifacts/
+
+# Local model weights cache
+models/
+*.gguf
+

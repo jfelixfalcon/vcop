@@ -192,6 +192,21 @@ rules:
       - update
       - watch
   - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - daemonsets
+      - statefulsets
+      - replicasets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
       - ""
     resources:
       - secrets
@@ -201,8 +216,11 @@ rules:
       - nodes
     verbs:
       - create
+      - delete
       - get
       - list
+      - patch
+      - update
       - watch
   - apiGroups:
       - metrics.k8s.io

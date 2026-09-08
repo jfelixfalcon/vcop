@@ -1,0 +1,109 @@
+{{- if .Values.ai.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vcop.fullname" . }}-ai
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: inference-engine
+spec:
+  replicas: {{ .Values.ai.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "vcop.ai.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vcop.labels" . | nindent 8 }}
+        {{- include "vcop.ai.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: gemma
+          image: "{{ if .Values.global.imageRegistry }}{{ .Values.global.imageRegistry }}/{{ end }}{{ .Values.ai.image.repository }}:{{ .Values.ai.image.tag }}"
+          imagePullPolicy: {{ default .Values.global.imagePullPolicy .Values.ai.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: MODEL_PATH
+              value: {{ default "/models/gemma-3-1b-it-Q4_K_M.gguf" .Values.ai.model.path | quote }}
+            - name: N_GPU_LAYERS
+              value: {{ default 99 .Values.ai.model.gpuLayers | quote }}
+            - name: CTX_SIZE
+              value: {{ default 4096 .Values.ai.model.contextSize | quote }}
+            - name: THREADS
+              value: {{ default 8 .Values.ai.model.threads | quote }}
+            {{- if .Values.ai.gpu.enabled }}
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "all"
+            {{- end }}
+          {{- if .Values.ai.securityContext }}
+          securityContext:
+            {{- toYaml .Values.ai.securityContext | nindent 12 }}
+          {{- end }}
+          {{- if .Values.ai.gpu.enabled }}
+          volumeMounts:
+            - mountPath: /dev/nvidia0
+              name: dev-nvidia0
+            - mountPath: /dev/nvidiactl
+              name: dev-nvidiactl
+            - mountPath: /dev/nvidia-uvm
+              name: dev-nvidia-uvm
+            - mountPath: /dev/nvidia-uvm-tools
+              name: dev-nvidia-uvm-tools
+            - mountPath: /dev/nvidia-modeset
+              name: dev-nvidia-modeset
+          {{- end }}
+          resources:
+            {{- toYaml .Values.ai.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: 8080
+            initialDelaySeconds: 4
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /v1/models
+              port: 8080
+            initialDelaySeconds: 6
+            periodSeconds: 15
+      {{- if .Values.ai.gpu.enabled }}
+      volumes:
+        - name: dev-nvidia0
+          hostPath:
+            path: /dev/nvidia0
+        - name: dev-nvidiactl
+          hostPath:
+            path: /dev/nvidiactl
+        - name: dev-nvidia-uvm
+          hostPath:
+            path: /dev/nvidia-uvm
+        - name: dev-nvidia-uvm-tools
+          hostPath:
+            path: /dev/nvidia-uvm-tools
+        - name: dev-nvidia-modeset
+          hostPath:
+            path: /dev/nvidia-modeset
+      {{- end }}
+      {{- with .Values.ai.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ai.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ai.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

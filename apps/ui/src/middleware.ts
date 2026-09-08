@@ -17,6 +17,8 @@ const PUBLIC_PATHS = [
   '/api/presets',
   '/api/cluster/capacity',
   '/api/cert-manager/issuers',
+  '/api/ai/status',
+  '/api/ai/chat',
   '/healthz',
 ];
 
