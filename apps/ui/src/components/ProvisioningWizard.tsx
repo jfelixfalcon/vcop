@@ -46,6 +46,8 @@ interface ProvisioningWizardProps {
 }
 
 export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) => {
+  const isAdmin = user?.role === 'admin';
+  const isDeveloper = user?.role === 'developers' || user?.role === 'developer';
   const [step, setStep] = useState<number>(1);
 
   // Cluster Baseline State
@@ -379,6 +381,10 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
         return;
       }
     }
+    if (isDeveloper) {
+      handleQuickLaunch();
+      return;
+    }
     setError(null);
     setStep((prev) => Math.min(prev + 1, 4));
   };
@@ -408,6 +414,7 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
 
       const payload: any = {
         clusterName: clusterName.trim().toLowerCase(),
+        baselineId: selectedBaselineId || (selectedBaseline ? selectedBaseline.id : 'dev-sandbox'),
         preset: sizePreset,
         owner: owner.trim() || 'Internal Developer Platform',
         allowedGroups: allowedGroups.split(',').map((s) => s.trim()).filter(Boolean),
@@ -549,54 +556,75 @@ policies:
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* Wizard Progress Bar */}
-      <div className="bg-cyber-900/80 border border-cyber-700/60 rounded-2xl p-4 backdrop-blur-sm shadow-lg">
-        <div className="flex items-center justify-between">
-          {[
-            { num: 1, label: 'Name & Identity', icon: Server },
-            { num: 2, label: 'Size & Policies', icon: Layers },
-            { num: 3, label: 'App Store ', icon: Package },
-            { num: 4, label: 'Lifecycle & Launch', icon: Clock },
-          ].map((item, idx) => {
-            const Icon = item.icon;
-            const isCompleted = step > item.num;
-            const isCurrent = step === item.num;
-
-            return (
-              <React.Fragment key={item.num}>
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center font-mono text-xs font-bold transition-all ${
-                      isCurrent
-                        ? 'bg-cyber-accent text-slate-950 shadow-glow-sm'
-                        : isCompleted
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                        : 'bg-cyber-800 text-slate-500 border border-cyber-700'
-                    }`}
-                  >
-                    {isCompleted ? <Check className="w-4 h-4" /> : item.num}
-                  </div>
-                  <div className="hidden sm:block">
-                    <p className={`text-xs font-medium ${isCurrent ? 'text-white font-semibold' : 'text-slate-400'}`}>
-                      {item.label}
-                    </p>
-                    <p className="text-[10px] text-slate-500 font-mono">Step 0{item.num}</p>
-                  </div>
-                </div>
-                {idx < 3 && (
-                  <div className="flex-1 mx-3 h-[2px] bg-cyber-800 rounded">
-                    <div
-                      className={`h-full transition-all duration-300 ${
-                        step > idx + 1 ? 'bg-cyber-accent w-full' : 'w-0'
-                      }`}
-                    ></div>
-                  </div>
-                )}
-              </React.Fragment>
-            );
-          })}
+      {/* Wizard Progress Bar / Developer Persona Banner */}
+      {isDeveloper ? (
+        <div className="bg-gradient-to-r from-amber-500/10 via-cyber-900 to-cyber-950 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-lg backdrop-blur-sm">
+          <div className="flex items-center gap-3.5">
+            <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+              <Shield className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
+                Developer Self-Service Baseline Provisioning
+                <span className="text-[10px] font-mono text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-500/40 uppercase font-semibold">
+                  Zero-Mistake Mode
+                </span>
+              </h3>
+              <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                Select an approved cluster baseline below, enter your cluster name, and deploy with 1 click. Low-level engine customizations are locked to guarantee stability.
+              </p>
+            </div>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-cyber-900/80 border border-cyber-700/60 rounded-2xl p-4 backdrop-blur-sm shadow-lg">
+          <div className="flex items-center justify-between">
+            {[
+              { num: 1, label: 'Name & Identity', icon: Server },
+              { num: 2, label: 'Size & Policies', icon: Layers },
+              { num: 3, label: 'App Store ', icon: Package },
+              { num: 4, label: 'Lifecycle & Launch', icon: Clock },
+            ].map((item, idx) => {
+              const Icon = item.icon;
+              const isCompleted = step > item.num;
+              const isCurrent = step === item.num;
+
+              return (
+                <React.Fragment key={item.num}>
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center font-mono text-xs font-bold transition-all ${
+                        isCurrent
+                          ? 'bg-cyber-accent text-slate-950 shadow-glow-sm'
+                          : isCompleted
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-cyber-800 text-slate-500 border border-cyber-700'
+                      }`}
+                    >
+                      {isCompleted ? <Check className="w-4 h-4" /> : item.num}
+                    </div>
+                    <div className="hidden sm:block">
+                      <p className={`text-xs font-medium ${isCurrent ? 'text-white font-semibold' : 'text-slate-400'}`}>
+                        {item.label}
+                      </p>
+                      <p className="text-[10px] text-slate-500 font-mono">Step 0{item.num}</p>
+                    </div>
+                  </div>
+                  {idx < 3 && (
+                    <div className="flex-1 mx-3 h-[2px] bg-cyber-800 rounded">
+                      <div
+                        className={`h-full transition-all duration-300 ${
+                          step > idx + 1 ? 'bg-cyber-accent w-full' : 'w-0'
+                        }`}
+                      ></div>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Main Wizard Form Container */}
       <div className="relative bg-cyber-900/90 border border-cyber-700/70 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-md overflow-hidden">
@@ -632,13 +660,15 @@ policies:
                     Predefined configuration with zero-touch wildcard Ingress. Select a baseline to deploy with 1 click.
                   </p>
                 </div>
-                <a
-                  href="/admin/baselines"
-                  className="text-[11px] text-cyan-400 hover:text-cyan-300 font-mono flex items-center gap-1 hover:underline"
-                >
-                  <span>Manage Baselines</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
+                {isAdmin && (
+                  <a
+                    href="/admin/baselines"
+                    className="text-[11px] text-cyan-400 hover:text-cyan-300 font-mono flex items-center gap-1 hover:underline"
+                  >
+                    <span>Manage Baselines</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
               </div>
 
               {baselines.length > 0 ? (
@@ -853,14 +883,16 @@ policies:
                       {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 stroke-[2.5]" />}
                       <span>1-Click Deploy</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setStep(2)}
-                      className="px-3.5 py-2.5 rounded-xl bg-cyber-950 hover:bg-cyber-800 border border-cyber-700 text-xs font-mono text-slate-300 hover:text-white transition-colors"
-                      title="Customize underlying compute, storage, apps, and Istio settings"
-                    >
-                      <span>Customize →</span>
-                    </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setStep(2)}
+                        className="px-3.5 py-2.5 rounded-xl bg-cyber-950 hover:bg-cyber-800 border border-cyber-700 text-xs font-mono text-slate-300 hover:text-white transition-colors"
+                        title="Customize underlying compute, storage, apps, and Istio settings"
+                      >
+                        <span>Customize →</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2123,7 +2155,26 @@ policies:
           </div>
 
           <div>
-            {step < 4 ? (
+            {isDeveloper ? (
+              <button
+                type="button"
+                onClick={handleQuickLaunch}
+                disabled={submitting}
+                className="px-6 py-2.5 bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-bold text-xs rounded-xl shadow-glow-md flex items-center gap-2 transition-all disabled:opacity-50 font-mono"
+              >
+                {submitting ? (
+                  <>
+                    <Zap className="w-4 h-4 animate-spin" />
+                    Deploying from Baseline...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 stroke-[2.5]" />
+                    Deploy Cluster from Baseline
+                  </>
+                )}
+              </button>
+            ) : step < 4 ? (
               <button
                 type="button"
                 onClick={handleNext}

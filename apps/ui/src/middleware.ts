@@ -79,16 +79,27 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return context.redirect('/');
   }
 
-  // 5. RBAC Persona Guards for Viewers
-  if (user.role !== 'admin') {
-    // Viewers cannot access cluster provisioning (/new)
-    if (pathname === '/new' || pathname.startsWith('/new/')) {
+  // 5. RBAC Persona Guards
+  const isAdmin = user.role === 'admin';
+  const isDeveloper = user.role === 'developers' || user.role === 'developer';
+  const isViewer = !isAdmin && !isDeveloper;
+
+  // A. Provisioning Wizard (/new):
+  // Admins and Developers can access /new. Viewers CANNOT!
+  if (pathname === '/new' || pathname.startsWith('/new/')) {
+    if (isViewer) {
       authLog(`[Middleware] Blocking viewer from accessing provisioning wizard ${pathname}`);
       return context.redirect('/?denied=admin_required');
     }
+  }
 
-    // Protect admin-only pages and APIs
-    if (pathname.startsWith('/admin/') || pathname.startsWith('/api/admin/')) {
+  // B. Administration pages and APIs (/admin/*, /api/admin/*):
+  // Version registry, OIDC policies, Baselines management, AI models are ADMIN ONLY.
+  // Exception: Authenticated developers need to read baselines via GET /api/admin/baselines to render presets in /new.
+  if (pathname.startsWith('/admin/') || pathname.startsWith('/api/admin/')) {
+    const isBaselinesRead = pathname === '/api/admin/baselines' && request.method.toUpperCase() === 'GET';
+    if (!isAdmin && !isBaselinesRead) {
+      authLog(`[Middleware] Blocking non-admin user (${user.username}, role=${user.role}) from admin route ${request.method} ${pathname}`);
       if (pathname.startsWith('/api/')) {
         return new Response(
           JSON.stringify({
@@ -103,16 +114,59 @@ export const onRequest = defineMiddleware(async (context, next) => {
       }
       return context.redirect('/?denied=admin_required');
     }
+  }
 
-    // Viewers can view clusters and get kubeconfigs, but CANNOT perform any mutations (POST, PUT, PATCH, DELETE)
-    const method = request.method.toUpperCase();
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-      if (pathname.startsWith('/api/vclusters') || pathname.startsWith('/api/appstore') || pathname.startsWith('/api/ai/config')) {
+  // C. AI model configuration mutations (/api/ai/config) and Registry mutations (/api/registry/config):
+  // Strictly ADMIN ONLY.
+  if (
+    (pathname.startsWith('/api/ai/config') || pathname.startsWith('/api/registry/config')) &&
+    ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method.toUpperCase())
+  ) {
+    if (!isAdmin) {
+      authLog(`[Middleware] Blocking non-admin (${user.username}) from configuring AI/registry`);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Forbidden: Administrator privileges required.',
+        }),
+        {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+  }
+
+  // D. AppStore catalog modifications:
+  // POST/PUT/DELETE on /api/appstore/apps and /api/appstore/groups are ADMIN ONLY.
+  if (pathname.startsWith('/api/appstore/') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method.toUpperCase())) {
+    if (!isAdmin) {
+      authLog(`[Middleware] Blocking non-admin (${user.username}) from modifying appstore catalog`);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Forbidden: Administrator privileges required to manage App Store catalog.',
+        }),
+        {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+  }
+
+  // E. Cluster lifecycle and mutation guards:
+  // Admins and Developers can create and mutate virtual clusters (quotas, RBAC, sleep/wake, apps, DR).
+  // Viewers CANNOT perform any mutations (POST, PUT, PATCH, DELETE).
+  const method = request.method.toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    if (isViewer) {
+      if (pathname.startsWith('/api/vclusters')) {
         authLog(`[Middleware] Blocking viewer ${user.username} from mutating ${method} ${pathname}`);
         return new Response(
           JSON.stringify({
             success: false,
-            error: 'Forbidden: Viewer persona has read-only access. Administrator privileges required.',
+            error: 'Forbidden: Viewer persona has read-only access. Administrator or Developer privileges required.',
           }),
           {
             status: 403,

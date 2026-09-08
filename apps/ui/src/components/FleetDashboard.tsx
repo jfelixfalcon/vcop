@@ -104,7 +104,9 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
   }, []);
 
   const isAdmin = user?.role === 'admin';
-  const isViewer = user?.role === 'viewer';
+  const isDeveloper = user?.role === 'developers' || user?.role === 'developer';
+  const isViewer = !isAdmin && !isDeveloper;
+  const canManage = isAdmin || isDeveloper;
 
   // Extract all distinct cluster groups across fleet
   const availableGroups = Array.from(
@@ -315,8 +317,30 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
         </div>
       )}
 
+      {/* Developer Access Mode Alert Banner */}
+      {isDeveloper && user && (
+        <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-3 text-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl shrink-0">
+              <Shield className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-white flex items-center gap-2 font-mono">
+                Developer Persona Active
+                <span className="text-[10px] font-mono text-amber-400 bg-amber-950 px-2 py-0.5 rounded border border-amber-800 uppercase font-semibold">
+                  Baseline Provisioning & Cluster Operations
+                </span>
+              </h4>
+              <p className="text-slate-300 mt-0.5 font-mono text-[11px] leading-relaxed">
+                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You can provision clusters from predefined baselines, adjust cluster quotas, manage RBAC, trigger sleep/wake, install apps, and take disaster recovery backups. Global registry, baseline management, and AI settings are reserved for administrators.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Viewer Access Mode Alert Banner */}
-      {!isAdmin && user && (
+      {isViewer && user && (
         <div className="bg-cyan-950/30 border border-cyan-500/30 rounded-2xl p-4 flex items-center justify-between gap-3 text-xs animate-in fade-in duration-200">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-cyan-500/20 text-cyan-400 rounded-xl shrink-0">
@@ -330,7 +354,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                 </span>
               </h4>
               <p className="text-slate-300 mt-0.5 font-mono text-[11px] leading-relaxed">
-                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have view access to all virtual clusters and metrics, and can retrieve cluster kubeconfigs via "Connect". Cluster provisioning and configuration modifications are reserved for administrators.
+                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have view access to all virtual clusters and metrics, and can retrieve cluster kubeconfigs via "Connect". Cluster provisioning and configuration modifications are reserved for administrators and developers.
               </p>
             </div>
           </div>
@@ -416,8 +440,8 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
               </button>
             </div>
 
-            {/* Manage Groups Modal Trigger (Admin) */}
-            {isAdmin && (
+            {/* Manage Groups Modal Trigger (Admin & Developer) */}
+            {canManage && (
               <button
                 onClick={() => {
                   setGroupModalTargetCluster(null);
@@ -436,8 +460,8 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
               </button>
             )}
 
-            {/* Action button (Admins only) */}
-            {isAdmin && (
+            {/* Action button (Admins and Developers) */}
+            {canManage && (
               <a
                 href="/new"
                 className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm flex items-center justify-center gap-1.5 transition-all shrink-0"
@@ -486,11 +510,11 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
           <Server className="w-10 h-10 text-slate-600 mx-auto mb-3" />
           <h4 className="text-base font-medium text-slate-300">No matching virtual clusters</h4>
           <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-            {isAdmin
+            {canManage
               ? 'No virtual clusters match your current filter criteria or none have been provisioned yet.'
               : 'No virtual clusters are currently provisioned in this fleet.'}
           </p>
-          {isAdmin ? (
+          {canManage ? (
             <a
               href="/new"
               className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-cyber-800 hover:bg-cyber-700 text-slate-200 text-xs rounded-xl border border-cyber-700 transition-colors"
@@ -569,7 +593,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         ) : (
                           <span className="text-[10px] text-slate-500 italic">—</span>
                         )}
-                        {isAdmin && (
+                        {canManage && (
                           <button
                             type="button"
                             onClick={() => {
@@ -631,7 +655,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         >
                           <Terminal className="w-3.5 h-3.5 text-cyber-accent" />
                         </button>
-                        {isAdmin && (
+                        {canManage && (
                           <>
                             <button
                               onClick={() => {
@@ -666,7 +690,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
-                        {isAdmin && (
+                        {canManage && (
                           <button
                             onClick={() => {
                               setSelectedCluster(cluster);
@@ -746,7 +770,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                     ) : (
                       <span className="text-[10px] font-mono text-slate-500 italic">No group</span>
                     )}
-                    {isAdmin && (
+                    {canManage && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -841,7 +865,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                       Connect
                     </button>
 
-                    {isAdmin && (
+                    {canManage && (
                       <>
                         <button
                           onClick={() => {
@@ -891,7 +915,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
-                    {isAdmin && (
+                    {canManage && (
                       <button
                         onClick={() => {
                           setSelectedCluster(cluster);
@@ -916,10 +940,10 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
         cluster={selectedCluster}
         isOpen={activeModal === 'kubeconfig'}
         onClose={() => setActiveModal(null)}
-        isAdmin={isAdmin}
+        isAdmin={canManage}
       />
 
-      {isAdmin && (
+      {canManage && (
         <>
           <SleepModal
             cluster={selectedCluster}

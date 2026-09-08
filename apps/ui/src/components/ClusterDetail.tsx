@@ -185,7 +185,9 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   }, [clusterName]);
 
   const isAdmin = user?.role === 'admin';
-  const isViewer = user?.role === 'viewer';
+  const isDeveloper = user?.role === 'developers' || user?.role === 'developer';
+  const isViewer = !isAdmin && !isDeveloper;
+  const canManage = isAdmin || isDeveloper;
 
   if (loading && !cluster) {
     return (
@@ -254,7 +256,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <span>•</span>
               <span>Engine: <span className="text-cyan-400">vCluster {vclusterVer}</span></span>
               <span>•</span>
-              {isAdmin ? (
+              {canManage ? (
                 <button
                   onClick={() => openKubeconfigModal('endpoint')}
                   className="hover:text-cyan-300 hover:underline flex items-center gap-1 text-slate-300"
@@ -293,7 +295,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             Connect & Kubeconfig
           </button>
 
-          {isAdmin && (
+          {canManage && (
             <>
               <button
                 onClick={() => setActiveModal('sleep')}
@@ -362,8 +364,30 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         </div>
       </div>
 
+      {/* Developer Notice Banner */}
+      {isDeveloper && user && (
+        <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-3 text-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl shrink-0">
+              <Shield className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-white flex items-center gap-2 font-mono">
+                Developer Persona Active
+                <span className="text-[10px] font-mono text-amber-400 bg-amber-950 px-2 py-0.5 rounded border border-amber-800 uppercase font-semibold">
+                  Cluster Operations & Quota Management
+                </span>
+              </h4>
+              <p className="text-slate-300 mt-0.5 font-mono text-[11px] leading-relaxed">
+                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have full permissions to modify this virtual cluster including quotas, RBAC, sleep/wake, apps, and Disaster Recovery. Global registries, baselines, and AI models are managed by administrators.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Viewer Notice Banner */}
-      {!isAdmin && user && (
+      {isViewer && user && (
         <div className="bg-cyan-950/30 border border-cyan-500/30 rounded-2xl p-4 flex items-center justify-between gap-3 text-xs animate-in fade-in duration-200">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-cyan-500/20 text-cyan-400 rounded-xl shrink-0">
@@ -377,7 +401,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 </span>
               </h4>
               <p className="text-slate-300 mt-0.5 font-mono text-[11px] leading-relaxed">
-                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have read-only visibility into cluster state, workloads, and telemetry, and can retrieve kubeconfigs via "Connect & Kubeconfig". Resource mutations and administrative controls are reserved for administrators.
+                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have read-only visibility into cluster state, workloads, and telemetry, and can retrieve kubeconfigs via "Connect & Kubeconfig". Resource mutations and administrative controls are reserved for administrators and developers.
               </p>
             </div>
           </div>
@@ -403,7 +427,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               </p>
             </div>
           </div>
-          {isAdmin && (
+          {canManage && (
             <button
               onClick={() => setActiveModal('sleep')}
               className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all self-start sm:self-auto shrink-0"
@@ -473,7 +497,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
           <div>
             <div className="flex justify-between items-center">
               <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Cluster Grouping</span>
-              {isAdmin && (
+              {canManage && (
                 <button
                   onClick={() => setActiveModal('group')}
                   className="text-[10px] font-mono text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1"
@@ -588,7 +612,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   CoreDNS, Metrics-Server, and Istio Ingress with Cert-Manager TLS termination.
                 </p>
               </div>
-              {isAdmin && (
+              {canManage && (
                 <button
                   onClick={() => setActiveModal('istio')}
                   className="px-3 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all self-start sm:self-auto"
@@ -828,7 +852,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 Dual-Scope
               </span>
             </div>
-            {isAdmin && (
+            {canManage && (
               <button
                 onClick={() => setActiveModal('quota')}
                 className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all self-start sm:self-auto shrink-0"
@@ -1093,7 +1117,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   Access & RBAC Delegation
                 </h3>
               </div>
-              {isAdmin && (
+              {canManage && (
                 <button
                   onClick={() => setActiveModal('rbac')}
                   className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all self-start sm:self-auto shrink-0"
@@ -1415,7 +1439,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 </h3>
               </div>
 
-              {isAdmin ? (
+              {canManage ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -1678,7 +1702,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
 
                   {/* Actions */}
                   <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
-                    {isAdmin && (
+                    {canManage && (
                       <button
                         onClick={async () => {
                           try {
@@ -1715,7 +1739,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                       <span>Config & Values</span>
                     </button>
 
-                    {isAdmin && (
+                    {canManage && (
                       <button
                         onClick={async () => {
                           if (
@@ -1753,7 +1777,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
           )}
 
           {/* App Store Catalog & Quick-Deploy Suites Section */}
-          {isAdmin && (
+          {canManage && (
             <div className="bg-cyber-900/60 border border-cyber-800 rounded-3xl p-6 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
@@ -1896,7 +1920,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
 
       {/* TAB CONTENT: Disaster Recovery */}
       {activeTab === 'dr' && (
-        <DisasterRecoveryTab cluster={cluster} onRefresh={fetchCluster} isAdmin={isAdmin} />
+        <DisasterRecoveryTab cluster={cluster} onRefresh={fetchCluster} isAdmin={canManage} />
       )}
 
       {/* TAB CONTENT: Effective vCluster 0.36 YAML */}
@@ -1919,10 +1943,10 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         initialTab={kubeconfigInitialTab}
         onClose={() => setActiveModal(null)}
         onClusterUpdated={fetchCluster}
-        isAdmin={isAdmin}
+        isAdmin={canManage}
       />
 
-      {isAdmin && (
+      {canManage && (
         <>
           <UpgradeModal
             cluster={cluster}

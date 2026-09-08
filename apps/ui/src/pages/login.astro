@@ -150,14 +150,21 @@ const displayError = error ? (errorMessages[error] || decodeURIComponent(error))
         <div class="mt-6 pt-5 border-t border-cyber-800/80 space-y-2 text-[11px] font-mono text-slate-400">
           <p class="font-semibold text-slate-300">Access Roles & Capabilities:</p>
           <div class="grid grid-cols-1 gap-2 pt-1">
-            <div class="p-2 rounded-lg bg-cyber-950/60 border border-cyber-800/60">
-              <span class="text-cyan-400 font-bold">Admin:</span> Full control (provision, adjust quotas, sleep/wake, upgrade, teardown, get kubeconfig).
+            <div class="p-2.5 rounded-lg bg-cyber-950/60 border border-cyber-800/60">
+              <span class="text-purple-400 font-bold">Admin:</span> Full platform control (provisioning, version registry, OIDC policies, baselines, AI models, and all cluster lifecycle operations).
             </div>
-            <div class="p-2 rounded-lg bg-cyber-950/60 border border-cyber-800/60">
-              <span class="text-blue-400 font-bold">Viewer:</span> View owned/group clusters and download kubeconfig. Modifications blocked.
+            <div class="p-2.5 rounded-lg bg-cyber-950/60 border border-cyber-800/60">
+              <span class="text-amber-400 font-bold">Developers:</span> Self-service cluster provisioning using predefined baselines, and full cluster management (quotas, RBAC, sleep/wake, apps, DR). Global platform registries, baselines, and AI models are read-only or restricted.
+            </div>
+            <div class="p-2.5 rounded-lg bg-cyber-950/60 border border-cyber-800/60">
+              <span class="text-cyan-400 font-bold">Viewer:</span> View all virtual clusters and metrics, and retrieve kubeconfigs via "Connect". Cluster provisioning and modifications are blocked.
             </div>
           </div>
-          <div class="pt-2 text-[10px] text-slate-500">
+          <div class="pt-2 text-[10px] text-slate-500 flex flex-wrap gap-x-3 gap-y-1">
+            <span>Demo Breakglass:</span>
+            <span class="text-slate-400">admin / vcop-breakglass-admin</span>
+            <span class="text-slate-400">dev / dev123</span>
+            <span class="text-slate-400">viewer / viewer123</span>
           </div>
         </div>
       </div>

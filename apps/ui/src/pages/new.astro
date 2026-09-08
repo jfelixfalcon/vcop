@@ -2,11 +2,13 @@
 import Layout from '../layouts/Layout.astro';
 import { ProvisioningWizard } from '../components/ProvisioningWizard';
 
+import { canUserCreateCluster } from '../lib/auth';
+
 const user = Astro.locals.user;
 if (!user) {
   return Astro.redirect('/login?redirect=/new');
 }
-if (user.role !== 'admin') {
+if (!canUserCreateCluster(user)) {
   return Astro.redirect('/?denied=admin_required');
 }
 ---

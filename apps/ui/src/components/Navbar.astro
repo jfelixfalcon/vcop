@@ -21,6 +21,8 @@ import {
 const pathname = Astro.url.pathname;
 const user = Astro.locals.user;
 const isAdmin = user?.role === 'admin';
+const isDeveloper = user?.role === 'developers' || user?.role === 'developer';
+const canCreate = isAdmin || isDeveloper;
 
 // Navigation active states
 const isClustersActive = pathname === '/' || pathname.startsWith('/clusters');
@@ -98,14 +100,14 @@ if (pathname.startsWith('/clusters/')) {
       <div class="hidden md:flex items-center gap-2 px-2.5 py-1 rounded-full bg-cyber-900/60 border border-cyber-800/80 text-xs font-mono" title="vCOp Operator running healthy on host Kubernetes cluster">
         <span class="relative flex h-2 w-2">
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_rgba(160,185,129,0.6)]"></span>
         </span>
         <span class="text-slate-400 text-[11px]">Operator</span>
         <span class="text-emerald-400 font-semibold text-[11px]">Active</span>
       </div>
 
-      <!-- Quick Action: New Cluster Button (Admins only) -->
-      {isAdmin && (
+      <!-- Quick Action: New Cluster Button (Admins and Developers) -->
+      {canCreate && (
         <a
           href="/new"
           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-[0_0_14px_rgba(6,182,212,0.3)] hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all font-mono"
@@ -129,6 +131,8 @@ if (pathname.startsWith('/clusters/')) {
             <div class={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold uppercase transition-all ${
               isAdmin
                 ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-[0_0_10px_rgba(168,85,247,0.25)]'
+                : isDeveloper
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.25)]'
                 : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-[0_0_10px_rgba(6,182,212,0.25)]'
             }`}>
               {user.username.slice(0, 2)}
@@ -151,9 +155,11 @@ if (pathname.startsWith('/clusters/')) {
                 <span class={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider ${
                   isAdmin
                     ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                    : isDeveloper
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                     : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
                 }`}>
-                  {isAdmin ? 'Admin' : 'Viewer'}
+                  {isAdmin ? 'Admin' : isDeveloper ? 'Developer' : 'Viewer'}
                 </span>
               </div>
               <p class="text-[11px] font-mono text-slate-400 truncate mt-0.5">{user.email || `${user.username}@cluster.local`}</p>
@@ -364,8 +370,8 @@ if (pathname.startsWith('/clusters/')) {
           </a>
         )}
 
-        <!-- Quick Deploy: Provisioning (Admins only) -->
-        {isAdmin && (
+        <!-- Quick Deploy: Provisioning (Admins & Developers) -->
+        {canCreate && (
           <a
             href="/new"
             class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
@@ -418,7 +424,7 @@ if (pathname.startsWith('/clusters/')) {
         </a>
       </>
     )}
-    {isAdmin && (
+    {canCreate && (
       <a href="/new" class="flex items-center gap-2.5 px-3 py-2 text-xs text-cyan-300 hover:text-white hover:bg-cyan-500/10 rounded-xl transition-colors font-mono font-semibold">
         <Plus class="w-4 h-4 text-cyan-400" />
         <span>Create Virtual Cluster</span>

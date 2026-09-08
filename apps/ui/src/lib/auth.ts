@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { VirtualCluster } from './types';
 
-export type UserRole = 'admin' | 'viewer';
+export type UserRole = 'admin' | 'developers' | 'developer' | 'viewer';
 
 export interface UserSession {
   id: string;
@@ -21,8 +21,10 @@ export const OIDC_VERIFIER_COOKIE_NAME = 'vcop_oidc_verifier';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'vcop-super-secret-jwt-signing-key-2026';
 const BREAKGLASS_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const BREAKGLASS_PASSWORD = process.env.ADMIN_PASSWORD || 'vcop-breakglass-admin';
-const VIEWER_USERNAME = process.env.VIEWER_USERNAME || 'dev';
-const VIEWER_PASSWORD = process.env.VIEWER_PASSWORD || 'dev123';
+const DEV_USERNAME = process.env.DEV_USERNAME || 'dev';
+const DEV_PASSWORD = process.env.DEV_PASSWORD || 'dev123';
+const VIEWER_USERNAME = process.env.VIEWER_USERNAME || 'viewer';
+const VIEWER_PASSWORD = process.env.VIEWER_PASSWORD || 'viewer123';
 
 // Auto-allow custom CA / self-signed TLS certificates for internal cluster IdPs unless explicitly forbidden with '1'
 if (process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '1') {
@@ -181,15 +183,29 @@ export function validateBreakglass(username: string, password: string): UserSess
     };
   }
 
-  // 2. Developer Viewer (test account)
+  // 2. Developer User (test account)
+  if ((u === DEV_USERNAME || u === 'developer' || u === 'developers') && p === DEV_PASSWORD) {
+    return {
+      id: 'dev-user',
+      username: DEV_USERNAME,
+      email: 'dev@vops.local',
+      name: 'Developer User',
+      role: 'developers',
+      groups: ['developers'],
+      method: 'breakglass',
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+    };
+  }
+
+  // 3. Viewer User (test account)
   if (u === VIEWER_USERNAME && p === VIEWER_PASSWORD) {
     return {
-      id: 'viewer-dev',
+      id: 'viewer-user',
       username: VIEWER_USERNAME,
-      email: 'dev@vops.local',
-      name: 'Dev User',
+      email: 'viewer@vops.local',
+      name: 'Viewer User',
       role: 'viewer',
-      groups: ['developers'],
+      groups: ['viewers'],
       method: 'breakglass',
       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
     };
@@ -199,7 +215,7 @@ export function validateBreakglass(username: string, password: string): UserSess
 }
 
 /**
- * Resolves whether an OIDC user is assigned Admin or Viewer role based on email or groups.
+ * Resolves whether an OIDC user is assigned Admin, Developers, or Viewer role based on email or groups.
  */
 export function resolveOidcRole(email: string, groups: string[]): UserRole {
   const normEmail = email.toLowerCase().trim();
@@ -212,6 +228,14 @@ export function resolveOidcRole(email: string, groups: string[]): UserRole {
   for (const adminGroup of OIDC_CONFIG.adminGroups) {
     if (normGroups.includes(adminGroup)) {
       return 'admin';
+    }
+  }
+
+  // Check Developer groups
+  const devGroups = ['developers', 'devs', 'developer', 'engineering', 'dev'];
+  for (const dg of devGroups) {
+    if (normGroups.includes(dg)) {
+      return 'developers';
     }
   }
 
@@ -471,10 +495,10 @@ export async function exchangeOidcCode(
 
 /**
  * Evaluates whether a user is authorized to VIEW a specific virtual cluster.
- * Admins and Viewers can see all virtual clusters, telemetry, and metrics across the fleet.
+ * Admins, Developers, and Viewers can see all virtual clusters, telemetry, and metrics across the fleet.
  */
 export function canUserViewCluster(user: UserSession, cluster?: VirtualCluster): boolean {
-  if (user.role === 'admin' || user.role === 'viewer') {
+  if (user.role === 'admin' || user.role === 'viewer' || user.role === 'developers' || user.role === 'developer') {
     return true;
   }
   return false;
@@ -482,25 +506,54 @@ export function canUserViewCluster(user: UserSession, cluster?: VirtualCluster):
 
 /**
  * Evaluates whether a user is authorized to retrieve the cluster kubeconfig.
- * Both Admins and Viewers can connect and download kubeconfigs.
+ * Admins, Developers, and Viewers can connect and download kubeconfigs.
  */
 export function canUserGetKubeconfig(user: UserSession, cluster?: VirtualCluster): boolean {
-  return user.role === 'admin' || user.role === 'viewer';
+  return user.role === 'admin' || user.role === 'viewer' || user.role === 'developers' || user.role === 'developer';
 }
 
 /**
  * Evaluates whether a user is authorized to MANAGE a virtual cluster.
- * Strictly restricted to Admins. Viewers CANNOT modify resources, scale, sleep, wake, or delete clusters.
+ * Restricted to Admins and Developers. Viewers CANNOT modify resources, scale, sleep, wake, or delete clusters.
  */
 export function canUserManageCluster(user: UserSession): boolean {
-  return user.role === 'admin';
+  return user.role === 'admin' || user.role === 'developers' || user.role === 'developer';
 }
 
 /**
  * Evaluates whether a user is authorized to CREATE new virtual clusters.
- * Strictly restricted to Admins. Viewers CANNOT provision new clusters.
+ * Restricted to Admins and Developers (developers deploy via baselines). Viewers CANNOT provision new clusters.
  */
 export function canUserCreateCluster(user: UserSession): boolean {
+  return user.role === 'admin' || user.role === 'developers' || user.role === 'developer';
+}
+
+/**
+ * Evaluates whether a user is an administrator.
+ */
+export function isUserAdmin(user: UserSession): boolean {
+  return user.role === 'admin';
+}
+
+/**
+ * Evaluates whether a user has the developer persona.
+ */
+export function isUserDeveloper(user: UserSession): boolean {
+  return user.role === 'developers' || user.role === 'developer';
+}
+
+/**
+ * Evaluates whether a user has the viewer persona.
+ */
+export function isUserViewer(user: UserSession): boolean {
+  return user.role === 'viewer';
+}
+
+/**
+ * Evaluates whether a user is authorized to manage admin settings (registries, OIDC, baselines, AI).
+ * Strictly restricted to Admins.
+ */
+export function canUserManageAdminSettings(user: UserSession): boolean {
   return user.role === 'admin';
 }
 
@@ -519,6 +572,7 @@ export async function getAuthConfig() {
       enabled: true,
       username: BREAKGLASS_USERNAME,
       hasDefaultCredentials: BREAKGLASS_USERNAME === 'admin' && BREAKGLASS_PASSWORD === 'vcop-breakglass-admin',
+      demoDevUsername: DEV_USERNAME,
       demoViewerUsername: VIEWER_USERNAME,
     },
   };

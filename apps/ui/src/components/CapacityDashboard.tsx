@@ -25,6 +25,8 @@ interface Props {
 
 export default function CapacityDashboard({ currentUser }: Props = {}) {
   const isAdmin = currentUser?.role === 'admin';
+  const isDeveloper = currentUser?.role === 'developers' || currentUser?.role === 'developer';
+  const canCreate = isAdmin || isDeveloper;
   const [data, setData] = useState<ClusterCapacityData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +100,7 @@ export default function CapacityDashboard({ currentUser }: Props = {}) {
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-cyan-400' : ''}`} />
             <span>Refresh</span>
           </button>
-          {isAdmin && (
+          {canCreate && (
             <a
               href="/new"
               className="flex items-center gap-2 px-3.5 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm transition-all"
