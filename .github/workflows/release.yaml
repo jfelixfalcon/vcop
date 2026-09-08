@@ -20,6 +20,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Clean Prior Releases
+        run: |
+          echo "Listing and removing any prior releases to ensure a clean official release..."
+          releases=$(gh api --paginate repos/${{ github.repository }}/releases --jq '.[].id' || true)
+          for rel_id in $releases; do
+            echo "Deleting prior release ID: $rel_id"
+            gh api -X DELETE repos/${{ github.repository }}/releases/$rel_id || true
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install Helm 3
         uses: azure/setup-helm@v4
         with:
@@ -27,13 +38,13 @@ jobs:
 
       - name: Prepare Release Artifacts Directory
         run: |
+          rm -rf dist
           mkdir -p dist
 
       - name: Package Helm Charts
         run: |
           helm package charts/vcop --destination dist/
           helm package charts/vcluster-istio --destination dist/
-          helm repo index dist/ --url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
 
       - name: Assemble All-In-One Kubernetes Manifests Bundle
         run: |
@@ -72,11 +83,10 @@ jobs:
         with:
           files: |
             dist/*.tgz
-            dist/index.yaml
             dist/vcop-install.yaml
             dist/crds.yaml
             dist/checksums.txt
-          name: "Release ${{ github.ref_name }} - vCOp Platform & Operations Center"
+          name: "Release ${{ github.ref_name }} - Virtual Cluster Operator & Operations Center"
           generate_release_notes: true
           draft: false
           prerelease: false
