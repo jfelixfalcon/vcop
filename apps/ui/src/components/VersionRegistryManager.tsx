@@ -517,7 +517,7 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
       </div>
 
       {/* Navigation Filter Tabs */}
-      <div className="flex items-center gap-1.5 p-1 bg-cyber-950 border border-cyber-800 rounded-xl overflow-x-auto text-xs font-mono">
+      <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-cyber-950 border border-cyber-800 rounded-xl text-xs font-mono">
         <button
           onClick={() => setActiveTab("all")}
           className={`px-3 py-1.5 rounded-lg transition-all whitespace-nowrap ${

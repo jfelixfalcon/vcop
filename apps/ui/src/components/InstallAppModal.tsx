@@ -419,7 +419,7 @@ export const InstallAppModal: React.FC<Props> = ({
         </div>
 
         {/* Modal Navigation Tabs */}
-        <div className="flex items-center gap-1.5 border-b border-cyber-800 pb-3 mb-4 overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-cyber-800 pb-3 mb-4">
           <button
             type="button"
             onClick={() => setActiveTab('catalog')}

@@ -461,7 +461,7 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
         </div>
 
         {/* Category Pills */}
-        <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
           {['All', ...CATEGORIES].map((cat) => {
             const isCatActive = selectedCategory === cat;
             return (

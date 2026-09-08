@@ -185,7 +185,7 @@ export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgr
         </div>
 
         {/* Tab Filters */}
-        <div className="flex items-center gap-1.5 pb-3 border-b border-cyber-800 mb-3 overflow-x-auto text-xs">
+        <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-cyber-800 mb-3 text-xs">
           <button
             type="button"
             onClick={() => setActiveTab('all')}
