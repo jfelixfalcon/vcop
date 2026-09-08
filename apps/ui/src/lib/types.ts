@@ -532,18 +532,11 @@ export interface DetectedHardwareInfo {
   allocatableGpus: number;
 }
 
-export type AIProviderType =
-  | 'local'
-  | 'openai'
-  | 'anthropic'
-  | 'gemini'
-  | 'groq'
-  | 'openrouter'
-  | 'custom';
+export type AIProviderType = 'local' | 'custom';
 
 export interface AISettingsConfig {
   localModelEnabled: boolean;
-  provider: AIProviderType;
+  provider?: string;
   remoteEndpoint?: string;
   remoteModel?: string;
   remoteApiKey?: string;
@@ -555,7 +548,7 @@ export interface AISettingsConfig {
 
 export interface AISettingsPublic {
   localModelEnabled: boolean;
-  provider: AIProviderType;
+  provider?: string;
   remoteEndpoint: string;
   remoteModel: string;
   hasApiKey: boolean;

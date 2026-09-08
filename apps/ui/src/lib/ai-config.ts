@@ -1,6 +1,5 @@
 import { k8sRequest } from './k8s-client';
 import type {
-  AIProviderType,
   AISettingsConfig,
   AISettingsPublic,
   AIConnectionTestResult,
@@ -9,118 +8,21 @@ import type {
 export const AI_CONFIGMAP_NAME = 'vcop-ai-config';
 export const AI_CONFIG_NAMESPACE = 'vcop-system';
 
-export interface ProviderPreset {
-  id: AIProviderType;
-  name: string;
-  description: string;
-  defaultEndpoint: string;
-  defaultModel: string;
-  modelSuggestions: string[];
-  apiKeyPlaceholder: string;
-  helpUrl?: string;
-  requiresKey: boolean;
-}
+export const DEFAULT_LOCAL_ENDPOINT =
+  process.env.AI_SERVICE_URL ||
+  (process.env.KUBERNETES_SERVICE_HOST
+    ? 'http://vcop-ai.vcop-system.svc:8080'
+    : 'http://127.0.0.1:8088');
 
-export const PROVIDER_PRESETS: Record<AIProviderType, ProviderPreset> = {
-  local: {
-    id: 'local',
-    name: 'Local Gemma 3 1B (GPU/Universal)',
-    description: 'Pre-baked offline Gemma 3 1B model bundled in cluster',
-    defaultEndpoint:
-      process.env.AI_SERVICE_URL ||
-      (process.env.KUBERNETES_SERVICE_HOST
-        ? 'http://vcop-ai.vcop-system.svc:8080'
-        : 'http://127.0.0.1:8088'),
-    defaultModel: 'Gemma 3 1B IT (Q4_K_M)',
-    modelSuggestions: ['Gemma 3 1B IT (Q4_K_M)'],
-    apiKeyPlaceholder: 'None required (Offline cluster service)',
-    requiresKey: false,
-  },
-  openai: {
-    id: 'openai',
-    name: 'OpenAI',
-    description: 'GPT-4o, GPT-4o Mini, and OpenAI API endpoints',
-    defaultEndpoint: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4o-mini',
-    modelSuggestions: ['gpt-4o-mini', 'gpt-4o', 'o3-mini', 'gpt-4-turbo'],
-    apiKeyPlaceholder: 'sk-proj-...',
-    helpUrl: 'https://platform.openai.com/api-keys',
-    requiresKey: true,
-  },
-  anthropic: {
-    id: 'anthropic',
-    name: 'Anthropic Claude',
-    description: 'Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus',
-    defaultEndpoint: 'https://api.anthropic.com/v1',
-    defaultModel: 'claude-3-5-sonnet-20241022',
-    modelSuggestions: [
-      'claude-3-5-sonnet-20241022',
-      'claude-3-5-haiku-20241022',
-      'claude-3-opus-20240229',
-    ],
-    apiKeyPlaceholder: 'sk-ant-api03-...',
-    helpUrl: 'https://console.anthropic.com/settings/keys',
-    requiresKey: true,
-  },
-  gemini: {
-    id: 'gemini',
-    name: 'Google Gemini',
-    description: 'Gemini 1.5 Flash, Gemini 1.5 Pro, Gemini 2.0 Flash',
-    defaultEndpoint: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultModel: 'gemini-1.5-flash',
-    modelSuggestions: ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp'],
-    apiKeyPlaceholder: 'AIzaSy...',
-    helpUrl: 'https://aistudio.google.com/app/apikey',
-    requiresKey: true,
-  },
-  groq: {
-    id: 'groq',
-    name: 'Groq Cloud',
-    description: 'Ultra-low-latency Llama 3.3, Llama 3.1, Mixtral',
-    defaultEndpoint: 'https://api.groq.com/openai/v1',
-    defaultModel: 'llama-3.3-70b-versatile',
-    modelSuggestions: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
-    apiKeyPlaceholder: 'gsk_...',
-    helpUrl: 'https://console.groq.com/keys',
-    requiresKey: true,
-  },
-  openrouter: {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    description: 'Unified multi-provider gateway for hundreds of open & proprietary models',
-    defaultEndpoint: 'https://openrouter.ai/api/v1',
-    defaultModel: 'meta-llama/llama-3.3-70b-instruct',
-    modelSuggestions: [
-      'meta-llama/llama-3.3-70b-instruct',
-      'google/gemini-flash-1.5',
-      'anthropic/claude-3.5-sonnet',
-      'deepseek/deepseek-chat',
-    ],
-    apiKeyPlaceholder: 'sk-or-v1-...',
-    helpUrl: 'https://openrouter.ai/keys',
-    requiresKey: true,
-  },
-  custom: {
-    id: 'custom',
-    name: 'Custom OpenAI-Compatible',
-    description: 'vLLM, Ollama, TGI, LocalAI, Azure OpenAI, or Sovereign Enterprise Gateway',
-    defaultEndpoint: 'http://my-llm-host:8000/v1',
-    defaultModel: 'custom-model',
-    modelSuggestions: [
-      'meta-llama/Meta-Llama-3.1-8B-Instruct',
-      'mistralai/Mistral-7B-Instruct-v0.3',
-      'qwen2.5-7b-instruct',
-    ],
-    apiKeyPlaceholder: 'Bearer token or API key (if required)',
-    requiresKey: false,
-  },
-};
+export const DEFAULT_LOCAL_MODEL = 'Gemma 3 1B IT (Q4_K_M)';
+export const DEFAULT_REMOTE_ENDPOINT = 'https://api.openai.com/v1';
+export const DEFAULT_REMOTE_MODEL = 'gpt-4o-mini';
 
 export const DEFAULT_AI_SETTINGS: AISettingsConfig = {
   localModelEnabled: process.env.AI_LOCAL_ENABLED !== 'false',
-  provider: (process.env.AI_PROVIDER as AIProviderType) || 'local',
-  remoteEndpoint: process.env.AI_REMOTE_ENDPOINT || '',
-  remoteModel: process.env.AI_REMOTE_MODEL || '',
+  provider: 'custom',
+  remoteEndpoint: process.env.AI_REMOTE_ENDPOINT || DEFAULT_REMOTE_ENDPOINT,
+  remoteModel: process.env.AI_REMOTE_MODEL || DEFAULT_REMOTE_MODEL,
   remoteApiKey: process.env.AI_API_KEY || '',
   temperature: 0.15,
   maxTokens: 800,
@@ -142,7 +44,7 @@ export function maskApiKey(apiKey?: string): string {
 }
 
 /**
- * Retrieves the AI settings from the Kubernetes ConfigMap or default environment variables.
+ * Retrieves AI settings from the Kubernetes ConfigMap or default environment variables.
  */
 export async function getAISettings(): Promise<AISettingsConfig> {
   const now = Date.now();
@@ -161,7 +63,8 @@ export async function getAISettings(): Promise<AISettingsConfig> {
         ...DEFAULT_AI_SETTINGS,
         ...parsed,
         localModelEnabled: parsed.localModelEnabled ?? true,
-        provider: parsed.provider || 'local',
+        remoteEndpoint: parsed.remoteEndpoint || DEFAULT_REMOTE_ENDPOINT,
+        remoteModel: parsed.remoteModel || DEFAULT_REMOTE_MODEL,
       };
       lastFetchTime = now;
       return configCache;
@@ -179,13 +82,12 @@ export async function getAISettings(): Promise<AISettingsConfig> {
  */
 export async function getPublicAISettings(): Promise<AISettingsPublic> {
   const settings = await getAISettings();
-  const preset = PROVIDER_PRESETS[settings.provider] || PROVIDER_PRESETS.local;
 
   return {
     localModelEnabled: settings.localModelEnabled,
-    provider: settings.provider,
-    remoteEndpoint: settings.remoteEndpoint || preset.defaultEndpoint,
-    remoteModel: settings.remoteModel || preset.defaultModel,
+    provider: 'custom',
+    remoteEndpoint: settings.remoteEndpoint || DEFAULT_REMOTE_ENDPOINT,
+    remoteModel: settings.remoteModel || DEFAULT_REMOTE_MODEL,
     hasApiKey: Boolean(settings.remoteApiKey && settings.remoteApiKey.trim().length > 0),
     maskedApiKey: maskApiKey(settings.remoteApiKey),
     temperature: settings.temperature ?? 0.15,
@@ -202,7 +104,7 @@ export async function saveAISettings(
 ): Promise<AISettingsConfig> {
   const current = await getAISettings();
 
-  // If apiKey is explicitly provided, update it. If omitted or undefined, retain the existing key.
+  // If apiKey is explicitly provided, update it. If omitted, retain existing key.
   let effectiveApiKey = current.remoteApiKey;
   if (partial.remoteApiKey !== undefined) {
     effectiveApiKey = partial.remoteApiKey.trim();
@@ -213,11 +115,15 @@ export async function saveAISettings(
     ...partial,
     localModelEnabled:
       partial.localModelEnabled !== undefined ? partial.localModelEnabled : current.localModelEnabled,
-    provider: partial.provider || current.provider,
+    provider: 'custom',
     remoteEndpoint:
-      partial.remoteEndpoint !== undefined ? partial.remoteEndpoint.trim() : current.remoteEndpoint,
+      partial.remoteEndpoint !== undefined
+        ? partial.remoteEndpoint.trim()
+        : current.remoteEndpoint || DEFAULT_REMOTE_ENDPOINT,
     remoteModel:
-      partial.remoteModel !== undefined ? partial.remoteModel.trim() : current.remoteModel,
+      partial.remoteModel !== undefined
+        ? partial.remoteModel.trim()
+        : current.remoteModel || DEFAULT_REMOTE_MODEL,
     remoteApiKey: effectiveApiKey,
     temperature: partial.temperature ?? current.temperature ?? 0.15,
     maxTokens: partial.maxTokens ?? current.maxTokens ?? 800,
@@ -264,31 +170,25 @@ export async function saveAISettings(
 }
 
 /**
- * Tests connection to a remote model provider using the specified parameters.
+ * Tests connection to local inference or a remote OpenAI-compatible API endpoint.
  */
 export async function testRemoteAIConnection(params: {
-  provider: AIProviderType;
   endpoint?: string;
   model?: string;
   apiKey?: string;
+  testLocal?: boolean;
 }): Promise<AIConnectionTestResult> {
   const current = await getAISettings();
-  const provider = params.provider || current.provider;
-  const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.local;
 
-  const endpoint = (params.endpoint || current.remoteEndpoint || preset.defaultEndpoint).trim();
-  const model = (params.model || current.remoteModel || preset.defaultModel).trim();
-  const apiKey = (params.apiKey !== undefined && params.apiKey !== ''
-    ? params.apiKey
-    : current.remoteApiKey || '').trim();
-
-  if (provider === 'local') {
-    // Test local service health
+  // Test local service if requested
+  if (params.testLocal) {
     try {
       const start = Date.now();
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3500);
-      const res = await fetch(`${endpoint}/v1/models`, { signal: controller.signal });
+      const res = await fetch(`${DEFAULT_LOCAL_ENDPOINT}/v1/models`, {
+        signal: controller.signal,
+      });
       clearTimeout(timeoutId);
       const latencyMs = Date.now() - start;
 
@@ -296,7 +196,7 @@ export async function testRemoteAIConnection(params: {
         return {
           ok: true,
           latencyMs,
-          model: 'Gemma 3 1B IT (Q4_K_M)',
+          model: DEFAULT_LOCAL_MODEL,
           message: `Successfully connected to local inference service (${latencyMs}ms)`,
         };
       }
@@ -309,77 +209,23 @@ export async function testRemoteAIConnection(params: {
     } catch (err: any) {
       return {
         ok: false,
-        message: `Could not reach local inference service at ${endpoint}: ${err.message}`,
+        message: `Could not reach local inference service at ${DEFAULT_LOCAL_ENDPOINT}: ${err.message}`,
         error: err.message,
       };
     }
   }
 
-  // Remote providers require an API key (except optionally custom)
-  if (preset.requiresKey && !apiKey) {
-    return {
-      ok: false,
-      message: `API key is required for ${preset.name}`,
-      error: 'Missing API Key',
-    };
-  }
+  // Test Remote OpenAI-Compatible API
+  const endpoint = (params.endpoint || current.remoteEndpoint || DEFAULT_REMOTE_ENDPOINT).trim();
+  const model = (params.model || current.remoteModel || DEFAULT_REMOTE_MODEL).trim();
+  const apiKey = (params.apiKey !== undefined && params.apiKey !== ''
+    ? params.apiKey
+    : current.remoteApiKey || '').trim();
 
   const start = Date.now();
-
-  if (provider === 'anthropic') {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 7000);
-      const targetUrl = endpoint.endsWith('/messages')
-        ? endpoint
-        : `${endpoint.replace(/\/+$/, '')}/messages`;
-
-      const res = await fetch(targetUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 10,
-          messages: [{ role: 'user', content: 'Ping' }],
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      const latencyMs = Date.now() - start;
-
-      if (res.ok) {
-        return {
-          ok: true,
-          latencyMs,
-          model,
-          message: `Successfully authenticated and connected to Anthropic ${model} (${latencyMs}ms)`,
-        };
-      }
-
-      const errText = await res.text().catch(() => '');
-      return {
-        ok: false,
-        latencyMs,
-        message: `Anthropic API returned HTTP ${res.status}: ${errText.slice(0, 160)}`,
-        error: `HTTP ${res.status}`,
-      };
-    } catch (err: any) {
-      return {
-        ok: false,
-        message: `Anthropic connection test failed: ${err.message}`,
-        error: err.message,
-      };
-    }
-  }
-
-  // Standard OpenAI-Compatible Endpoints (OpenAI, Gemini, Groq, OpenRouter, Custom)
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
     let chatUrl = endpoint.replace(/\/+$/, '');
     if (!chatUrl.endsWith('/chat/completions')) {
@@ -412,7 +258,7 @@ export async function testRemoteAIConnection(params: {
         ok: true,
         latencyMs,
         model,
-        message: `Successfully authenticated and connected to ${preset.name} [${model}] (${latencyMs}ms)`,
+        message: `Successfully connected to OpenAI-compatible API [${model}] (${latencyMs}ms)`,
       };
     }
 
@@ -420,13 +266,13 @@ export async function testRemoteAIConnection(params: {
     return {
       ok: false,
       latencyMs,
-      message: `${preset.name} returned HTTP ${res.status}: ${errText.slice(0, 160)}`,
+      message: `OpenAI API returned HTTP ${res.status}: ${errText.slice(0, 160)}`,
       error: `HTTP ${res.status}`,
     };
   } catch (err: any) {
     return {
       ok: false,
-      message: `${preset.name} connection test failed: ${err.message}`,
+      message: `Connection test failed: ${err.message}`,
       error: err.message,
     };
   }

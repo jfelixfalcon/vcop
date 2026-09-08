@@ -17,7 +17,13 @@ import {
   type WorkloadScaleResult,
   type DeploymentSummary,
 } from './k8s-client';
-import { getAISettings, PROVIDER_PRESETS } from './ai-config';
+import {
+  getAISettings,
+  DEFAULT_LOCAL_ENDPOINT,
+  DEFAULT_LOCAL_MODEL,
+  DEFAULT_REMOTE_ENDPOINT,
+  DEFAULT_REMOTE_MODEL,
+} from './ai-config';
 import type {
   ClusterCapacityData,
   VirtualCluster,
@@ -131,7 +137,7 @@ export async function checkAiServiceHealth(): Promise<{
   model: string;
   hardware: string;
   url: string;
-  provider: AIProviderType;
+  provider: string;
   localModelEnabled: boolean;
   hasApiKey: boolean;
 }> {
@@ -140,38 +146,23 @@ export async function checkAiServiceHealth(): Promise<{
     hardwareString: 'Host Hardware',
   }));
 
-  // 1. Remote Model Provider Mode
-  if (settings.provider !== 'local') {
-    const preset = PROVIDER_PRESETS[settings.provider] || PROVIDER_PRESETS.openai;
-    const model = settings.remoteModel || preset.defaultModel;
+  // 1. If Local Model is disabled -> Remote OpenAI-API Gateway mode
+  if (!settings.localModelEnabled) {
+    const model = settings.remoteModel || DEFAULT_REMOTE_MODEL;
     const hasKey = Boolean(settings.remoteApiKey && settings.remoteApiKey.trim().length > 0);
-    const isOnline = hasKey || !preset.requiresKey;
 
     return {
-      online: isOnline,
-      model: `${preset.name} (${model})`,
-      hardware: isOnline ? 'Remote API Provider' : 'Requires API Key',
-      url: settings.remoteEndpoint || preset.defaultEndpoint,
-      provider: settings.provider,
-      localModelEnabled: settings.localModelEnabled,
+      online: hasKey || !settings.remoteEndpoint?.includes('api.openai.com'),
+      model: `Remote: ${model}`,
+      hardware: hasKey ? 'OpenAI-Compatible API' : 'API Key Required',
+      url: settings.remoteEndpoint || DEFAULT_REMOTE_ENDPOINT,
+      provider: 'custom',
+      localModelEnabled: false,
       hasApiKey: hasKey,
     };
   }
 
-  // 2. Local Model Explicitly Disabled
-  if (!settings.localModelEnabled) {
-    return {
-      online: false,
-      model: 'Local Model Disabled',
-      hardware: 'Deterministic RAG Engine',
-      url: '',
-      provider: 'local',
-      localModelEnabled: false,
-      hasApiKey: false,
-    };
-  }
-
-  // 3. Local Gemma 3 Inference Engine Active
+  // 2. Local Gemma 3 Inference Engine Active
   const url = getAiServiceUrl();
   try {
     const controller = new AbortController();
@@ -647,105 +638,62 @@ Ground Truth Rules:
 - If 0 timeseries samples are found when querying historical CPU/memory metrics for a namespace, explicitly state that 0 samples were recorded, list the active namespaces from Cluster Facts, and recommend querying one of them.
 - Avoid casual pleasantries ("Sure!", "Okay"). Begin directly with the status badge.`;
 
-  // Branch 1: Remote Model Provider Mode (OpenAI, Anthropic, Gemini, Groq, OpenRouter, Custom)
-  if (settings.provider !== 'local') {
-    const preset = PROVIDER_PRESETS[settings.provider] || PROVIDER_PRESETS.openai;
+  // Branch 1: Remote OpenAI-Compatible API Mode (when local model is disabled)
+  if (!settings.localModelEnabled) {
     const apiKey = (settings.remoteApiKey || '').trim();
-    const endpoint = (settings.remoteEndpoint || preset.defaultEndpoint).trim();
-    const model = (settings.remoteModel || preset.defaultModel).trim();
+    const endpoint = (settings.remoteEndpoint || DEFAULT_REMOTE_ENDPOINT).trim();
+    const model = (settings.remoteModel || DEFAULT_REMOTE_MODEL).trim();
 
-    if (!preset.requiresKey || apiKey) {
-      try {
-        let generatedContent = '';
+    try {
+      let chatUrl = endpoint.replace(/\/+$/, '');
+      if (!chatUrl.endsWith('/chat/completions')) {
+        chatUrl = `${chatUrl}/chat/completions`;
+      }
 
-        if (settings.provider === 'anthropic') {
-          const targetUrl = endpoint.endsWith('/messages')
-            ? endpoint
-            : `${endpoint.replace(/\/+$/, '')}/messages`;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
 
-          const res = await fetch(targetUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01',
-            },
-            body: JSON.stringify({
-              model,
-              max_tokens: settings.maxTokens || 800,
-              temperature: settings.temperature ?? 0.15,
-              system: systemPrompt,
-              messages: [
-                {
-                  role: 'user',
-                  content: `Cluster Facts & Data:\n${contextSummary}\n\nUser Question:\n${latestUserMessage}`,
-                },
-              ],
-            }),
-          });
+      const aiMessages = [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: `Cluster Facts & Data:\n${contextSummary}\n\nUser Question:\n${latestUserMessage}`,
+        },
+      ];
 
-          if (res.ok) {
-            const json = await res.json();
-            const textBlocks = json.content?.filter((c: any) => c.type === 'text') || [];
-            generatedContent = textBlocks.map((c: any) => c.text).join('\n');
-          } else {
-            const errBody = await res.text().catch(() => '');
-            console.warn(`[ai-engine] Anthropic API failed (HTTP ${res.status}):`, errBody);
-          }
-        } else {
-          // OpenAI, Gemini, Groq, OpenRouter, Custom OpenAI-Compatible
-          let chatUrl = endpoint.replace(/\/+$/, '');
-          if (!chatUrl.endsWith('/chat/completions')) {
-            chatUrl = `${chatUrl}/chat/completions`;
-          }
+      const res = await fetch(chatUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model,
+          messages: aiMessages,
+          temperature: settings.temperature ?? 0.15,
+          max_tokens: settings.maxTokens || 800,
+        }),
+      });
 
-          const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-          };
-          if (apiKey) {
-            headers['Authorization'] = `Bearer ${apiKey}`;
-          }
-
-          const aiMessages = [
-            { role: 'system', content: systemPrompt },
-            {
-              role: 'user',
-              content: `Cluster Facts & Data:\n${contextSummary}\n\nUser Question:\n${latestUserMessage}`,
-            },
-          ];
-
-          const res = await fetch(chatUrl, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              model,
-              messages: aiMessages,
-              temperature: settings.temperature ?? 0.15,
-              max_tokens: settings.maxTokens || 800,
-            }),
-          });
-
-          if (res.ok) {
-            const json = await res.json();
-            generatedContent = json.choices?.[0]?.message?.content || '';
-          } else {
-            const errBody = await res.text().catch(() => '');
-            console.warn(`[ai-engine] ${preset.name} API failed (HTTP ${res.status}):`, errBody);
-          }
-        }
-
+      if (res.ok) {
+        const json = await res.json();
+        const generatedContent = json.choices?.[0]?.message?.content || '';
         if (generatedContent && generatedContent.trim()) {
           return {
             role: 'assistant',
             content: generatedContent.trim(),
-            model: `${model} (${preset.name})`,
+            model: `${model} (OpenAI-API)`,
             hardware: 'Remote API Endpoint',
             toolData: toolPayload,
           };
         }
-      } catch (err: any) {
-        console.warn(`[ai-engine] Remote AI provider call failed, falling back to deterministic synthesis:`, err.message);
+      } else {
+        const errBody = await res.text().catch(() => '');
+        console.warn(`[ai-engine] Remote OpenAI-API call failed (HTTP ${res.status}):`, errBody);
       }
+    } catch (err: any) {
+      console.warn('[ai-engine] Remote OpenAI-API call failed, falling back to deterministic synthesis:', err.message);
     }
   } else if (settings.localModelEnabled && health.online) {
     // Branch 2: Local Gemma 3 Inference via local llama-server

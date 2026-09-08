@@ -72,7 +72,7 @@ export function AIManager({ isAdmin = true }: AIManagerProps) {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-white tracking-tight font-mono">
-                AI Engine & Remote Model Gateway
+                AI Engine & Remote OpenAI Gateway
               </h2>
               <span
                 className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider ${
@@ -85,7 +85,7 @@ export function AIManager({ isAdmin = true }: AIManagerProps) {
               </span>
             </div>
             <p className="text-xs text-slate-400 font-mono mt-1">
-              Configure cluster intelligence: use bundled offline Gemma 3 or route prompts to OpenAI, Anthropic, Gemini, Groq, or custom endpoints.
+              Configure cluster intelligence: toggle bundled offline Gemma 3 or connect to a custom OpenAI-compatible API.
             </p>
           </div>
         </div>
@@ -112,7 +112,7 @@ export function AIManager({ isAdmin = true }: AIManagerProps) {
             {status.model}
           </div>
           <div className="text-[11px] text-slate-500 font-mono">
-            Provider: <span className="text-cyan-300 capitalize">{status.provider || 'local'}</span>
+            Mode: <span className="text-cyan-300">{status.localModelEnabled ? 'Local Cluster Engine' : 'Custom OpenAI API'}</span>
           </div>
         </div>
 

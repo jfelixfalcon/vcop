@@ -1,6 +1,5 @@
 import type { APIRoute } from 'astro';
 import { testRemoteAIConnection } from '../../../lib/ai-config';
-import type { AIProviderType } from '../../../lib/types';
 
 export const prerender = false;
 
@@ -8,10 +7,10 @@ export const POST: APIRoute = async ({ request }) => {
   try {
     const body = await request.json();
     const result = await testRemoteAIConnection({
-      provider: body.provider as AIProviderType,
       endpoint: body.endpoint,
       model: body.model,
       apiKey: body.apiKey,
+      testLocal: body.testLocal,
     });
 
     return new Response(JSON.stringify(result), {
