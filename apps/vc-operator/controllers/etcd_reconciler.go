@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
+	"github.com/vops/vc-operator/pkg/registry"
 	"github.com/vops/vc-operator/pkg/vcluster"
 )
 
@@ -155,7 +156,7 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 	if etcdVer == "" {
 		etcdVer = "3.6.8-0"
 	}
-	etcdImage := fmt.Sprintf("registry.k8s.io/etcd:%s", etcdVer)
+	etcdImage := registry.GetResolver().RewriteImage(fmt.Sprintf("registry.k8s.io/etcd:%s", etcdVer), vc)
 
 	var volumes []corev1.Volume
 	volumes = append(volumes, corev1.Volume{
@@ -210,7 +211,7 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 
 		initContainers = append(initContainers, corev1.Container{
 			Name:            "etcd-restore-init",
-			Image:           "vops/etcd-dr-runner:v1.3.0",
+			Image:           registry.GetResolver().RewriteImage("vops/etcd-dr-runner:v1.3.0", vc),
 			ImagePullPolicy: corev1.PullIfNotPresent,
 			Command:         []string{"/scripts/restore.sh"},
 			Env: []corev1.EnvVar{

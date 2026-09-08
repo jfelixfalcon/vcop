@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
+	"github.com/vops/vc-operator/pkg/registry"
 	"github.com/vops/vc-operator/pkg/vcluster"
 )
 
@@ -465,7 +466,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 					InitContainers: []corev1.Container{
 						{
 							Name:            "kubernetes",
-							Image:           fmt.Sprintf("ghcr.io/loft-sh/kubernetes:%s", k8sVersion),
+							Image:           registry.GetResolver().RewriteImage(fmt.Sprintf("ghcr.io/loft-sh/kubernetes:%s", k8sVersion), vc),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command:         []string{"cp"},
 							Args:            []string{"-r", "/kubernetes/.", "/binaries/"},
@@ -480,7 +481,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 					Containers: []corev1.Container{
 						{
 							Name:            "syncer",
-							Image:           fmt.Sprintf("ghcr.io/loft-sh/vcluster-oss:%s", vclusterVer),
+							Image:           registry.GetResolver().RewriteImage(fmt.Sprintf("ghcr.io/loft-sh/vcluster-oss:%s", vclusterVer), vc),
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command: []string{
 								"/vcluster",

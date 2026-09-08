@@ -1,0 +1,29 @@
+# vCOp & vCluster Canonical Container Image Manifest
+# Format: One image reference per line. Usable with docker pull, podman, skopeo copy, or image-swap.sh.
+
+# vCluster Control Plane & Syncer
+ghcr.io/loft-sh/vcluster-oss:0.36.0
+ghcr.io/loft-sh/kubernetes:v1.31.0
+ghcr.io/loft-sh/kubernetes:v1.32.0
+ghcr.io/loft-sh/kubernetes:v1.33.0
+
+# vCluster Backing Store (etcd)
+registry.k8s.io/etcd:3.6.8-0
+registry.k8s.io/etcd:3.5.18-0
+
+# vCluster Addons
+registry.k8s.io/coredns/coredns:v1.11.3
+registry.k8s.io/metrics-server/metrics-server:v0.7.2
+
+# Istio Service Mesh & Gateway
+docker.io/istio/pilot:1.24.2
+docker.io/istio/proxyv2:1.24.2
+
+# Disaster Recovery Runner
+vops/etcd-dr-runner:v1.3.0
+
+# vCOp Platform Stack
+vops/vc-operator:v1.4.1
+vops/vc-operations-center:v1.4.1
+vops/vc-ai:v1.4.1
+docker.io/library/postgres:16-alpine

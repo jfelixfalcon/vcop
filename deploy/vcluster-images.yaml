@@ -1,0 +1,98 @@
+# vCluster Operations Center (vCOp) Canonical Container Image Manifest
+# This manifest defines all container images required across virtual cluster control planes,
+# guest cluster addons, and the vCOp management platform.
+
+apiVersion: vops.gitops.io/v1alpha1
+kind: ImageManifest
+metadata:
+  name: vcop-vcluster-images
+  version: "1.4.1"
+  generatedAt: "2026-09-08T00:00:00Z"
+spec:
+  vcluster:
+    controlPlane:
+      - component: "syncer"
+        role: "vCluster core synchronization and control-loop engine"
+        image: "ghcr.io/loft-sh/vcluster-oss:0.36.0"
+        repository: "loft-sh/vcluster-oss"
+        tag: "0.36.0"
+      - component: "kubernetes-v1.31"
+        role: "Guest Kubernetes API server and controller binaries (v1.31)"
+        image: "ghcr.io/loft-sh/kubernetes:v1.31.0"
+        repository: "loft-sh/kubernetes"
+        tag: "v1.31.0"
+      - component: "kubernetes-v1.32"
+        role: "Guest Kubernetes API server and controller binaries (v1.32)"
+        image: "ghcr.io/loft-sh/kubernetes:v1.32.0"
+        repository: "loft-sh/kubernetes"
+        tag: "v1.32.0"
+      - component: "kubernetes-v1.33"
+        role: "Guest Kubernetes API server and controller binaries (v1.33)"
+        image: "ghcr.io/loft-sh/kubernetes:v1.33.0"
+        repository: "loft-sh/kubernetes"
+        tag: "v1.33.0"
+
+    backingStore:
+      - component: "etcd-v3.6"
+        role: "Dedicated high-throughput etcd backing store"
+        image: "registry.k8s.io/etcd:3.6.8-0"
+        repository: "etcd"
+        tag: "3.6.8-0"
+      - component: "etcd-v3.5"
+        role: "Long-term support etcd backing store"
+        image: "registry.k8s.io/etcd:3.5.18-0"
+        repository: "etcd"
+        tag: "3.5.18-0"
+
+    addons:
+      - component: "coredns"
+        role: "In-cluster CoreDNS resolver service"
+        image: "registry.k8s.io/coredns/coredns:v1.11.3"
+        repository: "coredns/coredns"
+        tag: "v1.11.3"
+      - component: "metrics-server"
+        role: "Resource telemetry and Horizontal Pod Autoscaling (HPA) provider"
+        image: "registry.k8s.io/metrics-server/metrics-server:v0.7.2"
+        repository: "metrics-server/metrics-server"
+        tag: "v0.7.2"
+
+    meshAndIngress:
+      - component: "istio-pilot"
+        role: "Istio discovery control plane (istiod)"
+        image: "docker.io/istio/pilot:1.24.2"
+        repository: "istio/pilot"
+        tag: "1.24.2"
+      - component: "istio-proxy"
+        role: "Istio Envoy ingress gateway proxy"
+        image: "docker.io/istio/proxyv2:1.24.2"
+        repository: "istio/proxyv2"
+        tag: "1.24.2"
+
+    disasterRecovery:
+      - component: "dr-runner"
+        role: "Automated snapshot backup and point-in-time restore runner"
+        image: "vops/etcd-dr-runner:v1.3.0"
+        repository: "vops/etcd-dr-runner"
+        tag: "v1.3.0"
+
+  platform:
+    - component: "operator"
+      role: "Virtual cluster Kubernetes custom controller"
+      image: "vops/vc-operator:v1.4.1"
+      repository: "vops/vc-operator"
+      tag: "v1.4.1"
+    - component: "operations-center-ui"
+      role: "Operations Center multi-tenant dashboard and UI"
+      image: "vops/vc-operations-center:v1.4.1"
+      repository: "vops/vc-operations-center"
+      tag: "v1.4.1"
+    - component: "ai-inference-engine"
+      role: "vCOp AI copilot, cost analyzer, and triage engine"
+      image: "vops/vc-ai:v1.4.1"
+      repository: "vops/vc-ai"
+      tag: "v1.4.1"
+    - component: "metrics-db"
+      role: "Timescale/PostgreSQL time-series telemetry store"
+      image: "docker.io/library/postgres:16-alpine"
+      repository: "library/postgres"
+      tag: "16-alpine"

@@ -369,6 +369,15 @@ type QuotaStatus struct {
 	Used map[string]string `json:"used,omitempty"`
 }
 
+// ImageRewriteRule specifies a single source-to-target registry swap rule
+type ImageRewriteRule struct {
+	// From defines the source registry or image prefix (e.g. "harbor.com" or "docker.io/library")
+	From string `json:"from"`
+
+	// To defines the replacement target registry prefix (e.g. "registry.com/library")
+	To string `json:"to"`
+}
+
 // VirtualClusterSpec defines the desired state of VirtualCluster
 type VirtualClusterSpec struct {
 	// ClusterName is the tenant-facing identifier
@@ -392,6 +401,14 @@ type VirtualClusterSpec struct {
 	// +kubebuilder:default="3.6.8-0"
 	// +optional
 	EtcdVersion string `json:"etcdVersion,omitempty"`
+
+	// ImageRegistry overrides default container image registry/repository prefix (e.g. "registry.com/library")
+	// +optional
+	ImageRegistry string `json:"imageRegistry,omitempty"`
+
+	// ImageRewriteRules defines specific source-to-target registry swap mappings
+	// +optional
+	ImageRewriteRules []ImageRewriteRule `json:"imageRewriteRules,omitempty"`
 
 	// SizePreset sets predefined sizing tiers for compute & storage
 	// +kubebuilder:default="medium"

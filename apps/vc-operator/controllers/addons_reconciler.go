@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
+	"github.com/vops/vc-operator/pkg/registry"
 )
 
 type AddonsReconciler struct {
@@ -433,7 +434,7 @@ func (r *AddonsReconciler) reconcileCoreDNS(ctx context.Context, vc *v1alpha1.Vi
 	if dnsVer == "" {
 		dnsVer = "v1.11.3"
 	}
-	dnsImage := fmt.Sprintf("registry.k8s.io/coredns/coredns:%s", dnsVer)
+	dnsImage := registry.GetResolver().RewriteImage(fmt.Sprintf("registry.k8s.io/coredns/coredns:%s", dnsVer), vc)
 
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -767,7 +768,7 @@ func (r *AddonsReconciler) reconcileMetricsServer(ctx context.Context, vc *v1alp
 	if msVer == "" {
 		msVer = "v0.7.2"
 	}
-	msImage := fmt.Sprintf("registry.k8s.io/metrics-server/metrics-server:%s", msVer)
+	msImage := registry.GetResolver().RewriteImage(fmt.Sprintf("registry.k8s.io/metrics-server/metrics-server:%s", msVer), vc)
 
 	replicas := int32(1)
 	dep := &appsv1.Deployment{

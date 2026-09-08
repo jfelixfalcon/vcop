@@ -15,8 +15,10 @@ import {
   X,
   Sliders,
   Sparkles,
+  Globe,
 } from "lucide-react";
 import type { VersionItem, VersionRegistry, VersionTag, VersionCategory } from "../lib/types";
+import { ImageRegistryManager } from "./ImageRegistryManager";
 
 interface Props {
   initialRegistry?: VersionRegistry;
@@ -222,6 +224,15 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>("all");
+  const [mainTab, setMainTab] = useState<"versions" | "images">("versions");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      if (window.location.hash === "#images" || window.location.search.includes("tab=images")) {
+        setMainTab("images");
+      }
+    }
+  }, []);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -420,18 +431,50 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
         <div>
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-cyan-500/10 rounded-xl border border-cyan-500/30 text-cyan-400 shadow-glow-sm">
-              <Layers className="w-6 h-6" />
+              {mainTab === "images" ? <Globe className="w-6 h-6" /> : <Layers className="w-6 h-6" />}
             </div>
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-white">
-                Version Registry
+                {mainTab === "images" ? "Container Image Registry & Swapper" : "Version Registry"}
               </h1>
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          {isAdmin && (
+          {/* View Switcher */}
+          <div className="flex items-center gap-1.5 p-1 bg-cyber-950 border border-cyber-800 rounded-xl text-xs font-mono">
+            <button
+              onClick={() => {
+                setMainTab("versions");
+                if (typeof window !== "undefined") window.location.hash = "#versions";
+              }}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                mainTab === "versions"
+                  ? "bg-cyber-800 text-white font-semibold border border-cyber-700 shadow-sm"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-cyan-400" />
+              Component Versions
+            </button>
+            <button
+              onClick={() => {
+                setMainTab("images");
+                if (typeof window !== "undefined") window.location.hash = "#images";
+              }}
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                mainTab === "images"
+                  ? "bg-cyan-500/20 text-cyan-300 font-semibold border border-cyan-500/40 shadow-sm"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Globe className="w-3.5 h-3.5 text-cyan-400" />
+              Images & Air-Gap Registry
+            </button>
+          </div>
+
+          {mainTab === "versions" && isAdmin && (
             <button
               onClick={() => openAddModal("k8s")}
               className="px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs font-mono rounded-xl shadow-glow-sm transition-all flex items-center gap-2"
@@ -440,15 +483,17 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
               Register Version
             </button>
           )}
-          <button
-            onClick={fetchRegistry}
-            disabled={loading}
-            className="px-3 py-1.5 bg-cyber-900 hover:bg-cyber-850 text-slate-300 text-xs font-mono rounded-xl border border-cyber-700 flex items-center gap-2 transition-all disabled:opacity-50"
-            title="Reload from Kubernetes ConfigMap"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            Sync
-          </button>
+          {mainTab === "versions" && (
+            <button
+              onClick={fetchRegistry}
+              disabled={loading}
+              className="px-3 py-1.5 bg-cyber-900 hover:bg-cyber-850 text-slate-300 text-xs font-mono rounded-xl border border-cyber-700 flex items-center gap-2 transition-all disabled:opacity-50"
+              title="Reload from Kubernetes ConfigMap"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              Sync
+            </button>
+          )}
         </div>
       </div>
 
@@ -477,8 +522,12 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
         </div>
       )}
 
-      {/* Quick Component Summary Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {mainTab === "images" ? (
+        <ImageRegistryManager isAdmin={isAdmin} />
+      ) : (
+        <>
+          {/* Quick Component Summary Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {CATEGORIES.map((cat) => {
           const Icon = cat.icon;
           const items = cat.getItems(registry);
@@ -659,6 +708,8 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
           );
         })}
       </div>
+    </>
+  )}
 
       {/* MODAL: Add Version */}
       {isModalOpen && (

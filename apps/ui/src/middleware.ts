@@ -17,6 +17,7 @@ const PUBLIC_PATHS = [
   '/api/metrics',
   '/api/health',
   '/api/presets',
+  '/api/registry/images',
   '/api/cluster/capacity',
   '/api/cert-manager/issuers',
   '/api/ai/status',

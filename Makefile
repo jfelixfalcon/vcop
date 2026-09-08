@@ -162,6 +162,7 @@ airgap-manifests: ## Stage air-gap manifests and all-in-one deployment YAML
 	cp $(DEPLOY_DIR)/operator.yaml $(AIRGAP_DIST_DIR)/manifests/
 	cp $(DEPLOY_DIR)/ui.yaml $(AIRGAP_DIST_DIR)/manifests/
 	cp $(DEPLOY_DIR)/ai.yaml $(AIRGAP_DIST_DIR)/manifests/
+	cp $(DEPLOY_DIR)/vcluster-images.* $(AIRGAP_DIST_DIR)/manifests/
 	@echo "Generating all-in-one offline installation manifest..."
 	cat $(DEPLOY_DIR)/crds/vops.gitops.io_virtualclusters.yaml > $(AIRGAP_DIST_DIR)/manifests/vcop-install-all-in-one.yaml
 	@echo "---" >> $(AIRGAP_DIST_DIR)/manifests/vcop-install-all-in-one.yaml

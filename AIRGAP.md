@@ -178,3 +178,75 @@ kubectl port-forward svc/vcop-ui 4321:80 -n vcop-system
 ```
 
 Open `http://localhost:4321` in your browser. All fonts, icons, telemetry metrics, and AI Copilot capabilities will load cleanly without any network timeouts or external requests.
+
+---
+
+## 7. Container Image Manifests & Registry FQDN Swapping
+
+vCOp provides canonical manifests of all container images used across virtual cluster control planes, guest cluster addons, and platform services, as well as tools to rewrite FQDNs and project namespaces across your fleet.
+
+### 7.1 Canonical Image Manifest Files
+
+Available in `deploy/` and packaged in `manifests/` inside the air-gap bundle:
+
+- `deploy/vcluster-images.txt`: Plaintext list of images (one per line) for simple loops, `docker pull`, or air-gap transfer scripts.
+- `deploy/vcluster-images.yaml`: Kubernetes-style structured manifest with component categories, roles, and default image references.
+- `deploy/vcluster-images.json`: JSON format for automated pipelines and programmatic tooling.
+
+### 7.2 Offline Image Swap CLI Tool (`image-swap.sh`)
+
+The included `scripts/airgap/image-swap.sh` tool enables offline FQDN and project swapping:
+
+```bash
+# Relocate all canonical images to a flat enterprise project (e.g. registry.com/library)
+./scripts/airgap/image-swap.sh --to registry.com/library
+
+# Swap from an existing source registry (e.g. harbor.com) to target private registry
+./scripts/airgap/image-swap.sh --from harbor.com --to registry.com/library
+
+# Generate Kubernetes ConfigMap and immediately apply to active cluster
+./scripts/airgap/image-swap.sh --to registry.com/library --generate-configmap --apply
+
+# Pull from source, retag, and push directly to target registry with Docker/Skopeo
+./scripts/airgap/image-swap.sh --to registry.com/library --pull-push
+```
+
+#### Image Flattening
+
+When pushing diverse images from `ghcr.io`, `registry.k8s.io`, `docker.io`, etc. into enterprise private registries (such as Harbor, ECR, or Nexus), multi-level nested paths (e.g. `registry.com/library/metrics-server/metrics-server:v0.7.2`) can fail repository depth limitations.
+
+The `--flatten` flag (enabled by default) automatically flattens all repository paths so every image is placed directly inside the target project:
+```
+ghcr.io/loft-sh/vcluster-oss:0.36.0  -> registry.com/library/vcluster-oss:0.36.0
+registry.k8s.io/etcd:3.6.8-0         -> registry.com/library/etcd:3.6.8-0
+docker.io/istio/pilot:1.24.2         -> registry.com/library/pilot:1.24.2
+vops/vc-operator:v1.4.1              -> registry.com/library/vc-operator:v1.4.1
+```
+
+### 7.3 Operator Dynamic Resolver
+
+The vCOp operator features a built-in resolver package (`github.com/vops/vc-operator/pkg/registry`) that reconciles image references dynamically at runtime:
+
+- **Cluster-wide ConfigMap**: `vcop-image-registry` in `vcop-system` defines global default target registries and FQDN swap rules.
+- **Environment Variables**: `GLOBAL_IMAGE_REGISTRY`, `IMAGE_SWAP_FROM`, `IMAGE_SWAP_TO`, `IMAGE_FLATTEN`.
+- **Per-Cluster CRD Spec**: `spec.imageRegistry` and `spec.imageRewriteRules` on `VirtualCluster`.
+- **Per-Cluster Annotations**:
+  - `vops.gitops.io/image-registry: "registry.com/library"`
+  - `vops.gitops.io/image-swap-from: "harbor.com"`
+  - `vops.gitops.io/image-swap-to: "registry.com/library"`
+  - `vops.gitops.io/image-flatten: "true"`
+
+### 7.4 UI Management & REST API
+
+Platform administrators can manage image registries directly from the Operations Center:
+
+- **Web UI**: Navigate to **Version Registry** &rarr; **Images & Air-Gap Registry** tab (`/admin/versions#images`).
+  - Live interactive Image Rewriter Sandbox.
+  - One-click downloads for `vcluster-images.txt`, `vcluster-images.yaml`, `vcluster-images.json`.
+  - Download ready-to-run `sync-vcluster-images.sh` Docker/Skopeo mirroring script.
+  - "Save & Apply to Cluster" button that updates `vcop-image-registry` ConfigMap live.
+- **REST Endpoints**:
+  - `GET /api/registry/images?format=txt|yaml|json|sync`
+  - `GET /api/registry/config`
+  - `POST /api/registry/config`
+

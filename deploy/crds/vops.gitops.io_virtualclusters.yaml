@@ -90,6 +90,24 @@ spec:
                   type: string
                   description: Backing store etcd image tag.
                   default: "3.6.8-0"
+                imageRegistry:
+                  type: string
+                  description: Target container image registry/repository prefix (e.g. "registry.com/library").
+                imageRewriteRules:
+                  type: array
+                  description: Specific source-to-target registry swap rules for this cluster.
+                  items:
+                    type: object
+                    required:
+                      - from
+                      - to
+                    properties:
+                      from:
+                        type: string
+                        description: Source registry or image prefix (e.g. "harbor.com" or "ghcr.io/loft-sh").
+                      to:
+                        type: string
+                        description: Target replacement prefix (e.g. "registry.com/library").
                 sizePreset:
                   type: string
                   description: Sizing preset driving CPU, memory requests, and etcd storage tiers.

@@ -9,6 +9,7 @@ BASE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 REGISTRY="${AIRGAP_REGISTRY:-}"
 IMAGES_ARCHIVE="${1:-}"
+FLATTEN="true"
 
 print_help() {
   cat <<EOF
@@ -24,16 +25,18 @@ Arguments:
 
 Options:
   -r, --registry REGISTRY  Internal registry prefix to retag and push images to
-                           (e.g., harbor.internal:5000/vops or ecr.internal/vops).
+                           (e.g., registry.com/library or harbor.internal:5000/vops).
                            Can also be set via AIRGAP_REGISTRY environment variable.
+      --flatten            Flatten image repositories into target project (Default: true).
+      --no-flatten         Preserve multi-level subpaths when pushing.
   -h, --help               Show this help message.
 
 Examples:
   # Load images directly into local Docker / containerd daemon:
   ./load-images.sh
 
-  # Load and push to private enterprise registry:
-  ./load-images.sh --registry harbor.corp.local/vops
+  # Load and push to private enterprise registry project:
+  ./load-images.sh --registry registry.com/library
 EOF
 }
 
@@ -43,6 +46,14 @@ while [[ $# -gt 0 ]]; do
     -r|--registry)
       REGISTRY="$2"
       shift 2
+      ;;
+    --flatten)
+      FLATTEN="true"
+      shift
+      ;;
+    --no-flatten)
+      FLATTEN="false"
+      shift
       ;;
     -h|--help)
       print_help
@@ -146,11 +157,18 @@ echo "=== Retagging and Pushing Images to ${REGISTRY} ==="
 # Clean trailing slash from registry
 REGISTRY="${REGISTRY%/}"
 
-# Known vCOp images
+# Known vCOp and vCluster images
 DEFAULT_IMAGES=(
+  "ghcr.io/loft-sh/vcluster-oss"
+  "ghcr.io/loft-sh/kubernetes"
+  "registry.k8s.io/etcd"
+  "registry.k8s.io/coredns/coredns"
+  "registry.k8s.io/metrics-server/metrics-server"
+  "docker.io/istio/pilot"
+  "docker.io/istio/proxyv2"
+  "vops/etcd-dr-runner"
   "vops/vc-operator"
   "vops/vc-operations-center"
-  "vops/etcd-dr-runner"
   "vops/vc-ai"
   "postgres:16-alpine"
 )
@@ -167,10 +185,20 @@ fi
 
 for source_img in "${LOADED_IMAGES[@]}"; do
   # Determine destination name
-  # e.g., vops/vc-operator:v1.4.1 -> registry.example.com/vops/vc-operator:v1.4.1
-  # or postgres:16-alpine -> registry.example.com/postgres:16-alpine
-  clean_name="${source_img}"
-  target_img="${REGISTRY}/${clean_name}"
+  # Flatten mode strips leading domains/paths so image lands directly in target registry/project
+  if [[ "${FLATTEN}" == "true" ]]; then
+    # e.g., ghcr.io/loft-sh/vcluster-oss:0.36.0 -> vcluster-oss:0.36.0
+    repo_tag="${source_img##*/}"
+    target_img="${REGISTRY}/${repo_tag}"
+  else
+    # Preserve subpath without the domain
+    clean_name="${source_img}"
+    # Remove leading domain if present (e.g. ghcr.io/, registry.k8s.io/)
+    if [[ "${clean_name}" =~ ^[^/]+\.[^/]+/ ]]; then
+      clean_name="${clean_name#*/}"
+    fi
+    target_img="${REGISTRY}/${clean_name}"
+  fi
 
   echo "  -> Tagging: ${source_img} -> ${target_img}"
   "${RUNTIME}" tag "${source_img}" "${target_img}"

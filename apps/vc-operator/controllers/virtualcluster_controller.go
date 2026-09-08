@@ -23,6 +23,7 @@ import (
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
 	"github.com/vops/vc-operator/pkg/capacity"
+	"github.com/vops/vc-operator/pkg/registry"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 )
@@ -98,6 +99,7 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if r.DisasterRecoveryReconciler == nil {
 		r.DisasterRecoveryReconciler = NewDisasterRecoveryReconciler(r.Client)
 	}
+	registry.InitResolver(r.Client)
 
 	// 1. Handle Finalizer & Deletion
 	if !vc.DeletionTimestamp.IsZero() {

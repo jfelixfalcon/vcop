@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
+	"github.com/vops/vc-operator/pkg/registry"
 )
 
 var (
@@ -349,7 +350,7 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 	if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Version != "" {
 		istioVer = vc.Spec.Components.Istio.Version
 	}
-	pilotImage := fmt.Sprintf("docker.io/istio/pilot:%s", istioVer)
+	pilotImage := registry.GetResolver().RewriteImage(fmt.Sprintf("docker.io/istio/pilot:%s", istioVer), vc)
 
 	replicas := r.GetIstiodReplicas(vc)
 	dep := &appsv1.Deployment{
@@ -525,7 +526,7 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 	if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Version != "" {
 		istioVer = vc.Spec.Components.Istio.Version
 	}
-	proxyImage := fmt.Sprintf("docker.io/istio/proxyv2:%s", istioVer)
+	proxyImage := registry.GetResolver().RewriteImage(fmt.Sprintf("docker.io/istio/proxyv2:%s", istioVer), vc)
 
 	replicas := r.GetIngressGatewayReplicas(vc)
 	dep := &appsv1.Deployment{

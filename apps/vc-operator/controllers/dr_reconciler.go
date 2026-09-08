@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1alpha1 "github.com/vops/vc-operator/api/v1alpha1"
+	"github.com/vops/vc-operator/pkg/registry"
 )
 
 type DisasterRecoveryReconciler struct {
@@ -116,7 +117,7 @@ func (r *DisasterRecoveryReconciler) ReconcileDisasterRecovery(ctx context.Conte
 		retentionCount = 7
 	}
 
-	drImage := "vops/etcd-dr-runner:v1.3.0"
+	drImage := registry.GetResolver().RewriteImage("vops/etcd-dr-runner:v1.3.0", vc)
 	suspend := vc.IsSleeping()
 	historyLimit := int32(5)
 

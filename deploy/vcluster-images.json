@@ -1,0 +1,142 @@
+{
+  "$schema": "https://vops.gitops.io/schemas/vcluster-images-v1.json",
+  "name": "vcop-vcluster-images",
+  "version": "1.4.1",
+  "images": [
+    {
+      "component": "syncer",
+      "category": "controlPlane",
+      "role": "vCluster core synchronization and control-loop engine",
+      "image": "ghcr.io/loft-sh/vcluster-oss:0.36.0",
+      "registry": "ghcr.io",
+      "repository": "loft-sh/vcluster-oss",
+      "tag": "0.36.0"
+    },
+    {
+      "component": "kubernetes-v1.31",
+      "category": "controlPlane",
+      "role": "Guest Kubernetes API server and controller binaries (v1.31)",
+      "image": "ghcr.io/loft-sh/kubernetes:v1.31.0",
+      "registry": "ghcr.io",
+      "repository": "loft-sh/kubernetes",
+      "tag": "v1.31.0"
+    },
+    {
+      "component": "kubernetes-v1.32",
+      "category": "controlPlane",
+      "role": "Guest Kubernetes API server and controller binaries (v1.32)",
+      "image": "ghcr.io/loft-sh/kubernetes:v1.32.0",
+      "registry": "ghcr.io",
+      "repository": "loft-sh/kubernetes",
+      "tag": "v1.32.0"
+    },
+    {
+      "component": "kubernetes-v1.33",
+      "category": "controlPlane",
+      "role": "Guest Kubernetes API server and controller binaries (v1.33)",
+      "image": "ghcr.io/loft-sh/kubernetes:v1.33.0",
+      "registry": "ghcr.io",
+      "repository": "loft-sh/kubernetes",
+      "tag": "v1.33.0"
+    },
+    {
+      "component": "etcd-v3.6",
+      "category": "backingStore",
+      "role": "Dedicated high-throughput etcd backing store",
+      "image": "registry.k8s.io/etcd:3.6.8-0",
+      "registry": "registry.k8s.io",
+      "repository": "etcd",
+      "tag": "3.6.8-0"
+    },
+    {
+      "component": "etcd-v3.5",
+      "category": "backingStore",
+      "role": "Long-term support etcd backing store",
+      "image": "registry.k8s.io/etcd:3.5.18-0",
+      "registry": "registry.k8s.io",
+      "repository": "etcd",
+      "tag": "3.5.18-0"
+    },
+    {
+      "component": "coredns",
+      "category": "addons",
+      "role": "In-cluster CoreDNS resolver service",
+      "image": "registry.k8s.io/coredns/coredns:v1.11.3",
+      "registry": "registry.k8s.io",
+      "repository": "coredns/coredns",
+      "tag": "v1.11.3"
+    },
+    {
+      "component": "metrics-server",
+      "category": "addons",
+      "role": "Resource telemetry and Horizontal Pod Autoscaling (HPA) provider",
+      "image": "registry.k8s.io/metrics-server/metrics-server:v0.7.2",
+      "registry": "registry.k8s.io",
+      "repository": "metrics-server/metrics-server",
+      "tag": "v0.7.2"
+    },
+    {
+      "component": "istio-pilot",
+      "category": "meshAndIngress",
+      "role": "Istio discovery control plane (istiod)",
+      "image": "docker.io/istio/pilot:1.24.2",
+      "registry": "docker.io",
+      "repository": "istio/pilot",
+      "tag": "1.24.2"
+    },
+    {
+      "component": "istio-proxy",
+      "category": "meshAndIngress",
+      "role": "Istio Envoy ingress gateway proxy",
+      "image": "docker.io/istio/proxyv2:1.24.2",
+      "registry": "docker.io",
+      "repository": "istio/proxyv2",
+      "tag": "1.24.2"
+    },
+    {
+      "component": "dr-runner",
+      "category": "disasterRecovery",
+      "role": "Automated snapshot backup and point-in-time restore runner",
+      "image": "vops/etcd-dr-runner:v1.3.0",
+      "registry": "docker.io",
+      "repository": "vops/etcd-dr-runner",
+      "tag": "v1.3.0"
+    },
+    {
+      "component": "operator",
+      "category": "platform",
+      "role": "Virtual cluster Kubernetes custom controller",
+      "image": "vops/vc-operator:v1.4.1",
+      "registry": "docker.io",
+      "repository": "vops/vc-operator",
+      "tag": "v1.4.1"
+    },
+    {
+      "component": "operations-center-ui",
+      "category": "platform",
+      "role": "Operations Center multi-tenant dashboard and UI",
+      "image": "vops/vc-operations-center:v1.4.1",
+      "registry": "docker.io",
+      "repository": "vops/vc-operations-center",
+      "tag": "v1.4.1"
+    },
+    {
+      "component": "ai-inference-engine",
+      "category": "platform",
+      "role": "vCOp AI copilot, cost analyzer, and triage engine",
+      "image": "vops/vc-ai:v1.4.1",
+      "registry": "docker.io",
+      "repository": "vops/vc-ai",
+      "tag": "v1.4.1"
+    },
+    {
+      "component": "metrics-db",
+      "category": "platform",
+      "role": "Timescale/PostgreSQL time-series telemetry store",
+      "image": "docker.io/library/postgres:16-alpine",
+      "registry": "docker.io",
+      "repository": "library/postgres",
+      "tag": "16-alpine"
+    }
+  ]
+}
