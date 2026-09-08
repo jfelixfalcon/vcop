@@ -37,7 +37,7 @@ if (pathname.startsWith('/clusters/')) {
   const parts = pathname.replace('/clusters/', '').split('/');
   clusterParam = decodeURIComponent(parts[0]);
 } else if (isCapacityActive) {
-  currentSection = 'Capacity Guard';
+  currentSection = 'Capacity & Headroom';
 } else if (isAppsActive) {
   currentSection = 'App Catalog';
 } else if (isVersionsActive) {
@@ -248,7 +248,7 @@ if (pathname.startsWith('/clusters/')) {
           <span>Fleet Clusters</span>
         </a>
 
-        <!-- Capacity Guard -->
+        <!-- Capacity & Headroom -->
         <a
           href="/capacity"
           class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
@@ -259,7 +259,6 @@ if (pathname.startsWith('/clusters/')) {
         >
           <Gauge class={`w-3.5 h-3.5 transition-colors ${isCapacityActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
           <span>Capacity & Headroom</span>
-          <span class="px-1.5 py-0.2 rounded text-[9px] font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Guard</span>
         </a>
 
         <!-- App Catalog -->
@@ -336,7 +335,7 @@ if (pathname.startsWith('/clusters/')) {
     </a>
     <a href="/capacity" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
       <Gauge class="w-4 h-4 text-emerald-400" />
-      <span>Capacity Guard</span>
+      <span>Capacity & Headroom</span>
     </a>
     <a href="/apps" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
       <Package class="w-4 h-4 text-purple-400" />

@@ -891,7 +891,7 @@ policies:
                             className="rounded border-cyber-700 bg-cyber-900 text-cyan-500 focus:ring-0"
                           />
                           <span className="font-mono text-[11px] text-amber-300">
-                            Administrator Override: Force overcommit (bypasses capacity guardrails)
+                            Administrator Override: Force overcommit (bypasses capacity check)
                           </span>
                         </label>
                       </div>

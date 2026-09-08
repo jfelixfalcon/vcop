@@ -72,7 +72,7 @@ export default function CapacityDashboard() {
             </div>
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-white">
-                Cluster Capacity & Overallocation Guard
+                Cluster Capacity & Headroom
               </h1>
             </div>
           </div>
@@ -121,7 +121,7 @@ export default function CapacityDashboard() {
             </div>
             <div>
               <h3 className="text-sm font-bold text-rose-200 uppercase tracking-wide flex items-center gap-2">
-                Overallocation Guard Triggered
+                Overallocation Detected
                 <span className="px-2 py-0.5 text-[10px] font-mono bg-rose-900/80 text-rose-300 border border-rose-700 rounded">
                   Admission Locked
                 </span>
