@@ -51,10 +51,12 @@ export async function getAppStoreCatalog(): Promise<AppStoreCatalog> {
   }
 }
 
+import YAML from 'yaml';
+
 /**
  * Saves the entire catalog structure to Kubernetes ConfigMap.
  */
-async function saveEntireCatalogToK8s(catalog: AppStoreCatalog): Promise<void> {
+export async function saveEntireCatalog(catalog: AppStoreCatalog): Promise<void> {
   const catalogPayload = {
     ...catalog,
     updatedAt: new Date().toISOString(),
@@ -97,6 +99,118 @@ async function saveEntireCatalogToK8s(catalog: AppStoreCatalog): Promise<void> {
 
   memoryCatalogCache = catalogPayload;
   lastFetchTime = Date.now();
+}
+
+/**
+ * Clears all applications and groups from the App Store catalog.
+ */
+export async function clearAppStoreCatalog(): Promise<AppStoreCatalog> {
+  const empty: AppStoreCatalog = {
+    updatedAt: new Date().toISOString(),
+    apps: [],
+    groups: [],
+  };
+  await saveEntireCatalog(empty);
+  return empty;
+}
+
+/**
+ * Parses and imports an App Store catalog manifest (YAML or JSON).
+ */
+export async function importAppStoreCatalog(input: string | any): Promise<AppStoreCatalog> {
+  let data: any = input;
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      throw new Error('Import manifest cannot be empty.');
+    }
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      try {
+        data = YAML.parse(trimmed);
+      } catch (yamlErr: any) {
+        throw new Error(`Failed to parse manifest as JSON or YAML: ${yamlErr.message}`);
+      }
+    }
+  }
+
+  // Handle multi-doc YAML array
+  if (Array.isArray(data) && data.length > 0) {
+    const cmDoc = data.find((d: any) => d?.metadata?.name === CATALOG_CONFIGMAP_NAME);
+    if (cmDoc) data = cmDoc;
+  }
+
+  // If Kubernetes ConfigMap format
+  if (data?.kind === 'ConfigMap' && data.data?.['catalog.json']) {
+    try {
+      data = JSON.parse(data.data['catalog.json']);
+    } catch {
+      data = YAML.parse(data.data['catalog.json']);
+    }
+  } else if (data?.appCatalog) {
+    data = data.appCatalog;
+  } else if (data?.appStore) {
+    data = data.appStore;
+  } else if (data?.catalog) {
+    data = data.catalog;
+  }
+
+  if (Array.isArray(data)) {
+    // Array of apps directly passed
+    data = { apps: data, groups: [] };
+  }
+
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid App Store catalog manifest format.');
+  }
+
+  const rawApps = Array.isArray(data.apps) ? data.apps : (Array.isArray(data.applications) ? data.applications : []);
+  const rawGroups = Array.isArray(data.groups) ? data.groups : (Array.isArray(data.appGroups) ? data.appGroups : []);
+
+  const normalizedApps: AppDefinition[] = rawApps.map((a: any) => {
+    const id = String(a.id || a.name || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+    return {
+      id,
+      name: String(a.name || id),
+      description: String(a.description || ''),
+      category: a.category || 'Developer Tools',
+      version: String(a.version || '1.0.0'),
+      group: a.group ? String(a.group) : undefined,
+      tags: Array.isArray(a.tags) ? a.tags : [],
+      helm: a.helm ? {
+        repo: String(a.helm.repo || ''),
+        name: String(a.helm.name || ''),
+        releaseName: String(a.helm.releaseName || a.helm.name || id),
+        version: a.helm.version ? String(a.helm.version) : undefined,
+        namespace: String(a.helm.namespace || 'default'),
+        values: a.helm.values ? String(a.helm.values) : undefined,
+      } : undefined,
+      manifests: a.manifests ? String(a.manifests) : undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }).filter((a: AppDefinition) => Boolean(a.id && a.name));
+
+  const normalizedGroups: AppGroup[] = rawGroups.map((g: any) => {
+    const id = String(g.id || g.name || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+    return {
+      id,
+      name: String(g.name || id),
+      description: String(g.description || ''),
+      icon: g.icon || 'Layers',
+      appIds: Array.isArray(g.appIds) ? g.appIds.map(String) : [],
+    };
+  }).filter((g: AppGroup) => Boolean(g.id && g.name));
+
+  const newCatalog: AppStoreCatalog = {
+    updatedAt: new Date().toISOString(),
+    apps: normalizedApps,
+    groups: normalizedGroups,
+  };
+
+  await saveEntireCatalog(newCatalog);
+  return newCatalog;
 }
 
 /**

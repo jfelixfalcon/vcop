@@ -27,6 +27,9 @@ import {
   Sparkles,
   Zap,
   Loader2,
+  Upload,
+  Download,
+  AlertOctagon,
 } from 'lucide-react';
 import type { AppDefinition, AppGroup, AppCategory, AppStoreCatalog, UserSession, VirtualCluster } from '../lib/types';
 
@@ -111,6 +114,103 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
   const [deploying, setDeploying] = useState(false);
   const [deploySuccessMessage, setDeploySuccessMessage] = useState<string | null>(null);
   const [deployError, setDeployError] = useState<string | null>(null);
+
+  // Import Manifest State
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importManifestText, setImportManifestText] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  // Clear Catalog State
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  // Success message toast
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const handleExportYaml = async () => {
+    try {
+      const res = await fetch('/api/appstore/import');
+      if (!res.ok) throw new Error('Failed to export catalog');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'appstore-catalog.yaml';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setSuccessMessage('App Store catalog exported as YAML!');
+    } catch (err: any) {
+      setError(err.message || 'Export failed');
+    }
+  };
+
+  const handleImportManifest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importManifestText.trim()) {
+      setImportError('Please provide YAML or JSON manifest content');
+      return;
+    }
+    setImporting(true);
+    setImportError(null);
+    try {
+      const res = await fetch('/api/appstore/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ manifest: importManifestText }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to import app catalog');
+      }
+      setCatalog(data.data);
+      setIsImportModalOpen(false);
+      setImportManifestText('');
+      setSuccessMessage('Application catalog imported successfully!');
+    } catch (err: any) {
+      setImportError(err.message || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        setImportManifestText(content);
+        setImportError(null);
+      }
+    };
+    reader.onerror = () => {
+      setImportError('Failed to read file');
+    };
+    reader.readAsText(file);
+  };
+
+  const handleClearCatalog = async () => {
+    setClearing(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/appstore/clear', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to clear app catalog');
+      }
+      setCatalog(data.data);
+      setIsClearModalOpen(false);
+      setSuccessMessage('App Store catalog cleared.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to clear app catalog');
+    } finally {
+      setClearing(false);
+    }
+  };
 
   const fetchClusters = async () => {
     try {
@@ -439,25 +539,83 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
           </h1>
         </div>
 
-        {isAdmin && (
-          <div className="flex items-center gap-2.5 shrink-0">
-            <button
-              onClick={openAddGroupModal}
-              className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-200 border border-cyber-700 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
-            >
-              <Layers className="w-4 h-4 text-purple-400" />
-              <span>+ Create App Group</span>
-            </button>
-            <button
-              onClick={openAddAppModal}
-              className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              <span>+ Add Application</span>
-            </button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            onClick={handleExportYaml}
+            className="px-3 py-2 bg-cyber-900 hover:bg-cyber-850 text-slate-300 hover:text-white border border-cyber-700 text-xs font-mono rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
+            title="Export App Store Catalog as YAML"
+          >
+            <Download className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Export YAML</span>
+          </button>
+
+          {isAdmin && (
+            <>
+              <button
+                onClick={() => {
+                  setImportManifestText('');
+                  setImportError(null);
+                  setIsImportModalOpen(true);
+                }}
+                className="px-3.5 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 text-xs font-mono rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
+                title="Import Application Catalog or Platform Manifest"
+              >
+                <Upload className="w-3.5 h-3.5 text-purple-400" />
+                <span>Import Manifest</span>
+              </button>
+
+              <button
+                onClick={() => setIsClearModalOpen(true)}
+                className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 border border-rose-500/30 text-xs font-mono rounded-xl flex items-center gap-1.5 transition-all"
+                title="Clear all applications and groups from catalog"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Clear</span>
+              </button>
+
+              <button
+                onClick={openAddGroupModal}
+                className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-200 border border-cyber-700 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
+              >
+                <Layers className="w-4 h-4 text-purple-400" />
+                <span>+ Create Group</span>
+              </button>
+              <button
+                onClick={openAddAppModal}
+                className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Add Application</span>
+              </button>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Alerts */}
+      {error && (
+        <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-400 text-xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <button onClick={() => setError(null)} className="p-1 hover:text-white">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-400 text-xs flex items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{successMessage}</span>
+          </div>
+          <button onClick={() => setSuccessMessage(null)} className="p-1 hover:text-white">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* App Groups Showcase Bar */}
       <div className="space-y-3">
@@ -637,12 +795,38 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
           Loading App Store Catalog...
         </div>
       ) : apps.length === 0 ? (
-        <div className="py-20 text-center bg-cyber-900/40 rounded-3xl border border-cyber-800 p-8">
-          <Package className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-white">App Store is Clean & Ready</h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            No applications have been added to the catalog yet. Click <span className="text-cyan-400 font-semibold">+ Add Application</span> above to publish your first Helm chart or Kubernetes manifests.
-          </p>
+        <div className="py-20 text-center bg-cyber-900/40 rounded-3xl border border-dashed border-cyber-800 p-8 space-y-4">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-cyber-800/80 border border-cyber-700 flex items-center justify-center text-slate-500">
+            <Package className="w-7 h-7" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-white font-mono">App Catalog is Empty</h3>
+            <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+              No applications have been imported yet. Import the platform manifest or add applications manually to populate the App Store catalog.
+            </p>
+          </div>
+          {isAdmin && (
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setImportManifestText('');
+                  setImportError(null);
+                  setIsImportModalOpen(true);
+                }}
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs font-mono rounded-xl shadow-lg flex items-center gap-2 transition-all"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Import Catalog Manifest</span>
+              </button>
+              <button
+                onClick={openAddAppModal}
+                className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs font-mono rounded-xl shadow-glow-sm flex items-center gap-2 transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Application</span>
+              </button>
+            </div>
+          )}
         </div>
       ) : filteredApps.length === 0 ? (
         <div className="py-20 text-center bg-cyber-900/40 rounded-3xl border border-cyber-800 p-8">
@@ -1505,6 +1689,234 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Import Catalog Manifest */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700 rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-4 border-b border-cyber-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-purple-500/10 rounded-xl border border-purple-500/30 text-purple-400">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    Import Application Catalog
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Upload or paste an applications YAML / JSON manifest or platform manifest.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsImportModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-cyber-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {importError && (
+              <div className="mt-4 p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{importError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleImportManifest} className="mt-4 flex-1 flex flex-col space-y-4 overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-xs font-mono text-slate-300 flex items-center gap-2">
+                  <FileCode className="w-4 h-4 text-purple-400" />
+                  Manifest Content (YAML / JSON)
+                </label>
+                <div className="flex items-center gap-2">
+                  <label className="px-2.5 py-1 bg-cyber-800 hover:bg-cyber-750 text-slate-300 hover:text-white text-[11px] font-mono rounded-lg border border-cyber-700 cursor-pointer transition-colors flex items-center gap-1.5">
+                    <Upload className="w-3 h-3 text-cyan-400" />
+                    <span>Upload File</span>
+                    <input
+                      type="file"
+                      accept=".yaml,.yml,.json"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportManifestText(`# VCOP Application Catalog Manifest
+appStore:
+  groups:
+    - id: "essential-ingress"
+      name: "Core Ingress & TLS"
+      description: "Automated TLS certificate issuing and layer-7 ingress routing stack"
+      icon: "Network"
+      appIds: ["cert-manager", "ingress-nginx"]
+    - id: "observability-suite"
+      name: "Observability & Metrics"
+      description: "Prometheus monitoring and telemetry suite for virtual clusters"
+      icon: "Activity"
+      appIds: ["prometheus"]
+    - id: "data-services"
+      name: "Data & Caching"
+      description: "High-throughput Redis cache for containerized microservices"
+      icon: "Database"
+      appIds: ["redis"]
+  apps:
+    - id: "cert-manager"
+      name: "Cert-Manager"
+      description: "Automated TLS / SSL certificate management with Let's Encrypt and private PKI"
+      category: "Security & Auth"
+      version: "v1.16.2"
+      icon: "Shield"
+      tags: ["tls", "certificates", "security"]
+      helm:
+        repo: "https://charts.jetstack.io"
+        name: "cert-manager"
+        releaseName: "cert-manager"
+        version: "v1.16.2"
+        namespace: "cert-manager"
+        values: |
+          installCRDs: true
+          replicaCount: 1
+    - id: "ingress-nginx"
+      name: "NGINX Ingress Controller"
+      description: "Enterprise HTTP/HTTPS Ingress controller with automated routing"
+      category: "Network & Ingress"
+      version: "4.12.0"
+      icon: "Network"
+      tags: ["ingress", "nginx", "routing"]
+      helm:
+        repo: "https://kubernetes.github.io/ingress-nginx"
+        name: "ingress-nginx"
+        releaseName: "ingress-nginx"
+        version: "4.12.0"
+        namespace: "ingress-nginx"
+        values: |
+          controller:
+            service:
+              type: NodePort
+    - id: "prometheus"
+      name: "Prometheus Monitoring"
+      description: "System monitoring and alerting toolkit with real-time metrics scraping"
+      category: "Observability"
+      version: "25.27.0"
+      icon: "Activity"
+      tags: ["monitoring", "prometheus", "metrics"]
+      helm:
+        repo: "https://prometheus-community.github.io/helm-charts"
+        name: "prometheus"
+        releaseName: "prometheus"
+        version: "25.27.0"
+        namespace: "monitoring"
+        values: |
+          server:
+            retention: "7d"
+            persistentVolume:
+              size: "10Gi"
+    - id: "redis"
+      name: "Redis In-Memory Data Store"
+      description: "In-memory key-value cache and message broker for microservices"
+      category: "Storage & Database"
+      version: "19.6.4"
+      icon: "Database"
+      tags: ["redis", "database", "cache"]
+      helm:
+        repo: "https://charts.bitnami.com/bitnami"
+        name: "redis"
+        releaseName: "redis"
+        version: "19.6.4"
+        namespace: "data"
+        values: |
+          architecture: "standalone"
+          auth:
+            enabled: false
+`);
+                      setImportError(null);
+                    }}
+                    className="px-2.5 py-1 bg-cyber-800 hover:bg-cyber-750 text-cyan-400 text-[11px] font-mono rounded-lg border border-cyber-700 transition-colors"
+                  >
+                    Load Default Template
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                value={importManifestText}
+                onChange={(e) => setImportManifestText(e.target.value)}
+                placeholder="Paste platform-manifest.yaml, Kubernetes ConfigMap, or apps YAML/JSON here..."
+                rows={12}
+                className="w-full flex-1 bg-cyber-950 border border-cyber-700 rounded-xl p-3 text-xs font-mono text-cyan-200 placeholder:text-slate-600 focus:outline-none focus:border-purple-500 font-mono resize-none leading-relaxed"
+                required
+              />
+
+              <div className="flex items-center justify-between pt-3 border-t border-cyber-800">
+                <p className="text-[11px] font-mono text-slate-500">
+                  Supports unified <code className="text-slate-400">platform-manifest.yaml</code>, ConfigMaps, or apps list.
+                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsImportModalOpen(false)}
+                    className="px-4 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-300 text-xs font-mono rounded-xl border border-cyber-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={importing || !importManifestText.trim()}
+                    className="px-5 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs font-mono rounded-xl shadow-lg transition-all disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                    <span>Import Manifest</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Clear All Applications Confirmation */}
+      {isClearModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-cyber-900 border border-rose-500/40 rounded-3xl shadow-2xl p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 bg-rose-500/20 rounded-xl border border-rose-500/30 text-rose-400">
+                <AlertOctagon className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Clear App Store Catalog?</h3>
+                <p className="text-xs text-rose-300/80">High-Impact Platform Action</p>
+              </div>
+            </div>
+
+            <p className="text-xs font-mono text-slate-300 bg-cyber-950 p-4 rounded-xl border border-cyber-800 mb-5 leading-relaxed">
+              This action will purge all applications and application groups from the App Store catalog.
+              <br /><br />
+              <strong className="text-rose-400">Notice:</strong> Existing deployments on running clusters are unaffected, but no apps can be newly deployed until an administrator imports or creates applications.
+            </p>
+
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsClearModalOpen(false)}
+                className="px-4 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-300 text-xs font-mono rounded-xl border border-cyber-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleClearCatalog}
+                disabled={clearing}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs font-mono rounded-xl shadow-lg transition-all disabled:opacity-50 flex items-center gap-2"
+              >
+                {clearing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                Yes, Clear All Applications
+              </button>
+            </div>
           </div>
         </div>
       )}

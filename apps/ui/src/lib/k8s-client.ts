@@ -505,13 +505,17 @@ export async function createVirtualCluster(data: {
     coreDNSVer = coreDNSVer || defaults.coreDNSVersion;
     metricsVer = metricsVer || defaults.metricsServerVersion;
     istioVer = istioVer || defaults.istioVersion;
-  } catch {
-    k8sVer = k8sVer || 'v1.31.0';
-    vclusterVer = vclusterVer || '0.36.0';
-    etcdVer = etcdVer || '3.6.8-0';
-    coreDNSVer = coreDNSVer || 'v1.11.3';
-    metricsVer = metricsVer || 'v0.7.2';
-    istioVer = istioVer || '1.24.2';
+  } catch {}
+
+  const missingCore = [
+    !k8sVer && 'Kubernetes',
+    !vclusterVer && 'vCluster Engine',
+    !etcdVer && 'etcd',
+  ].filter(Boolean);
+  if (missingCore.length > 0) {
+    throw new Error(
+      `Cannot deploy virtual cluster: Missing version for core component(s): ${missingCore.join(', ')}. An administrator must import a version registry manifest first.`
+    );
   }
   // Pre-flight host capacity guardrail
   if (!data.ignoreCapacityCheck) {

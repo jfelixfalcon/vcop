@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { listVirtualClusters, createVirtualCluster } from '../../../lib/k8s-client';
 import { canUserViewCluster, isUserAdmin, isUserDeveloper } from '../../../lib/auth';
+import { getVersionRegistry, getMissingCoreComponents } from '../../../lib/version-registry';
 
 export const GET: APIRoute = async ({ locals }) => {
   try {
@@ -57,6 +58,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+
+    // Guardrail: Verify core components exist in version registry before provisioning
+    const registry = await getVersionRegistry();
+    const missingCore = getMissingCoreComponents(registry);
+    if (missingCore.length > 0) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `Cannot deploy virtual cluster: Missing Version Registry for core component(s): ${missingCore.join(', ')}. An administrator must import a version registry manifest before clusters can be deployed.`,
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     // Strict guardrail for developers: must deploy using a predefined baseline

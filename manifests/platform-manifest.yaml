@@ -1,0 +1,224 @@
+# ==============================================================================
+# Virtual Cluster Operations Center (VCOP) - Platform Manifest
+# ==============================================================================
+# This manifest contains the Version Registry (Kubernetes, vCluster Engine, etcd,
+# CoreDNS, Metrics-Server, Istio) and the Application Catalog.
+#
+# IMPORT METHODS:
+# 1. UI: Go to "Version Registry" or "App Store" and click "Import Manifest"
+# 2. REST API:
+#    curl -X POST http://<VCOP_HOST>/api/admin/platform/import \
+#      -H "Content-Type: application/x-yaml" \
+#      -H "Cookie: vcop_session=<ADMIN_SESSION_TOKEN>" \
+#      --data-binary @manifests/platform-manifest.yaml
+# 3. Kubectl (ConfigMaps):
+#    kubectl apply -f manifests/platform-configmaps.yaml
+# ==============================================================================
+
+versionRegistry:
+  # ----------------------------------------------------------------------------
+  # Core Component 1: Kubernetes Control Plane (API Server)
+  # ----------------------------------------------------------------------------
+  kubernetesVersions:
+    - version: "v1.31.0"
+      label: "v1.31.0 (Latest Default)"
+      tag: "stable"
+      isDefault: true
+      notes: "Default Kubernetes GA release with latest upstream APIs"
+    - version: "v1.30.4"
+      label: "v1.30.4 (Enterprise LTS)"
+      tag: "lts"
+      isDefault: false
+      notes: "Enterprise hardened Kubernetes LTS release"
+    - version: "v1.29.8"
+      label: "v1.29.8 (Maintenance)"
+      tag: "deprecated"
+      isDefault: false
+      notes: "Kubernetes 1.29 maintenance patch for legacy workloads"
+
+  # ----------------------------------------------------------------------------
+  # Core Component 2: vCluster Syncer Core Engine
+  # ----------------------------------------------------------------------------
+  vclusterVersions:
+    - version: "0.36.0"
+      label: "0.36.0 (Recommended Core)"
+      tag: "stable"
+      isDefault: true
+      notes: "High performance syncer engine with ambient service routing"
+    - version: "0.35.2"
+      label: "0.35.2 (Previous Stable)"
+      tag: "lts"
+      isDefault: false
+      notes: "Proven stable syncer release for enterprise clusters"
+
+  # ----------------------------------------------------------------------------
+  # Core Component 3: etcd Backing Store
+  # ----------------------------------------------------------------------------
+  etcdVersions:
+    - version: "3.6.8-0"
+      label: "3.6.8-0 (Production SSD)"
+      tag: "stable"
+      isDefault: true
+      notes: "High throughput key-value backing store for state persistence"
+    - version: "3.5.15-0"
+      label: "3.5.15-0 (Long-Term Stable)"
+      tag: "lts"
+      isDefault: false
+      notes: "etcd 3.5 LTS release for standard workloads"
+
+  # ----------------------------------------------------------------------------
+  # Core DNS Resolver
+  # ----------------------------------------------------------------------------
+  coreDNSVersions:
+    - version: "v1.11.3"
+      label: "v1.11.3 (Default DNS)"
+      tag: "stable"
+      isDefault: true
+      notes: "Internal cluster service discovery and resolution"
+
+  # ----------------------------------------------------------------------------
+  # Metrics Server (HPA & Autoscaling)
+  # ----------------------------------------------------------------------------
+  metricsServerVersions:
+    - version: "v0.7.2"
+      label: "v0.7.2 (Default HPA Telemetry)"
+      tag: "stable"
+      isDefault: true
+      notes: "In-cluster resource metrics pipeline for autoscaling"
+
+  # ----------------------------------------------------------------------------
+  # Istio Service Mesh & Zero-Touch Ingress
+  # ----------------------------------------------------------------------------
+  istioVersions:
+    - version: "1.24.2"
+      label: "1.24.2 (Production Gateway)"
+      tag: "stable"
+      isDefault: true
+      notes: "Istio Ingress Gateway & Ambient Mesh"
+    - version: "1.23.4"
+      label: "1.23.4 (LTS)"
+      tag: "lts"
+      isDefault: false
+      notes: "Istio 1.23 Long Term Support"
+
+# ==============================================================================
+# Application Catalog (App Store)
+# ==============================================================================
+appStore:
+  # ----------------------------------------------------------------------------
+  # App Groups (Bundles for 1-Click Multi-App Deployment)
+  # ----------------------------------------------------------------------------
+  groups:
+    - id: "essential-ingress"
+      name: "Core Ingress & TLS"
+      description: "Automated TLS certificate issuing and layer-7 ingress routing stack"
+      icon: "Network"
+      appIds:
+        - "cert-manager"
+        - "ingress-nginx"
+
+    - id: "observability-suite"
+      name: "Observability & Metrics"
+      description: "Prometheus monitoring and telemetry suite for virtual clusters"
+      icon: "Activity"
+      appIds:
+        - "prometheus"
+
+    - id: "data-services"
+      name: "Data & Caching"
+      description: "High-throughput Redis cache for containerized microservices"
+      icon: "Database"
+      appIds:
+        - "redis"
+
+  # ----------------------------------------------------------------------------
+  # Individual Applications
+  # ----------------------------------------------------------------------------
+  apps:
+    - id: "cert-manager"
+      name: "Cert-Manager"
+      description: "Automated TLS / SSL certificate management with Let's Encrypt and private PKI"
+      category: "Security & Auth"
+      version: "v1.16.2"
+      icon: "Shield"
+      tags:
+        - "tls"
+        - "certificates"
+        - "security"
+        - "pki"
+      helm:
+        repo: "https://charts.jetstack.io"
+        name: "cert-manager"
+        releaseName: "cert-manager"
+        version: "v1.16.2"
+        namespace: "cert-manager"
+        values: |
+          installCRDs: true
+          replicaCount: 1
+
+    - id: "ingress-nginx"
+      name: "NGINX Ingress Controller"
+      description: "Enterprise HTTP/HTTPS Ingress controller with automated routing and SSL termination"
+      category: "Network & Ingress"
+      version: "4.12.0"
+      icon: "Network"
+      tags:
+        - "ingress"
+        - "nginx"
+        - "routing"
+        - "http"
+      helm:
+        repo: "https://kubernetes.github.io/ingress-nginx"
+        name: "ingress-nginx"
+        releaseName: "ingress-nginx"
+        version: "4.12.0"
+        namespace: "ingress-nginx"
+        values: |
+          controller:
+            service:
+              type: NodePort
+
+    - id: "prometheus"
+      name: "Prometheus Monitoring"
+      description: "System monitoring and alerting toolkit with real-time metrics scraping and storage"
+      category: "Observability"
+      version: "25.27.0"
+      icon: "Activity"
+      tags:
+        - "monitoring"
+        - "prometheus"
+        - "metrics"
+        - "alerts"
+      helm:
+        repo: "https://prometheus-community.github.io/helm-charts"
+        name: "prometheus"
+        releaseName: "prometheus"
+        version: "25.27.0"
+        namespace: "monitoring"
+        values: |
+          server:
+            retention: "7d"
+            persistentVolume:
+              size: "10Gi"
+
+    - id: "redis"
+      name: "Redis In-Memory Data Store"
+      description: "In-memory key-value cache and message broker for high-speed application caching"
+      category: "Storage & Database"
+      version: "19.6.4"
+      icon: "Database"
+      tags:
+        - "redis"
+        - "database"
+        - "cache"
+        - "key-value"
+      helm:
+        repo: "https://charts.bitnami.com/bitnami"
+        name: "redis"
+        releaseName: "redis"
+        version: "19.6.4"
+        namespace: "data"
+        values: |
+          architecture: "standalone"
+          auth:
+            enabled: false

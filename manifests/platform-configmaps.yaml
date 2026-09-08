@@ -1,0 +1,219 @@
+# ==============================================================================
+# Virtual Cluster Operations Center (VCOP) - Platform ConfigMaps
+# ==============================================================================
+# Direct Kubernetes manifests for automated GitOps / kubectl deployment.
+# Apply to host cluster:
+#   kubectl apply -f manifests/platform-configmaps.yaml
+# ==============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vcop-version-registry
+  namespace: vcop-system
+  labels:
+    app.kubernetes.io/name: vc-operations-center
+    app.kubernetes.io/part-of: vcop
+    vcop.dev/component: version-registry
+data:
+  versions.json: |
+    {
+      "updatedAt": "2026-09-08T00:00:00.000Z",
+      "kubernetesVersions": [
+        {
+          "version": "v1.31.0",
+          "label": "v1.31.0 (Latest Default)",
+          "tag": "default",
+          "isDefault": true,
+          "notes": "Default Kubernetes GA release with latest upstream APIs"
+        },
+        {
+          "version": "v1.30.4",
+          "label": "v1.30.4 (Enterprise LTS)",
+          "tag": "lts",
+          "isDefault": false,
+          "notes": "Enterprise hardened Kubernetes LTS release"
+        },
+        {
+          "version": "v1.29.8",
+          "label": "v1.29.8 (Maintenance)",
+          "tag": "deprecated",
+          "isDefault": false,
+          "notes": "Kubernetes 1.29 maintenance patch for legacy workloads"
+        }
+      ],
+      "vclusterVersions": [
+        {
+          "version": "0.36.0",
+          "label": "0.36.0 (Recommended Core)",
+          "tag": "default",
+          "isDefault": true,
+          "notes": "High performance syncer engine with ambient service routing"
+        },
+        {
+          "version": "0.35.2",
+          "label": "0.35.2 (Previous Stable)",
+          "tag": "lts",
+          "isDefault": false,
+          "notes": "Proven stable syncer release for enterprise clusters"
+        }
+      ],
+      "etcdVersions": [
+        {
+          "version": "3.6.8-0",
+          "label": "3.6.8-0 (Production SSD)",
+          "tag": "default",
+          "isDefault": true,
+          "notes": "High throughput key-value backing store for state persistence"
+        },
+        {
+          "version": "3.5.15-0",
+          "label": "3.5.15-0 (Long-Term Stable)",
+          "tag": "lts",
+          "isDefault": false,
+          "notes": "etcd 3.5 LTS release for standard workloads"
+        }
+      ],
+      "coreDNSVersions": [
+        {
+          "version": "v1.11.3",
+          "label": "v1.11.3 (Default DNS)",
+          "tag": "default",
+          "isDefault": true,
+          "notes": "Internal cluster service discovery and resolution"
+        }
+      ],
+      "metricsServerVersions": [
+        {
+          "version": "v0.7.2",
+          "label": "v0.7.2 (Default HPA Telemetry)",
+          "tag": "default",
+          "isDefault": true,
+          "notes": "In-cluster resource metrics pipeline for autoscaling"
+        }
+      ],
+      "istioVersions": [
+        {
+          "version": "1.24.2",
+          "label": "1.24.2 (Production Gateway)",
+          "tag": "default",
+          "isDefault": true,
+          "notes": "Istio Ingress Gateway & Ambient Mesh"
+        },
+        {
+          "version": "1.23.4",
+          "label": "1.23.4 (LTS)",
+          "tag": "lts",
+          "isDefault": false,
+          "notes": "Istio 1.23 Long Term Support"
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vcop-appstore-catalog
+  namespace: vcop-system
+  labels:
+    app.kubernetes.io/name: vc-operations-center
+    app.kubernetes.io/part-of: vcop
+    vcop.dev/component: appstore-catalog
+data:
+  catalog.json: |
+    {
+      "updatedAt": "2026-09-08T00:00:00.000Z",
+      "groups": [
+        {
+          "id": "essential-ingress",
+          "name": "Core Ingress & TLS",
+          "description": "Automated TLS certificate issuing and layer-7 ingress routing stack",
+          "icon": "Network",
+          "appIds": ["cert-manager", "ingress-nginx"]
+        },
+        {
+          "id": "observability-suite",
+          "name": "Observability & Metrics",
+          "description": "Prometheus monitoring and telemetry suite for virtual clusters",
+          "icon": "Activity",
+          "appIds": ["prometheus"]
+        },
+        {
+          "id": "data-services",
+          "name": "Data & Caching",
+          "description": "High-throughput Redis cache for containerized microservices",
+          "icon": "Database",
+          "appIds": ["redis"]
+        }
+      ],
+      "apps": [
+        {
+          "id": "cert-manager",
+          "name": "Cert-Manager",
+          "description": "Automated TLS / SSL certificate management with Let's Encrypt and private PKI",
+          "category": "Security & Auth",
+          "version": "v1.16.2",
+          "icon": "Shield",
+          "tags": ["tls", "certificates", "security", "pki"],
+          "helm": {
+            "repo": "https://charts.jetstack.io",
+            "name": "cert-manager",
+            "releaseName": "cert-manager",
+            "version": "v1.16.2",
+            "namespace": "cert-manager",
+            "values": "installCRDs: true\nreplicaCount: 1\n"
+          }
+        },
+        {
+          "id": "ingress-nginx",
+          "name": "NGINX Ingress Controller",
+          "description": "Enterprise HTTP/HTTPS Ingress controller with automated routing and SSL termination",
+          "category": "Network & Ingress",
+          "version": "4.12.0",
+          "icon": "Network",
+          "tags": ["ingress", "nginx", "routing", "http"],
+          "helm": {
+            "repo": "https://kubernetes.github.io/ingress-nginx",
+            "name": "ingress-nginx",
+            "releaseName": "ingress-nginx",
+            "version": "4.12.0",
+            "namespace": "ingress-nginx",
+            "values": "controller:\n  service:\n    type: NodePort\n"
+          }
+        },
+        {
+          "id": "prometheus",
+          "name": "Prometheus Monitoring",
+          "description": "System monitoring and alerting toolkit with real-time metrics scraping and storage",
+          "category": "Observability",
+          "version": "25.27.0",
+          "icon": "Activity",
+          "tags": ["monitoring", "prometheus", "metrics", "alerts"],
+          "helm": {
+            "repo": "https://prometheus-community.github.io/helm-charts",
+            "name": "prometheus",
+            "releaseName": "prometheus",
+            "version": "25.27.0",
+            "namespace": "monitoring",
+            "values": "server:\n  retention: 7d\n  persistentVolume:\n    size: 10Gi\n"
+          }
+        },
+        {
+          "id": "redis",
+          "name": "Redis In-Memory Data Store",
+          "description": "In-memory key-value cache and message broker for high-speed application caching",
+          "category": "Storage & Database",
+          "version": "19.6.4",
+          "icon": "Database",
+          "tags": ["redis", "database", "cache", "key-value"],
+          "helm": {
+            "repo": "https://charts.bitnami.com/bitnami",
+            "name": "redis",
+            "releaseName": "redis",
+            "version": "19.6.4",
+            "namespace": "data",
+            "values": "architecture: standalone\nauth:\n  enabled: false\n"
+          }
+        }
+      ]
+    }

@@ -1,142 +1,18 @@
-import type { VersionItem, VersionRegistry } from './types';
+import type { VersionItem, VersionRegistry, VersionTag } from './types';
 import { k8sRequest } from './k8s-client';
+import YAML from 'yaml';
 
 const REGISTRY_CONFIGMAP_NAME = 'vcop-version-registry';
 const REGISTRY_NAMESPACE = 'vcop-system';
 
 export const DEFAULT_VERSION_REGISTRY: VersionRegistry = {
   updatedAt: new Date().toISOString(),
-  kubernetesVersions: [
-    {
-      version: 'v1.31.0',
-      label: 'v1.31.0 (Latest Default)',
-      tag: 'default',
-      isDefault: true,
-      notes: 'Recommended stable release for production virtual clusters',
-    },
-    {
-      version: 'v1.30.0',
-      label: 'v1.30.0 (LTS)',
-      tag: 'lts',
-      isDefault: false,
-      notes: 'Long Term Support control plane version',
-    },
-    {
-      version: 'v1.32.0',
-      label: 'v1.32.0 (Preview)',
-      tag: 'preview',
-      isDefault: false,
-      notes: 'Cutting edge release for feature evaluation',
-    },
-  ],
-  vclusterVersions: [
-    {
-      version: '0.36.0',
-      label: '0.36.0 (Unified Schema)',
-      tag: 'default',
-      isDefault: true,
-      notes: 'vCluster OSS engine with unified schema and modular architecture',
-    },
-    {
-      version: '0.35.2',
-      label: '0.35.2 (Classic Stable)',
-      tag: 'stable',
-      isDefault: false,
-      notes: 'Proven stable engine release for compatibility fallback',
-    },
-    {
-      version: '0.37.0-beta.1',
-      label: '0.37.0-beta.1 (Preview)',
-      tag: 'preview',
-      isDefault: false,
-      notes: 'Next-generation vCluster preview with advanced isolation hooks',
-    },
-  ],
-  etcdVersions: [
-    {
-      version: '3.6.8-0',
-      label: '3.6.8-0 (Recommended)',
-      tag: 'default',
-      isDefault: true,
-      notes: 'High-performance backing store with enhanced Raft throughput',
-    },
-  ],
-  coreDNSVersions: [
-    {
-      version: 'v1.11.3',
-      label: 'v1.11.3 (Recommended)',
-      tag: 'default',
-      isDefault: true,
-      notes: 'Standard CoreDNS plugin suite with optimal latency',
-    },
-    {
-      version: 'v1.11.1',
-      label: 'v1.11.1 (Stable)',
-      tag: 'stable',
-      isDefault: false,
-      notes: 'Proven stable DNS resolver',
-    },
-    {
-      version: 'v1.12.0',
-      label: 'v1.12.0 (Preview)',
-      tag: 'preview',
-      isDefault: false,
-      notes: 'Latest CoreDNS release with enhanced caching plugins',
-    },
-  ],
-  metricsServerVersions: [
-    {
-      version: 'v0.7.2',
-      label: 'v0.7.2 (Recommended)',
-      tag: 'default',
-      isDefault: true,
-      notes: 'Modern lightweight metrics-server with HPA support',
-    },
-    {
-      version: 'v0.7.1',
-      label: 'v0.7.1 (Stable)',
-      tag: 'stable',
-      isDefault: false,
-      notes: 'Stable metrics aggregation engine',
-    },
-    {
-      version: 'v0.6.4',
-      label: 'v0.6.4 (Legacy)',
-      tag: 'deprecated',
-      isDefault: false,
-      notes: 'Legacy v0.6 metrics-server pipeline',
-    },
-  ],
-  istioVersions: [
-    {
-      version: '1.24.2',
-      label: '1.24.2 (Recommended)',
-      tag: 'default',
-      isDefault: true,
-      notes: 'Production-ready Istio service mesh and ingress gateway',
-    },
-    {
-      version: '1.24.0',
-      label: '1.24.0 (Stable)',
-      tag: 'stable',
-      isDefault: false,
-      notes: 'Initial 1.24 minor release',
-    },
-    {
-      version: '1.23.3',
-      label: '1.23.3 (LTS)',
-      tag: 'lts',
-      isDefault: false,
-      notes: 'Long Term Support Istio release branch',
-    },
-    {
-      version: '1.25.0-alpha.1',
-      label: '1.25.0 (Preview)',
-      tag: 'preview',
-      isDefault: false,
-      notes: 'Next-generation Istio preview build with ambient enhancements',
-    },
-  ],
+  kubernetesVersions: [],
+  vclusterVersions: [],
+  etcdVersions: [],
+  coreDNSVersions: [],
+  metricsServerVersions: [],
+  istioVersions: [],
 };
 
 let memoryRegistryCache: VersionRegistry | null = null;
@@ -184,10 +60,12 @@ export async function getVersionRegistry(): Promise<VersionRegistry> {
 
     if (res.statusCode === 200 && res.data?.data?.['versions.json']) {
       const parsed = JSON.parse(res.data.data['versions.json']) as VersionRegistry;
-      if (!parsed.etcdVersions || parsed.etcdVersions.length === 0) parsed.etcdVersions = DEFAULT_VERSION_REGISTRY.etcdVersions;
-      if (!parsed.coreDNSVersions || parsed.coreDNSVersions.length === 0) parsed.coreDNSVersions = DEFAULT_VERSION_REGISTRY.coreDNSVersions;
-      if (!parsed.metricsServerVersions || parsed.metricsServerVersions.length === 0) parsed.metricsServerVersions = DEFAULT_VERSION_REGISTRY.metricsServerVersions;
-      if (!parsed.istioVersions || parsed.istioVersions.length === 0) parsed.istioVersions = DEFAULT_VERSION_REGISTRY.istioVersions;
+      if (!Array.isArray(parsed.kubernetesVersions)) parsed.kubernetesVersions = [];
+      if (!Array.isArray(parsed.vclusterVersions)) parsed.vclusterVersions = [];
+      if (!Array.isArray(parsed.etcdVersions)) parsed.etcdVersions = [];
+      if (!Array.isArray(parsed.coreDNSVersions)) parsed.coreDNSVersions = [];
+      if (!Array.isArray(parsed.metricsServerVersions)) parsed.metricsServerVersions = [];
+      if (!Array.isArray(parsed.istioVersions)) parsed.istioVersions = [];
       memoryRegistryCache = parsed;
       lastFetchTime = now;
       return parsed;
@@ -196,9 +74,9 @@ export async function getVersionRegistry(): Promise<VersionRegistry> {
     // ConfigMap not created yet
   }
 
-  // If not found, persist default registry to Kubernetes ConfigMap
+  // If not found, persist empty default registry to Kubernetes ConfigMap
   try {
-    await saveEntireRegistryToK8s(DEFAULT_VERSION_REGISTRY);
+    await saveEntireRegistry(DEFAULT_VERSION_REGISTRY);
     memoryRegistryCache = DEFAULT_VERSION_REGISTRY;
     lastFetchTime = now;
     return DEFAULT_VERSION_REGISTRY;
@@ -212,7 +90,7 @@ export async function getVersionRegistry(): Promise<VersionRegistry> {
 /**
  * Saves the entire registry structure to Kubernetes ConfigMap.
  */
-async function saveEntireRegistryToK8s(registry: VersionRegistry): Promise<void> {
+export async function saveEntireRegistry(registry: VersionRegistry): Promise<void> {
   const payload: VersionRegistry = {
     ...registry,
     updatedAt: new Date().toISOString(),
@@ -254,6 +132,126 @@ async function saveEntireRegistryToK8s(registry: VersionRegistry): Promise<void>
 
   memoryRegistryCache = payload;
   lastFetchTime = Date.now();
+}
+
+/**
+ * Checks if any of the major core components (Kubernetes, vCluster Engine, etcd)
+ * are missing versions in the registry.
+ */
+export function getMissingCoreComponents(registry?: VersionRegistry | null): string[] {
+  const missing: string[] = [];
+  if (!registry?.kubernetesVersions || registry.kubernetesVersions.length === 0) {
+    missing.push('Kubernetes');
+  }
+  if (!registry?.vclusterVersions || registry.vclusterVersions.length === 0) {
+    missing.push('vCluster Engine');
+  }
+  if (!registry?.etcdVersions || registry.etcdVersions.length === 0) {
+    missing.push('etcd');
+  }
+  return missing;
+}
+
+/**
+ * Clears the Version Registry completely so that all categories are empty.
+ */
+export async function clearVersionRegistry(): Promise<VersionRegistry> {
+  const empty: VersionRegistry = {
+    updatedAt: new Date().toISOString(),
+    kubernetesVersions: [],
+    vclusterVersions: [],
+    etcdVersions: [],
+    coreDNSVersions: [],
+    metricsServerVersions: [],
+    istioVersions: [],
+  };
+  await saveEntireRegistry(empty);
+  return empty;
+}
+
+/**
+ * Parses and imports a Version Registry manifest (YAML or JSON) and saves it.
+ */
+export async function importVersionRegistry(input: string | any): Promise<VersionRegistry> {
+  let data: any = input;
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      throw new Error('Import manifest cannot be empty.');
+    }
+    try {
+      data = JSON.parse(trimmed);
+    } catch {
+      try {
+        data = YAML.parse(trimmed);
+      } catch (yamlErr: any) {
+        throw new Error(`Failed to parse manifest as JSON or YAML: ${yamlErr.message}`);
+      }
+    }
+  }
+
+  // Handle multi-doc YAML array or single object
+  if (Array.isArray(data) && data.length > 0) {
+    const cmDoc = data.find((d: any) => d?.metadata?.name === REGISTRY_CONFIGMAP_NAME);
+    if (cmDoc) data = cmDoc;
+  }
+
+  // If standard Kubernetes ConfigMap format
+  if (data?.kind === 'ConfigMap' && data.data?.['versions.json']) {
+    try {
+      data = JSON.parse(data.data['versions.json']);
+    } catch {
+      data = YAML.parse(data.data['versions.json']);
+    }
+  } else if (data?.versionRegistry) {
+    data = data.versionRegistry;
+  } else if (data?.versions) {
+    data = data.versions;
+  }
+
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid version registry manifest format.');
+  }
+
+  const normalizeList = (items: any): VersionItem[] => {
+    if (!Array.isArray(items)) return [];
+    return items
+      .map((item: any) => {
+        const version = String(item.version || item.name || '').trim();
+        return {
+          version,
+          label: String(item.label || version).trim(),
+          tag: (item.tag as VersionTag) || (item.isDefault ? 'default' : 'stable'),
+          isDefault: Boolean(item.isDefault),
+          notes: item.notes ? String(item.notes).trim() : undefined,
+        };
+      })
+      .filter((v) => Boolean(v.version));
+  };
+
+  const current = await getVersionRegistry();
+  const newRegistry: VersionRegistry = {
+    updatedAt: new Date().toISOString(),
+    kubernetesVersions: data.kubernetesVersions !== undefined ? normalizeList(data.kubernetesVersions) : current.kubernetesVersions,
+    vclusterVersions: data.vclusterVersions !== undefined ? normalizeList(data.vclusterVersions) : current.vclusterVersions,
+    etcdVersions: data.etcdVersions !== undefined ? normalizeList(data.etcdVersions) : current.etcdVersions,
+    coreDNSVersions: data.coreDNSVersions !== undefined ? normalizeList(data.coreDNSVersions) : current.coreDNSVersions,
+    metricsServerVersions: data.metricsServerVersions !== undefined ? normalizeList(data.metricsServerVersions) : current.metricsServerVersions,
+    istioVersions: data.istioVersions !== undefined ? normalizeList(data.istioVersions) : current.istioVersions,
+  };
+
+  // Ensure default version is set for each non-empty category
+  const categories: VersionCategory[] = ['k8s', 'vcluster', 'etcd', 'coredns', 'metricsServer', 'istio'];
+  for (const cat of categories) {
+    const list = getListForCategory(newRegistry, cat);
+    if (list.length > 0 && !list.some((v) => v.isDefault)) {
+      list[0].isDefault = true;
+      list[0].tag = 'default';
+    }
+  }
+
+  await saveEntireRegistry(newRegistry);
+  return newRegistry;
 }
 
 /**
@@ -314,10 +312,6 @@ export async function deleteVersion(
   const registry = await getVersionRegistry();
   const list = [...getListForCategory(registry, type)];
 
-  if (list.length <= 1) {
-    throw new Error(`Cannot delete version "${version}". At least one version must remain in the registry.`);
-  }
-
   const targetIdx = list.findIndex(v => v.version === version);
   if (targetIdx === -1) {
     throw new Error(`Version "${version}" not found in registry.`);
@@ -333,7 +327,7 @@ export async function deleteVersion(
   }
 
   setListForCategory(registry, type, list);
-  await saveEntireRegistryToK8s(registry);
+  await saveEntireRegistry(registry);
   return registry;
 }
 
@@ -363,12 +357,13 @@ export async function setDefaultVersion(
   }
 
   setListForCategory(registry, type, list);
-  await saveEntireRegistryToK8s(registry);
+  await saveEntireRegistry(registry);
   return registry;
 }
 
 /**
  * Helper to fetch currently active defaults.
+ * Returns empty strings if no version exists in registry.
  */
 export async function getDefaultVersions(): Promise<{
   kubernetesVersion: string;
@@ -380,12 +375,12 @@ export async function getDefaultVersions(): Promise<{
 }> {
   try {
     const registry = await getVersionRegistry();
-    const defaultK8s = registry.kubernetesVersions.find(v => v.isDefault)?.version || registry.kubernetesVersions[0]?.version || 'v1.31.0';
-    const defaultEngine = registry.vclusterVersions.find(v => v.isDefault)?.version || registry.vclusterVersions[0]?.version || '0.36.0';
-    const defaultEtcd = registry.etcdVersions?.find(v => v.isDefault)?.version || registry.etcdVersions?.[0]?.version || '3.6.8-0';
-    const defaultCoreDNS = registry.coreDNSVersions?.find(v => v.isDefault)?.version || registry.coreDNSVersions?.[0]?.version || 'v1.11.3';
-    const defaultMetrics = registry.metricsServerVersions?.find(v => v.isDefault)?.version || registry.metricsServerVersions?.[0]?.version || 'v0.7.2';
-    const defaultIstio = registry.istioVersions?.find(v => v.isDefault)?.version || registry.istioVersions?.[0]?.version || '1.24.2';
+    const defaultK8s = registry.kubernetesVersions.find(v => v.isDefault)?.version || registry.kubernetesVersions[0]?.version || '';
+    const defaultEngine = registry.vclusterVersions.find(v => v.isDefault)?.version || registry.vclusterVersions[0]?.version || '';
+    const defaultEtcd = registry.etcdVersions?.find(v => v.isDefault)?.version || registry.etcdVersions?.[0]?.version || '';
+    const defaultCoreDNS = registry.coreDNSVersions?.find(v => v.isDefault)?.version || registry.coreDNSVersions?.[0]?.version || '';
+    const defaultMetrics = registry.metricsServerVersions?.find(v => v.isDefault)?.version || registry.metricsServerVersions?.[0]?.version || '';
+    const defaultIstio = registry.istioVersions?.find(v => v.isDefault)?.version || registry.istioVersions?.[0]?.version || '';
     return {
       kubernetesVersion: defaultK8s,
       vclusterVersion: defaultEngine,
@@ -396,12 +391,12 @@ export async function getDefaultVersions(): Promise<{
     };
   } catch {
     return {
-      kubernetesVersion: 'v1.31.0',
-      vclusterVersion: '0.36.0',
-      etcdVersion: '3.6.8-0',
-      coreDNSVersion: 'v1.11.3',
-      metricsServerVersion: 'v0.7.2',
-      istioVersion: '1.24.2',
+      kubernetesVersion: '',
+      vclusterVersion: '',
+      etcdVersion: '',
+      coreDNSVersion: '',
+      metricsServerVersion: '',
+      istioVersion: '',
     };
   }
 }

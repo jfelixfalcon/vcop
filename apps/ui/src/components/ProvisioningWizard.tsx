@@ -89,6 +89,7 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
   // Advanced Mode
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   const [versionRegistry, setVersionRegistry] = useState<VersionRegistry | null>(null);
+  const [loadingVersions, setLoadingVersions] = useState<boolean>(true);
   const [kubernetesVersion, setKubernetesVersion] = useState<string>('');
   const [vclusterVersion, setVclusterVersion] = useState<string>('');
   const [etcdVersion, setEtcdVersion] = useState<string>('');
@@ -194,12 +195,12 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
         if (data.success && data.data) {
           const reg: VersionRegistry = data.data;
           setVersionRegistry(reg);
-          const defaultK8s = reg.kubernetesVersions.find((v) => v.isDefault)?.version || reg.kubernetesVersions[0]?.version || 'v1.31.0';
-          const defaultEngine = reg.vclusterVersions.find((v) => v.isDefault)?.version || reg.vclusterVersions[0]?.version || '0.36.0';
-          const defaultEtcd = reg.etcdVersions?.find((v) => v.isDefault)?.version || reg.etcdVersions?.[0]?.version || '3.6.8-0';
-          const defaultCoreDNS = reg.coreDNSVersions?.find((v) => v.isDefault)?.version || reg.coreDNSVersions?.[0]?.version || 'v1.11.3';
-          const defaultMetrics = reg.metricsServerVersions?.find((v) => v.isDefault)?.version || reg.metricsServerVersions?.[0]?.version || 'v0.7.2';
-          const defaultIstio = reg.istioVersions?.find((v) => v.isDefault)?.version || reg.istioVersions?.[0]?.version || '1.24.2';
+          const defaultK8s = reg.kubernetesVersions.find((v) => v.isDefault)?.version || reg.kubernetesVersions[0]?.version || '';
+          const defaultEngine = reg.vclusterVersions.find((v) => v.isDefault)?.version || reg.vclusterVersions[0]?.version || '';
+          const defaultEtcd = reg.etcdVersions?.find((v) => v.isDefault)?.version || reg.etcdVersions?.[0]?.version || '';
+          const defaultCoreDNS = reg.coreDNSVersions?.find((v) => v.isDefault)?.version || reg.coreDNSVersions?.[0]?.version || '';
+          const defaultMetrics = reg.metricsServerVersions?.find((v) => v.isDefault)?.version || reg.metricsServerVersions?.[0]?.version || '';
+          const defaultIstio = reg.istioVersions?.find((v) => v.isDefault)?.version || reg.istioVersions?.[0]?.version || '';
           setKubernetesVersion((prev) => prev || defaultK8s);
           setVclusterVersion((prev) => prev || defaultEngine);
           setEtcdVersion((prev) => prev || defaultEtcd);
@@ -208,7 +209,8 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
           setIstioVersion((prev) => prev || defaultIstio);
         }
       })
-      .catch((e) => console.warn('Failed loading versions in wizard:', e));
+      .catch((e) => console.warn('Failed loading versions in wizard:', e))
+      .finally(() => setLoadingVersions(false));
 
     fetch('/api/admin/baselines')
       .then((res) => res.json())
@@ -277,7 +279,24 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
     setGatewayHost(fqdn.wildcard);
   };
 
+  const missingCoreComponents: string[] = [];
+  if (versionRegistry) {
+    if (!versionRegistry.kubernetesVersions || versionRegistry.kubernetesVersions.length === 0) {
+      missingCoreComponents.push('Kubernetes Control Plane');
+    }
+    if (!versionRegistry.vclusterVersions || versionRegistry.vclusterVersions.length === 0) {
+      missingCoreComponents.push('vCluster Engine');
+    }
+    if (!versionRegistry.etcdVersions || versionRegistry.etcdVersions.length === 0) {
+      missingCoreComponents.push('etcd Backing Store');
+    }
+  }
+
   const handleQuickLaunch = async () => {
+    if (missingCoreComponents.length > 0) {
+      setError(`Cannot provision virtual cluster: Core component versions are missing in registry (${missingCoreComponents.join(', ')}). Platform administrators must import or register core component versions first.`);
+      return;
+    }
     if (!clusterName.trim()) {
       setError('Please enter a Cluster Identifier before deploying.');
       return;
@@ -305,7 +324,7 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
     }
     if (reqStorageBytes > clusterCapacity.availableStorageBytes) {
       errors.push(
-        `Requested Storage (${requestsStorage}) exceeds cluster available headroom (${clusterCapacity.availableStorageStr} remaining of ${clusterCapacity.allocatableStorageStr} total)`
+        `Requested Storage (${requestsStorage}) exceeds storage capacity (${clusterCapacity.availableStorageStr} remaining of ${clusterCapacity.allocatableStorageStr} total)`
       );
     }
 
@@ -396,6 +415,10 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (missingCoreComponents.length > 0) {
+      setError(`Cannot provision virtual cluster: Core component versions are missing in registry (${missingCoreComponents.join(', ')}). Platform administrators must import or register core component versions first.`);
+      return;
+    }
     const overcommit = checkCapacityOvercommit();
     if (overcommit.isOverallocated && !ignoreCapacityCheck) {
       setError(`Cannot deploy: ${overcommit.errors[0]}. Reduce requested quotas or enable Administrator Overcommit Bypass.`);
@@ -622,6 +645,39 @@ policies:
                 </React.Fragment>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Missing Core Component Versions Warning Banner */}
+      {!loadingVersions && missingCoreComponents.length > 0 && (
+        <div className="p-5 rounded-2xl bg-rose-950/40 border border-rose-500/50 text-rose-300 flex items-start gap-4 shadow-xl shadow-rose-950/30 animate-in fade-in">
+          <div className="p-2.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/40 shrink-0 mt-0.5">
+            <AlertOctagon className="w-5 h-5" />
+          </div>
+          <div className="space-y-2 flex-1">
+            <h4 className="text-sm font-bold text-rose-200 font-mono flex items-center gap-2">
+              Virtual Cluster Provisioning Disabled: Core Component Versions Missing
+            </h4>
+            <p className="text-xs text-rose-300/90 leading-relaxed">
+              Virtual clusters cannot be created because required core components have no registered versions in the Version Registry:
+              <span className="font-semibold text-white ml-1 underline decoration-rose-500 underline-offset-2">{missingCoreComponents.join(', ')}</span>.
+            </p>
+            <div className="pt-1 text-xs flex flex-wrap items-center gap-3">
+              {isAdmin ? (
+                <a
+                  href="/admin/versions"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 font-mono font-semibold transition-colors shadow-sm"
+                >
+                  <span>Open Version Registry to Import Manifest</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </a>
+              ) : (
+                <span className="text-rose-300/80 font-mono italic">
+                  ⚠️ Platform Administrator action required: Please contact an administrator to import the platform manifest.
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -876,9 +932,10 @@ policies:
                   <div className="flex items-center gap-3 shrink-0">
                     <button
                       type="button"
-                      disabled={submitting}
+                      disabled={submitting || missingCoreComponents.length > 0}
                       onClick={handleQuickLaunch}
-                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs font-mono shadow-lg shadow-cyan-500/25 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2 disabled:opacity-50"
+                      title={missingCoreComponents.length > 0 ? `Disabled: Missing core component versions (${missingCoreComponents.join(', ')})` : '1-Click Deploy from Baseline'}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs font-mono shadow-lg shadow-cyan-500/25 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                     >
                       {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 stroke-[2.5]" />}
                       <span>1-Click Deploy</span>
@@ -2159,8 +2216,9 @@ policies:
               <button
                 type="button"
                 onClick={handleQuickLaunch}
-                disabled={submitting}
-                className="px-6 py-2.5 bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-bold text-xs rounded-xl shadow-glow-md flex items-center gap-2 transition-all disabled:opacity-50 font-mono"
+                disabled={submitting || missingCoreComponents.length > 0}
+                title={missingCoreComponents.length > 0 ? `Disabled: Missing core component versions (${missingCoreComponents.join(', ')})` : 'Deploy Cluster from Baseline'}
+                className="px-6 py-2.5 bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-bold text-xs rounded-xl shadow-glow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-mono"
               >
                 {submitting ? (
                   <>
@@ -2187,8 +2245,9 @@ policies:
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting}
-                className="px-6 py-2.5 bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-bold text-xs rounded-xl shadow-glow-md flex items-center gap-2 transition-all disabled:opacity-50"
+                disabled={submitting || missingCoreComponents.length > 0}
+                title={missingCoreComponents.length > 0 ? `Disabled: Missing core component versions (${missingCoreComponents.join(', ')})` : 'Deploy Virtual Cluster'}
+                className="px-6 py-2.5 bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-bold text-xs rounded-xl shadow-glow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {submitting ? (
                   <>
