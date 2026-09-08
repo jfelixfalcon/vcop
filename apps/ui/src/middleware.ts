@@ -80,15 +80,28 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   // 5. RBAC Guards for Viewers
   if (user.role !== 'admin') {
-    // Block viewers from provisioning page
-    if (pathname === '/new' || pathname.startsWith('/new/')) {
+    // Protect admin-only sections
+    if (pathname.startsWith('/admin/') || pathname.startsWith('/api/admin/')) {
+      if (pathname.startsWith('/api/')) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Forbidden: Administrator privileges required.',
+          }),
+          {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
       return context.redirect('/?denied=admin_required');
     }
 
-    // Block write operations on virtual clusters API (except apps endpoints which enforce cluster ownership)
+    // Block destructive modifications on clusters API for viewers (PATCH, PUT, DELETE)
+    // Note: POST is allowed so non-technical users can launch clusters from preconfigured baselines
     if (pathname.startsWith('/api/vclusters') && !pathname.includes('/apps')) {
       const method = request.method.toUpperCase();
-      if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
+      if (['PATCH', 'PUT', 'DELETE'].includes(method)) {
         return new Response(
           JSON.stringify({
             success: false,

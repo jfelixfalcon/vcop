@@ -228,13 +228,28 @@ func (r *IstioReconciler) reconcileHostCertificate(ctx context.Context, vc *v1al
 	u.SetGroupVersionKind(certificateGVK)
 	u.SetName(certName)
 	u.SetNamespace(vc.Namespace)
+	var dnsList []interface{}
+	if vc.Spec.Components.Istio != nil && len(vc.Spec.Components.Istio.Hosts) > 0 {
+		seen := make(map[string]bool)
+		for _, h := range vc.Spec.Components.Istio.Hosts {
+			trimmed := strings.TrimSpace(h)
+			if trimmed != "" && !seen[trimmed] {
+				seen[trimmed] = true
+				dnsList = append(dnsList, trimmed)
+			}
+		}
+	}
+	if len(dnsList) == 0 && hostFQDN != "" {
+		dnsList = append(dnsList, hostFQDN)
+	}
+
 	u.Object["spec"] = map[string]interface{}{
 		"secretName": tlsSecretName,
 		"issuerRef": map[string]interface{}{
 			"name": issuerName,
 			"kind": issuerKind,
 		},
-		"dnsNames": []interface{}{hostFQDN},
+		"dnsNames": dnsList,
 	}
 
 	existing := &unstructured.Unstructured{}
@@ -744,6 +759,21 @@ func (r *IstioReconciler) reconcileGateway(ctx context.Context, vc *v1alpha1.Vir
 }
 
 func (r *IstioReconciler) reconcileVirtualService(ctx context.Context, vc *v1alpha1.VirtualCluster, dyn dynamic.Interface, hostFQDN string) error {
+	var vsHosts []interface{}
+	if vc.Spec.Components.Istio != nil && len(vc.Spec.Components.Istio.Hosts) > 0 {
+		seen := make(map[string]bool)
+		for _, h := range vc.Spec.Components.Istio.Hosts {
+			trimmed := strings.TrimSpace(h)
+			if trimmed != "" && !seen[trimmed] {
+				seen[trimmed] = true
+				vsHosts = append(vsHosts, trimmed)
+			}
+		}
+	}
+	if len(vsHosts) == 0 && hostFQDN != "" {
+		vsHosts = append(vsHosts, hostFQDN)
+	}
+
 	vs := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "networking.istio.io/v1beta1",
@@ -756,9 +786,7 @@ func (r *IstioReconciler) reconcileVirtualService(ctx context.Context, vc *v1alp
 				},
 			},
 			"spec": map[string]interface{}{
-				"hosts": []interface{}{
-					hostFQDN,
-				},
+				"hosts": vsHosts,
 				"gateways": []interface{}{
 					"istio-system/default-gateway",
 				},

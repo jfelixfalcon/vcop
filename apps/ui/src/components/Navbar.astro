@@ -15,6 +15,7 @@ import {
   Activity,
   Terminal,
   Bot,
+  Sliders,
 } from 'lucide-react';
 
 const pathname = Astro.url.pathname;
@@ -28,6 +29,7 @@ const isAppsActive = pathname.startsWith('/apps');
 const isVersionsActive = pathname.startsWith('/admin/versions');
 const isOidcActive = pathname.startsWith('/admin/oidc');
 const isAiActive = pathname.startsWith('/admin/ai');
+const isBaselinesActive = pathname.startsWith('/admin/baselines');
 const isProvisionActive = pathname.startsWith('/new');
 
 // Breadcrumb resolution
@@ -48,6 +50,8 @@ if (pathname.startsWith('/clusters/')) {
   currentSection = 'OIDC Policy';
 } else if (isAiActive) {
   currentSection = 'AI Engine & Models';
+} else if (isBaselinesActive) {
+  currentSection = 'Cluster Baselines';
 } else if (isProvisionActive) {
   currentSection = 'Provision Cluster';
 }
@@ -100,8 +104,8 @@ if (pathname.startsWith('/clusters/')) {
         <span class="text-emerald-400 font-semibold text-[11px]">Active</span>
       </div>
 
-      <!-- Quick Action: New Cluster Button (Admins only) -->
-      {isAdmin && (
+      <!-- Quick Action: New Cluster Button -->
+      {user && (
         <a
           href="/new"
           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-[0_0_14px_rgba(6,182,212,0.3)] hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all font-mono"
@@ -198,6 +202,15 @@ if (pathname.startsWith('/clusters/')) {
                 >
                   <ShieldCheck class="w-3.5 h-3.5 text-slate-400" />
                   <span>OIDC Policies</span>
+                </a>
+              )}
+              {isAdmin && (
+                <a
+                  href="/admin/baselines"
+                  class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono"
+                >
+                  <Sliders class="w-3.5 h-3.5 text-slate-400" />
+                  <span>Cluster Baselines</span>
                 </a>
               )}
               {isAdmin && (
@@ -321,6 +334,21 @@ if (pathname.startsWith('/clusters/')) {
           </a>
         )}
 
+        <!-- Admin: Cluster Baselines -->
+        {isAdmin && (
+          <a
+            href="/admin/baselines"
+            class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
+              isBaselinesActive
+                ? 'bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-900/60 border border-transparent'
+            }`}
+          >
+            <Sliders class={`w-3.5 h-3.5 transition-colors ${isBaselinesActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+            <span>Baselines</span>
+          </a>
+        )}
+
         <!-- Admin: AI Gateway -->
         {isAdmin && (
           <a
@@ -336,8 +364,8 @@ if (pathname.startsWith('/clusters/')) {
           </a>
         )}
 
-        <!-- Admin: Provision -->
-        {isAdmin && (
+        <!-- Quick Deploy: Provisioning -->
+        {user && (
           <a
             href="/new"
             class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
@@ -347,7 +375,7 @@ if (pathname.startsWith('/clusters/')) {
             }`}
           >
             <Plus class={`w-3.5 h-3.5 transition-colors ${isProvisionActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
-            <span>Provisioning</span>
+            <span>New Cluster</span>
           </a>
         )}
       </nav>
@@ -380,15 +408,21 @@ if (pathname.startsWith('/clusters/')) {
           <ShieldCheck class="w-4 h-4 text-purple-400" />
           <span>OIDC Policies</span>
         </a>
+        <a href="/admin/baselines" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
+          <Sliders class="w-4 h-4 text-emerald-400" />
+          <span>Cluster Baselines</span>
+        </a>
         <a href="/admin/ai" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
           <Bot class="w-4 h-4 text-cyan-400" />
           <span>AI Engine & Models</span>
         </a>
-        <a href="/new" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
-          <Plus class="w-4 h-4 text-cyan-400" />
-          <span>Provision New Cluster</span>
-        </a>
       </>
+    )}
+    {user && (
+      <a href="/new" class="flex items-center gap-2.5 px-3 py-2 text-xs text-cyan-300 hover:text-white hover:bg-cyan-500/10 rounded-xl transition-colors font-mono font-semibold">
+        <Plus class="w-4 h-4 text-cyan-400" />
+        <span>Create Virtual Cluster</span>
+      </a>
     )}
     {user && (
       <div class="pt-3 mt-3 border-t border-cyber-800">

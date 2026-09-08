@@ -566,5 +566,47 @@ export interface AIConnectionTestResult {
   error?: string;
 }
 
-
-
+export interface ClusterBaseline {
+  id: string;
+  name: string;
+  description: string;
+  badge?: string;
+  isDefault: boolean;
+  baseDomain: string; // e.g. "test.example.com"
+  preset: SizePreset;
+  environment: 'development' | 'staging' | 'production';
+  kubernetesVersion?: string;
+  vclusterVersion?: string;
+  enableMonitoringAndDNS: boolean;
+  autoSleep: boolean;
+  ttlHours?: number;
+  istio: {
+    enabled: boolean;
+    meshEnabled?: boolean;
+    certificateIssuer?: string;
+    certificateIssuerKind?: 'ClusterIssuer' | 'Issuer';
+    serviceType?: string;
+  };
+  disasterRecovery: {
+    enabled: boolean;
+    schedule: string;
+    retentionCount: number;
+  };
+  policies?: {
+    resourceQuota?: {
+      requestsCPU?: string;
+      limitsCPU?: string;
+      requestsMemory?: string;
+      limitsMemory?: string;
+      requestsStorage?: string;
+      pods?: string;
+      services?: string;
+      persistentVolumeClaims?: string;
+    };
+  };
+  clusterGroup?: string;
+  installedAppIds?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}

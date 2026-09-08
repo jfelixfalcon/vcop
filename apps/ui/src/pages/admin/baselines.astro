@@ -1,0 +1,19 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { ClusterBaselinesManager } from '../../components/ClusterBaselinesManager';
+import { getClusterBaselines } from '../../lib/cluster-baselines';
+
+const user = Astro.locals.user;
+if (user && user.role !== 'admin') {
+  return Astro.redirect('/?denied=admin_required');
+}
+
+const isAdmin = user?.role === 'admin';
+const baselines = await getClusterBaselines();
+---
+
+<Layout title="Cluster Baselines & Predefined Configs - vCluster Operations Center">
+  <div class="space-y-6">
+    <ClusterBaselinesManager client:load initialBaselines={baselines} isAdmin={isAdmin} />
+  </div>
+</Layout>

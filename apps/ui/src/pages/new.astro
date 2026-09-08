@@ -3,8 +3,8 @@ import Layout from '../layouts/Layout.astro';
 import { ProvisioningWizard } from '../components/ProvisioningWizard';
 
 const user = Astro.locals.user;
-if (user && user.role !== 'admin') {
-  return Astro.redirect('/?denied=admin_required');
+if (!user) {
+  return Astro.redirect('/login?redirect=/new');
 }
 ---
 
@@ -14,9 +14,12 @@ if (user && user.role !== 'admin') {
       <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-white">
         Provision Virtual Cluster
       </h1>
+      <p class="text-xs text-slate-400 font-mono mt-1">
+        Select a preconfigured cluster baseline to deploy in 1 click, or customize advanced settings.
+      </p>
     </div>
 
     <!-- Provisioning Wizard React Island -->
-    <ProvisioningWizard client:load />
+    <ProvisioningWizard client:load user={user} />
   </div>
 </Layout>

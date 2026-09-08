@@ -30,17 +30,32 @@ import {
   RotateCcw,
   History,
   HardDriveDownload,
+  ExternalLink,
 } from 'lucide-react';
-import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry, ClusterCapacityData, BackupItem } from '../lib/types';
+import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry, ClusterCapacityData, BackupItem, ClusterBaseline } from '../lib/types';
 import { PRESETS } from '../lib/presets';
+import { computeClusterFqdn } from '../lib/baseline-utils';
 import { parseCpuMillis, parseMemoryBytes, formatCpuMillis, formatMemoryBytes } from '../lib/metrics-utils';
 
-export const ProvisioningWizard: React.FC = () => {
+interface ProvisioningWizardProps {
+  user?: {
+    username: string;
+    email?: string;
+    role: string;
+  } | null;
+}
+
+export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) => {
   const [step, setStep] = useState<number>(1);
+
+  // Cluster Baseline State
+  const [baselines, setBaselines] = useState<ClusterBaseline[]>([]);
+  const [selectedBaselineId, setSelectedBaselineId] = useState<string>('dev-sandbox');
+  const [selectedBaseline, setSelectedBaseline] = useState<ClusterBaseline | null>(null);
 
   // Form State
   const [clusterName, setClusterName] = useState<string>('');
-  const [owner, setOwner] = useState<string>('');
+  const [owner, setOwner] = useState<string>(user?.email || user?.username || '');
   const [allowedGroups, setAllowedGroups] = useState<string>('');
   const [allowedEmails, setAllowedEmails] = useState<string>('');
   const [clusterGroup, setClusterGroup] = useState<string>('');
@@ -189,7 +204,71 @@ export const ProvisioningWizard: React.FC = () => {
         }
       })
       .catch((e) => console.warn('Failed loading versions in wizard:', e));
+
+    fetch('/api/admin/baselines')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+          const list: ClusterBaseline[] = data.data;
+          setBaselines(list);
+          const def = list.find((b) => b.isDefault) || list[0];
+          applyBaseline(def);
+        }
+      })
+      .catch((e) => console.warn('Failed loading baselines in wizard:', e));
   }, []);
+
+  const applyBaseline = (b: ClusterBaseline) => {
+    setSelectedBaselineId(b.id);
+    setSelectedBaseline(b);
+    setSizePreset(b.preset);
+    setEnvironment(b.environment);
+    if (b.kubernetesVersion) setKubernetesVersion(b.kubernetesVersion);
+    if (b.vclusterVersion) setVclusterVersion(b.vclusterVersion);
+    setAutoSleep(b.autoSleep);
+    setEnableMonitoringAndDNS(b.enableMonitoringAndDNS);
+    if (b.istio) {
+      setEnableIstio(b.istio.enabled);
+      setEnableMesh(b.istio.meshEnabled ?? false);
+      if (b.istio.certificateIssuer) setCertIssuer(b.istio.certificateIssuer);
+      if (b.istio.certificateIssuerKind) setCertIssuerKind(b.istio.certificateIssuerKind);
+    }
+    if (b.disasterRecovery) {
+      setEnableBackup(b.disasterRecovery.enabled);
+      setBackupSchedule((b.disasterRecovery.schedule as any) || 'daily');
+      setBackupRetention(b.disasterRecovery.retentionCount || 7);
+    }
+    if (b.policies?.resourceQuota) {
+      const q = b.policies.resourceQuota;
+      if (q.requestsCPU) setRequestsCPU(q.requestsCPU);
+      if (q.limitsCPU) setLimitsCPU(q.limitsCPU);
+      if (q.requestsMemory) setRequestsMemory(q.requestsMemory);
+      if (q.limitsMemory) setLimitsMemory(q.limitsMemory);
+      if (q.requestsStorage) setRequestsStorage(q.requestsStorage);
+      if (q.pods) setPods(q.pods);
+      if (q.services) setServices(q.services);
+      if (q.persistentVolumeClaims) setPersistentVolumeClaims(q.persistentVolumeClaims);
+    }
+    const fqdn = computeClusterFqdn(clusterName, b.baseDomain);
+    setGatewayHost(fqdn.wildcard);
+  };
+
+  const handleClusterNameChange = (val: string) => {
+    const cleaned = val.toLowerCase();
+    setClusterName(cleaned);
+    const domain = selectedBaseline?.baseDomain || 'test.example.com';
+    const fqdn = computeClusterFqdn(cleaned, domain);
+    setGatewayHost(fqdn.wildcard);
+  };
+
+  const handleQuickLaunch = async () => {
+    if (!clusterName.trim()) {
+      setError('Please enter a Cluster Identifier before deploying.');
+      return;
+    }
+    const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+    await handleSubmit(fakeEvent);
+  };
 
   const checkCapacityOvercommit = () => {
     if (!clusterCapacity) return { isOverallocated: false, errors: [] as string[], reqCpuMillis: 0, reqMemBytes: 0, reqStorageBytes: 0 };
@@ -307,6 +386,12 @@ export const ProvisioningWizard: React.FC = () => {
     setError(null);
 
     try {
+      const domain = selectedBaseline?.baseDomain || 'test.example.com';
+      const fqdn = computeClusterFqdn(clusterName, domain);
+      const hostsList = gatewayHost.trim()
+        ? (gatewayHost.trim() === fqdn.wildcard ? fqdn.hosts : [gatewayHost.trim()])
+        : fqdn.hosts;
+
       const payload: any = {
         clusterName: clusterName.trim().toLowerCase(),
         preset: sizePreset,
@@ -336,13 +421,14 @@ export const ProvisioningWizard: React.FC = () => {
           initialBackupRestore: deploymentMode === 'restore' ? (selectedRestoreSnapshot.trim() || undefined) : undefined,
         },
         initialBackupRestore: deploymentMode === 'restore' ? (selectedRestoreSnapshot.trim() || undefined) : undefined,
+        customEndpoint: `https://${fqdn.primary}`,
         istio: enableIstio
           ? {
               enabled: true,
               meshEnabled: enableMesh,
               certificateIssuer: certIssuer.trim() || undefined,
               certificateIssuerKind: certIssuerKind,
-              hosts: gatewayHost.trim() ? [gatewayHost.trim()] : undefined,
+              hosts: hostsList,
               version: istioVersion || undefined,
             }
           : { enabled: false },
@@ -514,8 +600,80 @@ policies:
             <div>
               <h3 className="text-xl font-bold text-white flex items-center gap-2.5">
                 <Sparkles className="w-5 h-5 text-cyber-accent" />
-                Cluster Identity
+                Cluster Identity & Baseline
               </h3>
+            </div>
+
+            {/* PREDEFINED CLUSTER BASELINES */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                    <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Choose Predefined Cluster Baseline</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                    Predefined configuration with zero-touch wildcard Ingress. Select a baseline to deploy with 1 click.
+                  </p>
+                </div>
+                <a
+                  href="/admin/baselines"
+                  className="text-[11px] text-cyan-400 hover:text-cyan-300 font-mono flex items-center gap-1 hover:underline"
+                >
+                  <span>Manage Baselines</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              {baselines.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {baselines.map((b) => {
+                    const isSelected = selectedBaselineId === b.id;
+                    const fqdnPreview = computeClusterFqdn(clusterName || 'cluster', b.baseDomain);
+
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => applyBaseline(b)}
+                        className={`p-3.5 rounded-2xl border text-left transition-all relative flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-cyan-500/10 border-cyan-500 text-white shadow-md shadow-cyan-500/10 ring-1 ring-cyan-500/50'
+                            : 'bg-cyber-950/60 border-cyber-800 hover:border-cyber-700 hover:bg-cyber-900/60 text-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5 font-mono">
+                              {b.name}
+                            </span>
+                            {isSelected && <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
+                          </div>
+
+                          <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed mb-2.5">
+                            {b.description}
+                          </p>
+                        </div>
+
+                        <div className="space-y-1 pt-2 border-t border-cyber-800/80 text-[10px] font-mono">
+                          <div className="flex items-center justify-between text-slate-400">
+                            <span>Tier:</span>
+                            <span className="text-slate-200 uppercase font-semibold">{b.preset}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-slate-400">
+                            <span>Ingress:</span>
+                            <span className="text-emerald-400 font-semibold">{fqdnPreview.wildcard}</span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-3 bg-cyber-950/60 rounded-xl border border-cyber-800 text-xs font-mono text-slate-400">
+                  Loading predefined baselines...
+                </div>
+              )}
             </div>
 
             {/* Deployment Mode: Clean Instance vs Restore from DR Backup */}
@@ -627,7 +785,7 @@ policies:
                   <input
                     type="text"
                     value={clusterName}
-                    onChange={(e) => setClusterName(e.target.value.toLowerCase())}
+                    onChange={(e) => handleClusterNameChange(e.target.value)}
                     placeholder="e.g. checkout-service-test"
                     className="w-full bg-cyber-950/80 border border-cyber-700 rounded-xl px-4 py-3 font-mono text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-cyber-accent transition-colors"
                   />
@@ -635,6 +793,54 @@ policies:
                 <p className="text-[11px] text-slate-500 mt-1.5 font-mono">
                   Kubernetes DNS-1123 format: lowercase alphanumeric, hyphens allowed.
                 </p>
+
+                {/* Automated Wildcard Ingress Preview Banner */}
+                <div className="mt-3 p-3.5 rounded-2xl bg-cyan-950/40 border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
+                  <div className="flex items-center gap-2.5 text-slate-200">
+                    <Globe className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <div>
+                      <span className="text-slate-400">Preconfigured Ingress: </span>
+                      <span className="text-emerald-400 font-bold">
+                        *.{clusterName.trim() || 'vcluster-name'}.{selectedBaseline?.baseDomain || 'test.example.com'}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-cyan-300/90 bg-cyan-900/60 px-2 py-0.5 rounded-full border border-cyan-500/30">
+                    Zero-Touch Ingress
+                  </span>
+                </div>
+
+                {/* 1-Click Deploy Callout for Non-Technical Users */}
+                <div className="mt-3 p-4 rounded-2xl bg-gradient-to-r from-cyber-900 via-cyber-900 to-cyber-950 border border-cyber-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="text-xs font-bold text-white font-mono flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-400" />
+                      <span>Ready to Deploy from Baseline</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-mono">
+                      Selected: <strong className="text-cyan-300">{selectedBaseline?.name || 'Developer Sandbox'}</strong> ({sizePreset.toUpperCase()} Tier). No further technical steps required.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={handleQuickLaunch}
+                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs font-mono shadow-lg shadow-cyan-500/25 transition-all transform hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 stroke-[2.5]" />}
+                      <span>1-Click Deploy</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStep(2)}
+                      className="px-3.5 py-2.5 rounded-xl bg-cyber-950 hover:bg-cyber-800 border border-cyber-700 text-xs font-mono text-slate-300 hover:text-white transition-colors"
+                      title="Customize underlying compute, storage, apps, and Istio settings"
+                    >
+                      <span>Customize →</span>
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

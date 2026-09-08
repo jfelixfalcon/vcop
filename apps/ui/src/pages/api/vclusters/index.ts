@@ -27,11 +27,11 @@ export const GET: APIRoute = async ({ locals }) => {
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const user = locals.user;
-  if (!user || user.role !== 'admin') {
+  if (!user) {
     return new Response(
-      JSON.stringify({ success: false, error: 'Forbidden: Administrator privileges required to provision clusters.' }),
+      JSON.stringify({ success: false, error: 'Unauthorized: Authentication required to provision virtual clusters.' }),
       {
-        status: 403,
+        status: 401,
         headers: { 'Content-Type': 'application/json' },
       }
     );
