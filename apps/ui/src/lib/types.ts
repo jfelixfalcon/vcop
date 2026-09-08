@@ -152,6 +152,8 @@ export interface VirtualCluster {
     vclusterVersion: string;
     kubernetesVersion: string;
     etcdVersion?: string;
+    storageClass?: string;
+    etcdStorageClass?: string;
     sizePreset: SizePreset;
     highAvailability: boolean;
     components: {
@@ -606,7 +608,19 @@ export interface ClusterBaseline {
   };
   clusterGroup?: string;
   installedAppIds?: string[];
+  storageClass?: string;
+  etcdStorageClass?: string;
   createdAt?: string;
   updatedAt?: string;
   updatedBy?: string;
 }
+
+export interface StorageClassInfo {
+  name: string;
+  provisioner: string;
+  reclaimPolicy?: string;
+  volumeBindingMode?: string;
+  isDefault: boolean;
+  allowVolumeExpansion?: boolean;
+}
+

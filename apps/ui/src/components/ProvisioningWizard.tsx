@@ -32,7 +32,7 @@ import {
   HardDriveDownload,
   ExternalLink,
 } from 'lucide-react';
-import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry, ClusterCapacityData, BackupItem, ClusterBaseline } from '../lib/types';
+import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry, ClusterCapacityData, BackupItem, ClusterBaseline, StorageClassInfo } from '../lib/types';
 import { PRESETS } from '../lib/presets';
 import { computeClusterFqdn } from '../lib/baseline-utils';
 import { parseCpuMillis, parseMemoryBytes, formatCpuMillis, formatMemoryBytes } from '../lib/metrics-utils';
@@ -65,6 +65,9 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
   const [enableMonitoringAndDNS, setEnableMonitoringAndDNS] = useState<boolean>(true);
   const [autoSleep, setAutoSleep] = useState<boolean>(false);
   const [ttlHours, setTtlHours] = useState<number>(72);
+  const [storageClasses, setStorageClasses] = useState<StorageClassInfo[]>([]);
+  const [etcdStorageClass, setEtcdStorageClass] = useState<string>('');
+  const [storageClass, setStorageClass] = useState<string>('');
 
   // Dynamic Resource Quotas & Policies
   const [showQuotaOverrides, setShowQuotaOverrides] = useState<boolean>(false);
@@ -216,6 +219,15 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
         }
       })
       .catch((e) => console.warn('Failed loading baselines in wizard:', e));
+
+    fetch('/api/cluster/storage-classes')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.data)) {
+          setStorageClasses(data.data);
+        }
+      })
+      .catch((e) => console.warn('Failed loading storage classes in wizard:', e));
   }, []);
 
   const applyBaseline = (b: ClusterBaseline) => {
@@ -227,6 +239,8 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
     if (b.vclusterVersion) setVclusterVersion(b.vclusterVersion);
     setAutoSleep(b.autoSleep);
     setEnableMonitoringAndDNS(b.enableMonitoringAndDNS);
+    setEtcdStorageClass(b.etcdStorageClass || '');
+    setStorageClass(b.storageClass || '');
     if (b.istio) {
       setEnableIstio(b.istio.enabled);
       setEnableMesh(b.istio.meshEnabled ?? false);
@@ -407,6 +421,8 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
         kubernetesVersion,
         vclusterVersion,
         etcdVersion: etcdVersion || undefined,
+        storageClass: storageClass.trim() || undefined,
+        etcdStorageClass: etcdStorageClass.trim() || undefined,
         coreDNSVersion: coreDNSVersion || undefined,
         metricsServerVersion: metricsServerVersion || undefined,
         istioVersion: istioVersion || undefined,
@@ -493,7 +509,7 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
             replicas: ${sizePreset === 'normal' || sizePreset === 'small' ? 1 : 3}
           persistence:
             volumeClaim:
-              size: "${selectedPresetDetails.storage.split(' ')[0]}Gi"
+              size: "${selectedPresetDetails.storage.split(' ')[0]}Gi"${etcdStorageClass ? `\n              storageClass: "${etcdStorageClass}"` : ''}
   coreDNS:
     enabled: false # Reconciled externally as standalone cluster addon
 integrations:
@@ -661,6 +677,12 @@ policies:
                             <span className="text-slate-200 uppercase font-semibold">{b.preset}</span>
                           </div>
                           <div className="flex items-center justify-between text-slate-400">
+                            <span>etcd Drive:</span>
+                            <span className="text-amber-300 font-semibold truncate max-w-[130px]" title={b.etcdStorageClass || 'Cluster Default'}>
+                              {b.etcdStorageClass || 'Default'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-slate-400">
                             <span>Ingress:</span>
                             <span className="text-emerald-400 font-semibold">{fqdnPreview.wildcard}</span>
                           </div>
@@ -818,7 +840,7 @@ policies:
                       <span>Ready to Deploy from Baseline</span>
                     </div>
                     <p className="text-[11px] text-slate-400 font-mono">
-                      Selected: <strong className="text-cyan-300">{selectedBaseline?.name || 'Developer Sandbox'}</strong> ({sizePreset.toUpperCase()} Tier). No further technical steps required.
+                      Selected: <strong className="text-cyan-300">{selectedBaseline?.name || 'Developer Sandbox'}</strong> ({sizePreset.toUpperCase()} Tier • etcd Drive: <strong className="text-amber-300">{etcdStorageClass || 'Default'}</strong>). No further technical steps required.
                     </p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
@@ -1114,6 +1136,80 @@ policies:
                 </div>
               );
             })()}
+
+            {/* etcd Database Storage Engine & StorageClass */}
+            <div className="p-5 bg-cyber-950/80 border border-amber-500/30 rounded-2xl space-y-4 shadow-lg shadow-amber-950/10">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-cyber-800/80">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white font-mono flex items-center gap-2">
+                      etcd Database Storage Engine
+                      <span className="text-[10px] font-mono text-amber-400/90 uppercase font-semibold bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
+                        High-IOPS Drive
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400 font-mono">
+                      Dedicated backing volume for cluster state database
+                    </p>
+                  </div>
+                </div>
+                {etcdStorageClass ? (
+                  <span className="text-xs font-mono text-amber-300 bg-amber-950/60 px-2.5 py-1 rounded-lg border border-amber-500/40 self-start sm:self-auto flex items-center gap-1.5">
+                    <HardDrive className="w-3.5 h-3.5" />
+                    {etcdStorageClass}
+                  </span>
+                ) : (
+                  <span className="text-xs font-mono text-slate-400 bg-cyber-900 px-2.5 py-1 rounded-lg border border-cyber-800 self-start sm:self-auto">
+                    Default Host StorageClass
+                  </span>
+                )}
+              </div>
+
+              <div className="p-3 bg-amber-950/20 border border-amber-500/20 rounded-xl flex items-start gap-2.5 text-xs text-amber-200/90 font-mono leading-relaxed">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-amber-300">Fast Disk / SSD Required: </strong>
+                  etcd is a consensus state database that depends heavily on sequential write-ahead log (WAL) fsync speed. Selecting an SSD or NVMe-backed StorageClass avoids leader election timeouts and cluster latency spikes.
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-200 font-mono flex items-center justify-between">
+                    <span>Host StorageClass</span>
+                    <span className="text-[10px] text-slate-400">Autodetected ({storageClasses.length})</span>
+                  </label>
+                  <select
+                    value={etcdStorageClass}
+                    onChange={(e) => setEtcdStorageClass(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-cyber-900 border border-amber-500/40 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="">Cluster Default StorageClass</option>
+                    {storageClasses.map((sc) => (
+                      <option key={sc.name} value={sc.name}>
+                        {sc.name} {sc.isDefault ? '(Default)' : ''} — {sc.provisioner}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-200 font-mono">
+                    Custom StorageClass Override
+                  </label>
+                  <input
+                    type="text"
+                    value={etcdStorageClass}
+                    onChange={(e) => setEtcdStorageClass(e.target.value)}
+                    placeholder="e.g. fast-nvme, local-ssd, gp3-fast"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-cyber-900 border border-cyber-700 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+            </div>
 
             {/* Collapsible Quota & Policy Tuning */}
             <div className="pt-2">

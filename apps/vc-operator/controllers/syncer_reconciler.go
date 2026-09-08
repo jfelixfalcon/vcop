@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -411,6 +412,15 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 
 	var volumeClaimTemplates []corev1.PersistentVolumeClaim
 	if !isExternalEtcd {
+		syncerSc := strings.TrimSpace(vc.Spec.StorageClass)
+		if syncerSc == "" {
+			syncerSc = strings.TrimSpace(vc.Spec.EtcdStorageClass)
+		}
+		var syncerScPtr *string
+		if syncerSc != "" {
+			syncerScPtr = &syncerSc
+		}
+
 		// Only single-node embedded SQLite mode requires persistent storage on the syncer itself.
 		volumeClaimTemplates = []corev1.PersistentVolumeClaim{
 			{
@@ -421,6 +431,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 					AccessModes: []corev1.PersistentVolumeAccessMode{
 						corev1.ReadWriteOnce,
 					},
+					StorageClassName: syncerScPtr,
 					Resources: corev1.VolumeResourceRequirements{
 						Requests: corev1.ResourceList{
 							corev1.ResourceStorage: storageQuantity,

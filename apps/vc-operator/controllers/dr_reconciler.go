@@ -94,11 +94,21 @@ func (r *DisasterRecoveryReconciler) ReconcileDisasterRecovery(ctx context.Conte
 	existingPvc := &corev1.PersistentVolumeClaim{}
 	err = r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: vc.Namespace}, existingPvc)
 	if errors.IsNotFound(err) {
+		backupSc := strings.TrimSpace(drSpec.StorageClass)
+		if backupSc == "" {
+			backupSc = strings.TrimSpace(vc.Spec.StorageClass)
+		}
+		var backupScPtr *string
+		if backupSc != "" {
+			backupScPtr = &backupSc
+		}
+
 		pvc.Labels = labels
 		pvc.Spec = corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteOnce,
 			},
+			StorageClassName: backupScPtr,
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceStorage: storageQuantity,

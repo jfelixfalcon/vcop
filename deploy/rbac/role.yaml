@@ -260,3 +260,13 @@ rules:
       - get
       - list
       - watch
+  # StorageClass discovery for persistent storage & database drives
+  - apiGroups:
+      - storage.k8s.io
+    resources:
+      - storageclasses
+    verbs:
+      - get
+      - list
+      - watch
+

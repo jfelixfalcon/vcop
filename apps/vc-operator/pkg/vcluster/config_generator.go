@@ -116,7 +116,8 @@ type EtcdPersistenceConfig struct {
 }
 
 type VolumeClaimConfig struct {
-	Size string `yaml:"size" json:"size"`
+	Size         string `yaml:"size" json:"size"`
+	StorageClass string `yaml:"storageClass,omitempty" json:"storageClass,omitempty"`
 }
 
 type ResourceRequirements struct {
@@ -214,6 +215,10 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 		etcdReplicas = 3
 	}
 	if etcdReplicas > 0 {
+		etcdStorageClass := strings.TrimSpace(spec.EtcdStorageClass)
+		if etcdStorageClass == "" {
+			etcdStorageClass = strings.TrimSpace(spec.StorageClass)
+		}
 		backingStore = BackingStoreConfig{
 			Etcd: &EtcdConfig{
 				Deploy: EtcdDeployConfig{
@@ -224,7 +229,8 @@ func GenerateVClusterConfig(spec *v1alpha1.VirtualClusterSpec) (*VClusterConfig,
 						},
 						Persistence: EtcdPersistenceConfig{
 							VolumeClaim: VolumeClaimConfig{
-								Size: preset.StorageSize,
+								Size:         preset.StorageSize,
+								StorageClass: etcdStorageClass,
 							},
 						},
 						Resources: ResourceRequirements{

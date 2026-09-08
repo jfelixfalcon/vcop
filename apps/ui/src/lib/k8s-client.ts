@@ -2,7 +2,7 @@ import https from 'node:https';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig, K8sEvent, ClusterCapacityData, VClusterCapacityItem, DisasterRecoverySpec, DisasterRecoveryStatus, BackupItem, DetectedHardwareInfo } from './types';
+import type { VirtualCluster, SizePreset, PoliciesSpec, InstalledApp, ClusterGroupInfo, OidcConfig, K8sEvent, ClusterCapacityData, VClusterCapacityItem, DisasterRecoverySpec, DisasterRecoveryStatus, BackupItem, DetectedHardwareInfo, StorageClassInfo } from './types';
 import { getAppStoreCatalog } from './appstore';
 import { PRESETS } from './presets';
 import { syncGuestClusterRBAC } from './cluster-rbac';
@@ -458,6 +458,8 @@ export async function createVirtualCluster(data: {
   kubernetesVersion?: string;
   vclusterVersion?: string;
   etcdVersion?: string;
+  storageClass?: string;
+  etcdStorageClass?: string;
   coreDNSVersion?: string;
   metricsServerVersion?: string;
   istioVersion?: string;
@@ -646,6 +648,8 @@ export async function createVirtualCluster(data: {
       vclusterVersion: vclusterVer,
       kubernetesVersion: k8sVer,
       etcdVersion: etcdVer,
+      ...(data.storageClass ? { storageClass: data.storageClass } : {}),
+      ...(data.etcdStorageClass ? { etcdStorageClass: data.etcdStorageClass } : {}),
       sizePreset: data.preset,
       highAvailability: isHA,
       components: {
@@ -2673,6 +2677,35 @@ export async function scaleWorkload(
     cliCommand: `kubectl scale ${found.kind.toLowerCase()} ${targetName} --replicas=${replicas} -n ${targetNs}`,
   };
 }
+
+/**
+ * Retrieves all StorageClasses from the host Kubernetes cluster.
+ * Identifies the cluster default storage class and drive provisioner.
+ */
+export async function listStorageClasses(): Promise<StorageClassInfo[]> {
+  try {
+    const res = await k8sRequest<{ items?: any[] }>('/apis/storage.k8s.io/v1/storageclasses');
+    const items = res.data?.items || [];
+    return items.map((sc: any) => {
+      const annotations = sc.metadata?.annotations || {};
+      const isDefault =
+        annotations['storageclass.kubernetes.io/is-default-class'] === 'true' ||
+        annotations['storageclass.beta.kubernetes.io/is-default-class'] === 'true';
+      return {
+        name: sc.metadata?.name || '',
+        provisioner: sc.provisioner || '',
+        reclaimPolicy: sc.reclaimPolicy,
+        volumeBindingMode: sc.volumeBindingMode,
+        isDefault,
+        allowVolumeExpansion: sc.allowVolumeExpansion,
+      };
+    });
+  } catch (error) {
+    console.error('Failed to list storage classes from Kubernetes API:', error);
+    return [];
+  }
+}
+
 
 
 

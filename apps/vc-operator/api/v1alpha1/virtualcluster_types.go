@@ -332,6 +332,10 @@ type DisasterRecoverySpec struct {
 	// +optional
 	InitialBackupRestore string `json:"initialBackupRestore,omitempty"`
 
+	// StorageClass defines the StorageClass for backup PVCs (defaults to cluster default)
+	// +optional
+	StorageClass string `json:"storageClass,omitempty"`
+
 	// RestoreSnapshotName specifies an existing snapshot to restore onto this cluster
 	// +optional
 	RestoreSnapshotName string `json:"restoreSnapshotName,omitempty"`
@@ -414,6 +418,14 @@ type VirtualClusterSpec struct {
 	// +kubebuilder:default="medium"
 	// +optional
 	SizePreset SizePreset `json:"sizePreset,omitempty"`
+
+	// StorageClass defines the cluster default StorageClass for persistent volumes (defaults to cluster default StorageClass)
+	// +optional
+	StorageClass string `json:"storageClass,omitempty"`
+
+	// EtcdStorageClass explicitly defines the StorageClass for etcd database volumes (e.g. fast drive SSD/NVMe)
+	// +optional
+	EtcdStorageClass string `json:"etcdStorageClass,omitempty"`
 
 	// CustomResources specifies custom compute allocations when sizePreset is "custom"
 	// +optional

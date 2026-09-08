@@ -20,7 +20,7 @@ import {
   ExternalLink,
   Info,
 } from 'lucide-react';
-import type { ClusterBaseline, SizePreset } from '../lib/types';
+import type { ClusterBaseline, SizePreset, StorageClassInfo } from '../lib/types';
 import { computeClusterFqdn } from '../lib/baseline-utils';
 
 interface ClusterBaselinesManagerProps {
@@ -33,8 +33,21 @@ export function ClusterBaselinesManager({
   isAdmin,
 }: ClusterBaselinesManagerProps) {
   const [baselines, setBaselines] = useState<ClusterBaseline[]>(initialBaselines);
+  const [storageClasses, setStorageClasses] = useState<StorageClassInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Load cluster storage classes for database & drive selection
+  React.useEffect(() => {
+    fetch('/api/cluster/storage-classes')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.data)) {
+          setStorageClasses(data.data);
+        }
+      })
+      .catch((e) => console.warn('Failed to fetch storage classes:', e));
+  }, []);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -65,6 +78,8 @@ export function ClusterBaselinesManager({
     requestsMemory: string;
     limitsMemory: string;
     requestsStorage: string;
+    storageClass: string;
+    etcdStorageClass: string;
   }>({
     id: '',
     name: '',
@@ -89,6 +104,8 @@ export function ClusterBaselinesManager({
     requestsMemory: '4Gi',
     limitsMemory: '8Gi',
     requestsStorage: '10Gi',
+    storageClass: '',
+    etcdStorageClass: '',
   });
 
   // Sample cluster name for interactive FQDN preview
@@ -126,6 +143,8 @@ export function ClusterBaselinesManager({
       requestsMemory: '4Gi',
       limitsMemory: '8Gi',
       requestsStorage: '10Gi',
+      storageClass: '',
+      etcdStorageClass: '',
     });
     setIsModalOpen(true);
   };
@@ -156,6 +175,8 @@ export function ClusterBaselinesManager({
       requestsMemory: b.policies?.resourceQuota?.requestsMemory || '4Gi',
       limitsMemory: b.policies?.resourceQuota?.limitsMemory || '8Gi',
       requestsStorage: b.policies?.resourceQuota?.requestsStorage || '10Gi',
+      storageClass: b.storageClass || '',
+      etcdStorageClass: b.etcdStorageClass || '',
     });
     setIsModalOpen(true);
   };
@@ -227,6 +248,8 @@ export function ClusterBaselinesManager({
       vclusterVersion: formData.vclusterVersion,
       enableMonitoringAndDNS: formData.enableMonitoringAndDNS,
       autoSleep: formData.autoSleep,
+      storageClass: formData.storageClass.trim() || undefined,
+      etcdStorageClass: formData.etcdStorageClass.trim() || undefined,
       istio: {
         enabled: formData.enableIstio,
         certificateIssuer: formData.certIssuer.trim() || undefined,
@@ -478,6 +501,16 @@ export function ClusterBaselinesManager({
                       {b.disasterRecovery?.enabled ? `${b.disasterRecovery.schedule} backup` : 'No backup'}
                     </span>
                   </div>
+
+                  <div className="col-span-2 p-2 rounded-xl bg-cyber-950/50 border border-cyber-800/60 flex items-center justify-between text-[11px] font-mono">
+                    <span className="flex items-center gap-1.5 text-slate-400">
+                      <Database className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>etcd Drive:</span>
+                    </span>
+                    <span className="text-amber-300 font-semibold truncate max-w-[170px]" title={b.etcdStorageClass || 'Cluster Default'}>
+                      {b.etcdStorageClass || 'Cluster Default'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -685,6 +718,56 @@ export function ClusterBaselinesManager({
                     placeholder="e.g. Quick Launch"
                     className="w-full px-3 py-2 rounded-xl bg-cyber-950 border border-cyber-700 text-xs font-mono text-white focus:outline-none"
                   />
+                </div>
+              </div>
+
+              {/* DATABASE & ETCD STORAGE CLASS */}
+              <div className="p-4 rounded-2xl bg-amber-950/25 border border-amber-500/35 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-amber-300 font-mono">
+                    <Database className="w-4 h-4 text-amber-400" />
+                    <span>etcd Database Storage Class</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-amber-400/90 uppercase font-semibold bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
+                    High-IOPS Drive
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-300 leading-relaxed font-mono">
+                  etcd is a consensus state database requiring fast, low-latency disk writes. Specify an SSD or NVMe-backed storage class to ensure optimal write-ahead log (WAL) fsync performance.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-200 font-mono">
+                      Preset Cluster StorageClass
+                    </label>
+                    <select
+                      value={formData.etcdStorageClass}
+                      onChange={(e) => setFormData({ ...formData, etcdStorageClass: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-cyber-950 border border-amber-500/40 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
+                    >
+                      <option value="">Cluster Default StorageClass</option>
+                      {storageClasses.map((sc) => (
+                        <option key={sc.name} value={sc.name}>
+                          {sc.name} {sc.isDefault ? '(Default)' : ''} — {sc.provisioner}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-200 font-mono">
+                      Custom StorageClass Name
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.etcdStorageClass}
+                      onChange={(e) => setFormData({ ...formData, etcdStorageClass: e.target.value })}
+                      placeholder="e.g. fast-nvme, local-ssd"
+                      className="w-full px-3 py-2 rounded-xl bg-cyber-950 border border-cyber-700 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
                 </div>
               </div>
 

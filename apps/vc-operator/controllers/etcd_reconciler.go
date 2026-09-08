@@ -252,6 +252,15 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 		podAnnotations["vops.gitops.io/restore-snapshot"] = vc.Spec.DisasterRecovery.RestoreSnapshotName
 	}
 
+	etcdStorageClass := strings.TrimSpace(vc.Spec.EtcdStorageClass)
+	if etcdStorageClass == "" {
+		etcdStorageClass = strings.TrimSpace(vc.Spec.StorageClass)
+	}
+	var storageClassPtr *string
+	if etcdStorageClass != "" {
+		storageClassPtr = &etcdStorageClass
+	}
+
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-etcd", vc.Name),
@@ -382,6 +391,7 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 						AccessModes: []corev1.PersistentVolumeAccessMode{
 							corev1.ReadWriteOnce,
 						},
+						StorageClassName: storageClassPtr,
 						Resources: corev1.VolumeResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceStorage: storageQuantity,

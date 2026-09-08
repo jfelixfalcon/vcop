@@ -119,6 +119,12 @@ spec:
                     - medium
                     - large
                     - custom
+                storageClass:
+                  type: string
+                  description: Cluster default StorageClass for persistent volumes (defaults to cluster default StorageClass).
+                etcdStorageClass:
+                  type: string
+                  description: StorageClass explicitly designated for etcd database volumes (e.g. fast drive SSD/NVMe).
                 customResources:
                   type: object
                   description: Custom resource requests and limits when sizePreset is set to 'custom'.
@@ -309,6 +315,9 @@ spec:
                     storageSize:
                       type: string
                       default: "10Gi"
+                    storageClass:
+                      type: string
+                      description: StorageClass to use for backup PVC volume.
                     initialBackupRestore:
                       type: string
                     restoreSnapshotName:

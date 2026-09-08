@@ -474,3 +474,73 @@ func TestVirtualClusterReconciler_CustomCA(t *testing.T) {
 		t.Errorf("Expected SSL_CERT_DIR env var in syncer container")
 	}
 }
+
+func TestVirtualClusterReconciler_EtcdStorageClass(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-storage-cluster",
+			Namespace: "default",
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName:      "test-storage-cluster",
+			SizePreset:       v1alpha1.PresetHA,
+			HighAvailability: true,
+			EtcdStorageClass: "fast-nvme-ssd",
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc).
+		WithStatusSubresource(vc).
+		Build()
+
+	logger := zap.New(zap.UseDevMode(true))
+
+	reconciler := &VirtualClusterReconciler{
+		Client:               client,
+		Log:                  logger,
+		Scheme:               scheme,
+		EtcdReconciler:       NewEtcdReconciler(client),
+		SyncerReconciler:     NewSyncerReconciler(client),
+		KubeconfigReconciler: NewKubeconfigReconciler(client),
+		AddonsReconciler:     NewAddonsReconciler(client),
+		UpgradeManager:       NewUpgradeManager(client),
+	}
+
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      "test-storage-cluster",
+			Namespace: "default",
+		},
+	}
+
+	ctx := context.Background()
+	// Pass 1: Adds finalizer
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("Reconcile pass 1 failed: %v", err)
+	}
+	// Pass 2: Creates resources
+	if _, err := reconciler.Reconcile(ctx, req); err != nil {
+		t.Fatalf("Reconcile pass 2 failed: %v", err)
+	}
+
+	etcdSts := &appsv1.StatefulSet{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-storage-cluster-etcd", Namespace: "default"}, etcdSts); err != nil {
+		t.Fatalf("Expected etcd StatefulSet to exist: %v", err)
+	}
+
+	if len(etcdSts.Spec.VolumeClaimTemplates) == 0 {
+		t.Fatalf("Expected VolumeClaimTemplates on etcd StatefulSet")
+	}
+
+	pvcSpec := etcdSts.Spec.VolumeClaimTemplates[0].Spec
+	if pvcSpec.StorageClassName == nil || *pvcSpec.StorageClassName != "fast-nvme-ssd" {
+		t.Errorf("Expected StorageClassName 'fast-nvme-ssd', got: %v", pvcSpec.StorageClassName)
+	}
+}
+

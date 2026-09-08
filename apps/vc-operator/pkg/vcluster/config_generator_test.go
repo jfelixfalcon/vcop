@@ -181,3 +181,24 @@ func TestGenerateYAML_PresetHA(t *testing.T) {
 		t.Errorf("Expected etcd deploy enabled for HA tier, got:\n%s", yamlStr)
 	}
 }
+
+func TestGenerateYAML_EtcdStorageClass(t *testing.T) {
+	spec := &v1alpha1.VirtualClusterSpec{
+		ClusterName:       "tenant-etcd-storage",
+		KubernetesVersion: "v1.31.0",
+		SizePreset:        v1alpha1.PresetHA,
+		HighAvailability:  true,
+		EtcdStorageClass:  "fast-local-nvme",
+	}
+
+	yamlBytes, err := GenerateYAML(spec)
+	if err != nil {
+		t.Fatalf("GenerateYAML failed: %v", err)
+	}
+
+	yamlStr := string(yamlBytes)
+	if !strings.Contains(yamlStr, "storageClass: fast-local-nvme") {
+		t.Errorf("Expected 'storageClass: fast-local-nvme' in vcluster.yaml, got:\n%s", yamlStr)
+	}
+}
+
