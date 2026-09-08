@@ -532,4 +532,46 @@ export interface DetectedHardwareInfo {
   allocatableGpus: number;
 }
 
+export type AIProviderType =
+  | 'local'
+  | 'openai'
+  | 'anthropic'
+  | 'gemini'
+  | 'groq'
+  | 'openrouter'
+  | 'custom';
+
+export interface AISettingsConfig {
+  localModelEnabled: boolean;
+  provider: AIProviderType;
+  remoteEndpoint?: string;
+  remoteModel?: string;
+  remoteApiKey?: string;
+  temperature?: number;
+  maxTokens?: number;
+  customHeaders?: Record<string, string>;
+  updatedAt?: string;
+}
+
+export interface AISettingsPublic {
+  localModelEnabled: boolean;
+  provider: AIProviderType;
+  remoteEndpoint: string;
+  remoteModel: string;
+  hasApiKey: boolean;
+  maskedApiKey?: string;
+  temperature: number;
+  maxTokens: number;
+  updatedAt?: string;
+}
+
+export interface AIConnectionTestResult {
+  ok: boolean;
+  latencyMs?: number;
+  message: string;
+  model?: string;
+  error?: string;
+}
+
+
 

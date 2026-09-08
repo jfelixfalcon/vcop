@@ -22,6 +22,8 @@ const PUBLIC_PATHS = [
   '/api/cert-manager/issuers',
   '/api/ai/status',
   '/api/ai/chat',
+  '/api/ai/config',
+  '/api/ai/test',
   '/healthz',
 ];
 

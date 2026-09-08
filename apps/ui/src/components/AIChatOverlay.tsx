@@ -25,6 +25,7 @@ import {
   Boxes,
   RotateCw,
 } from 'lucide-react';
+import { AISettingsPanel } from './AISettingsPanel';
 
 interface ChatMessage {
   id: string;
@@ -57,12 +58,12 @@ export default function AIChatOverlay() {
     hardware: 'Detecting...',
   });
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Poll status on mount
-  useEffect(() => {
+  const fetchStatus = () => {
     fetch('/api/ai/status')
       .then((res) => res.json())
       .then((data) => {
@@ -75,6 +76,11 @@ export default function AIChatOverlay() {
         }
       })
       .catch(() => {});
+  };
+
+  // Poll status on mount
+  useEffect(() => {
+    fetchStatus();
   }, []);
 
   // Keyboard shortcut Ctrl+/ or Cmd+/ to toggle overlay
@@ -401,6 +407,17 @@ export default function AIChatOverlay() {
 
             <div className="flex items-center gap-1">
               <button
+                onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                title="AI Model & API Gateway Settings"
+                className={`p-1.5 rounded-lg transition-colors ${
+                  isSettingsOpen
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-800'
+                }`}
+              >
+                <Sliders className="w-4 h-4" />
+              </button>
+              <button
                 onClick={handleClear}
                 title="Clear conversation"
                 className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-cyber-800 rounded-lg transition-colors"
@@ -424,17 +441,30 @@ export default function AIChatOverlay() {
             </div>
           </div>
 
-          {/* Chat Messages List */}
-          <div className="flex-1 p-4 overflow-y-auto overflow-x-hidden space-y-4">
-            {messages.length === 0 && (
-              <div className="h-full flex flex-col justify-center items-center text-center px-4 py-8">
-                <div className="w-14 h-14 rounded-2xl bg-cyber-900 border border-cyber-700/80 flex items-center justify-center text-cyan-400 mb-4 shadow-xl">
-                  <Sparkles className="w-7 h-7" />
-                </div>
-                <h4 className="text-base font-semibold text-white mb-1">How can I assist your cluster today?</h4>
-                <p className="text-xs text-slate-400 max-w-sm mb-6">
-                  Powered by bundled <strong className="text-cyan-300">Gemma 3</strong> on local GPU. Ask about historical CPU/memory stats, capacity, virtual clusters, and events.
-                </p>
+          {/* Main Body: Either Settings Panel or Messages & Input */}
+          {isSettingsOpen ? (
+            <div className="flex-1 p-4 overflow-y-auto overflow-x-hidden bg-cyber-950/80">
+              <AISettingsPanel
+                onClose={() => setIsSettingsOpen(false)}
+                onSaved={() => {
+                  fetchStatus();
+                }}
+                compact
+              />
+            </div>
+          ) : (
+            <>
+              {/* Chat Messages List */}
+              <div className="flex-1 p-4 overflow-y-auto overflow-x-hidden space-y-4">
+                {messages.length === 0 && (
+                  <div className="h-full flex flex-col justify-center items-center text-center px-4 py-8">
+                    <div className="w-14 h-14 rounded-2xl bg-cyber-900 border border-cyber-700/80 flex items-center justify-center text-cyan-400 mb-4 shadow-xl">
+                      <Sparkles className="w-7 h-7" />
+                    </div>
+                    <h4 className="text-base font-semibold text-white mb-1">How can I assist your cluster today?</h4>
+                    <p className="text-xs text-slate-400 max-w-sm mb-6">
+                      Powered by <strong className="text-cyan-300">{status.model}</strong> ({status.hardware}). Ask about historical CPU/memory stats, capacity, virtual clusters, and events.
+                    </p>
 
                 <div className="w-full space-y-2 text-left">
                   <span className="text-[11px] font-mono text-slate-500 uppercase tracking-wider block mb-2 px-1">
@@ -991,11 +1021,13 @@ export default function AIChatOverlay() {
             </form>
             <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono mt-1.5 px-1">
               <span>Press Enter to send, Shift+Enter for new line</span>
-              <span>Gemma 3 • Offline Self-Contained</span>
+              <span className="truncate max-w-[200px]">{status.model}</span>
             </div>
           </div>
-        </div>
+        </>
       )}
+    </div>
+  )}
     </>
   );
 }

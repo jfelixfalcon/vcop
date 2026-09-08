@@ -17,7 +17,14 @@ import {
   type WorkloadScaleResult,
   type DeploymentSummary,
 } from './k8s-client';
-import type { ClusterCapacityData, VirtualCluster, K8sEvent, BackupItem } from './types';
+import { getAISettings, PROVIDER_PRESETS } from './ai-config';
+import type {
+  ClusterCapacityData,
+  VirtualCluster,
+  K8sEvent,
+  BackupItem,
+  AIProviderType,
+} from './types';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -119,12 +126,53 @@ function getAiServiceUrl(): string {
   return 'http://127.0.0.1:8088';
 }
 
-export async function checkAiServiceHealth(): Promise<{ online: boolean; model: string; hardware: string; url: string }> {
-  const url = getAiServiceUrl();
+export async function checkAiServiceHealth(): Promise<{
+  online: boolean;
+  model: string;
+  hardware: string;
+  url: string;
+  provider: AIProviderType;
+  localModelEnabled: boolean;
+  hasApiKey: boolean;
+}> {
+  const settings = await getAISettings();
   const hw = await getClusterHardware().catch(() => ({
     hardwareString: 'Host Hardware',
   }));
 
+  // 1. Remote Model Provider Mode
+  if (settings.provider !== 'local') {
+    const preset = PROVIDER_PRESETS[settings.provider] || PROVIDER_PRESETS.openai;
+    const model = settings.remoteModel || preset.defaultModel;
+    const hasKey = Boolean(settings.remoteApiKey && settings.remoteApiKey.trim().length > 0);
+    const isOnline = hasKey || !preset.requiresKey;
+
+    return {
+      online: isOnline,
+      model: `${preset.name} (${model})`,
+      hardware: isOnline ? 'Remote API Provider' : 'Requires API Key',
+      url: settings.remoteEndpoint || preset.defaultEndpoint,
+      provider: settings.provider,
+      localModelEnabled: settings.localModelEnabled,
+      hasApiKey: hasKey,
+    };
+  }
+
+  // 2. Local Model Explicitly Disabled
+  if (!settings.localModelEnabled) {
+    return {
+      online: false,
+      model: 'Local Model Disabled',
+      hardware: 'Deterministic RAG Engine',
+      url: '',
+      provider: 'local',
+      localModelEnabled: false,
+      hasApiKey: false,
+    };
+  }
+
+  // 3. Local Gemma 3 Inference Engine Active
+  const url = getAiServiceUrl();
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 1200);
@@ -136,6 +184,9 @@ export async function checkAiServiceHealth(): Promise<{ online: boolean; model: 
         model: 'Gemma 3 1B IT (Q4_K_M)',
         hardware: hw.hardwareString,
         url,
+        provider: 'local',
+        localModelEnabled: true,
+        hasApiKey: false,
       };
     }
   } catch {}
@@ -145,6 +196,9 @@ export async function checkAiServiceHealth(): Promise<{ online: boolean; model: 
     model: 'Gemma 3 1B IT (Standby)',
     hardware: hw.hardwareString,
     url,
+    provider: 'local',
+    localModelEnabled: true,
+    hasApiKey: false,
   };
 }
 
@@ -570,11 +624,10 @@ ${backups.slice(0, 5).map((b) => `  - Cluster: ${b.vcluster}, Snapshot: ${b.snap
     } catch {}
   }
 
-  // Attempt Gemma 3 Inference via local llama-server
+  const settings = await getAISettings();
   const health = await checkAiServiceHealth();
-  if (health.online) {
-    try {
-      const systemPrompt = `You are vCOp Cyber-Copilot, an elite AI cluster intelligence engine embedded inside the Virtual Cluster Operations Center.
+
+  const systemPrompt = `You are vCOp Cyber-Copilot, an elite AI cluster intelligence engine embedded inside the Virtual Cluster Operations Center.
 Your mission is to deliver authoritative, executive-grade, beautifully structured Kubernetes telemetry analysis and operational insights.
 
 Response Formatting Protocol:
@@ -594,6 +647,109 @@ Ground Truth Rules:
 - If 0 timeseries samples are found when querying historical CPU/memory metrics for a namespace, explicitly state that 0 samples were recorded, list the active namespaces from Cluster Facts, and recommend querying one of them.
 - Avoid casual pleasantries ("Sure!", "Okay"). Begin directly with the status badge.`;
 
+  // Branch 1: Remote Model Provider Mode (OpenAI, Anthropic, Gemini, Groq, OpenRouter, Custom)
+  if (settings.provider !== 'local') {
+    const preset = PROVIDER_PRESETS[settings.provider] || PROVIDER_PRESETS.openai;
+    const apiKey = (settings.remoteApiKey || '').trim();
+    const endpoint = (settings.remoteEndpoint || preset.defaultEndpoint).trim();
+    const model = (settings.remoteModel || preset.defaultModel).trim();
+
+    if (!preset.requiresKey || apiKey) {
+      try {
+        let generatedContent = '';
+
+        if (settings.provider === 'anthropic') {
+          const targetUrl = endpoint.endsWith('/messages')
+            ? endpoint
+            : `${endpoint.replace(/\/+$/, '')}/messages`;
+
+          const res = await fetch(targetUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify({
+              model,
+              max_tokens: settings.maxTokens || 800,
+              temperature: settings.temperature ?? 0.15,
+              system: systemPrompt,
+              messages: [
+                {
+                  role: 'user',
+                  content: `Cluster Facts & Data:\n${contextSummary}\n\nUser Question:\n${latestUserMessage}`,
+                },
+              ],
+            }),
+          });
+
+          if (res.ok) {
+            const json = await res.json();
+            const textBlocks = json.content?.filter((c: any) => c.type === 'text') || [];
+            generatedContent = textBlocks.map((c: any) => c.text).join('\n');
+          } else {
+            const errBody = await res.text().catch(() => '');
+            console.warn(`[ai-engine] Anthropic API failed (HTTP ${res.status}):`, errBody);
+          }
+        } else {
+          // OpenAI, Gemini, Groq, OpenRouter, Custom OpenAI-Compatible
+          let chatUrl = endpoint.replace(/\/+$/, '');
+          if (!chatUrl.endsWith('/chat/completions')) {
+            chatUrl = `${chatUrl}/chat/completions`;
+          }
+
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+          };
+          if (apiKey) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+          }
+
+          const aiMessages = [
+            { role: 'system', content: systemPrompt },
+            {
+              role: 'user',
+              content: `Cluster Facts & Data:\n${contextSummary}\n\nUser Question:\n${latestUserMessage}`,
+            },
+          ];
+
+          const res = await fetch(chatUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              model,
+              messages: aiMessages,
+              temperature: settings.temperature ?? 0.15,
+              max_tokens: settings.maxTokens || 800,
+            }),
+          });
+
+          if (res.ok) {
+            const json = await res.json();
+            generatedContent = json.choices?.[0]?.message?.content || '';
+          } else {
+            const errBody = await res.text().catch(() => '');
+            console.warn(`[ai-engine] ${preset.name} API failed (HTTP ${res.status}):`, errBody);
+          }
+        }
+
+        if (generatedContent && generatedContent.trim()) {
+          return {
+            role: 'assistant',
+            content: generatedContent.trim(),
+            model: `${model} (${preset.name})`,
+            hardware: 'Remote API Endpoint',
+            toolData: toolPayload,
+          };
+        }
+      } catch (err: any) {
+        console.warn(`[ai-engine] Remote AI provider call failed, falling back to deterministic synthesis:`, err.message);
+      }
+    }
+  } else if (settings.localModelEnabled && health.online) {
+    // Branch 2: Local Gemma 3 Inference via local llama-server
+    try {
       const aiMessages = [
         { role: 'system', content: systemPrompt },
         {
@@ -607,8 +763,8 @@ Ground Truth Rules:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: aiMessages,
-          temperature: 0.15,
-          max_tokens: 500,
+          temperature: settings.temperature ?? 0.15,
+          max_tokens: settings.maxTokens || 500,
         }),
       });
 
@@ -626,7 +782,7 @@ Ground Truth Rules:
         }
       }
     } catch (err: any) {
-      console.warn('[ai-engine] Gemma 3 call failed, falling back to deterministic synthesis:', err.message);
+      console.warn('[ai-engine] Local model call failed, falling back to deterministic synthesis:', err.message);
     }
   }
 
