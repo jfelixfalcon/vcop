@@ -60,20 +60,6 @@ export const DEFAULT_VERSION_REGISTRY: VersionRegistry = {
       isDefault: true,
       notes: 'High-performance backing store with enhanced Raft throughput',
     },
-    {
-      version: '3.5.18-0',
-      label: '3.5.18-0 (LTS Stable)',
-      tag: 'stable',
-      isDefault: false,
-      notes: 'Battle-tested etcd v3.5 branch with long-term maintenance',
-    },
-    {
-      version: '3.5.16-0',
-      label: '3.5.16-0 (Legacy)',
-      tag: 'lts',
-      isDefault: false,
-      notes: 'Legacy etcd release for backward compatibility',
-    },
   ],
   coreDNSVersions: [
     {

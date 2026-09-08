@@ -74,15 +74,6 @@ export const CANONICAL_IMAGES: CanonicalImageItem[] = [
     tag: '3.6.8-0',
   },
   {
-    component: 'etcd-v3.5',
-    category: 'backingStore',
-    role: 'Long-term support etcd backing store (v3.5)',
-    defaultImage: 'registry.k8s.io/etcd:3.5.18-0',
-    registry: 'registry.k8s.io',
-    repository: 'etcd',
-    tag: '3.5.18-0',
-  },
-  {
     component: 'coredns',
     category: 'addons',
     role: 'In-cluster CoreDNS resolver service',

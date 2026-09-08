@@ -9,7 +9,6 @@ ghcr.io/loft-sh/kubernetes:v1.33.0
 
 # vCluster Backing Store (etcd)
 registry.k8s.io/etcd:3.6.8-0
-registry.k8s.io/etcd:3.5.18-0
 
 # vCluster Addons
 registry.k8s.io/coredns/coredns:v1.11.3

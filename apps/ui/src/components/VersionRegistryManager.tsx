@@ -114,7 +114,7 @@ const CATEGORIES: CategoryConfig[] = [
     badge: "Stateful Storage",
     description: "Dedicated etcd statefulset backing store image tag used for virtual cluster state persistence.",
     imageHint: "registry.k8s.io/etcd:<tag>",
-    placeholder: "e.g. 3.6.8-0 or 3.5.18-0",
+    placeholder: "e.g. 3.6.8-0",
     labelPlaceholder: "e.g. 3.6.8-0 (High Throughput)",
     icon: Database,
     theme: {
