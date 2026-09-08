@@ -223,6 +223,8 @@ interface OidcDiscovery {
   authorization_endpoint: string;
   token_endpoint: string;
   userinfo_endpoint?: string;
+  scopes_supported?: string[];
+  token_endpoint_auth_methods_supported?: string[];
 }
 
 let cachedDiscovery: { data: OidcDiscovery; timestamp: number } | null = null;
@@ -261,7 +263,7 @@ export async function getOidcDiscovery(customIssuerUrl?: string): Promise<OidcDi
 
 /**
  * Generates the OIDC Authorization URL for redirecting the user to the IdP.
- * Supports standard RFC 7636 PKCE S256 code challenge.
+ * Supports standard RFC 7636 PKCE S256 code challenge and dynamically negotiates supported scopes.
  */
 export async function getOidcAuthorizationUrl(
   origin: string,
@@ -272,11 +274,24 @@ export async function getOidcAuthorizationUrl(
   const discovery = await getOidcDiscovery(config.issuerUrl);
   const redirectUri = config.redirectUri || `${origin}/api/auth/callback`;
 
+  const requestedScopes = (config.scopes || 'openid email profile')
+    .split(' ')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  let finalScopes = requestedScopes;
+  if (discovery?.scopes_supported && Array.isArray(discovery.scopes_supported)) {
+    finalScopes = requestedScopes.filter((s) => discovery.scopes_supported!.includes(s));
+    if (!finalScopes.includes('openid')) {
+      finalScopes.unshift('openid');
+    }
+  }
+
   const params = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: config.scopes,
+    scope: finalScopes.join(' '),
     state,
   });
 
@@ -408,12 +423,18 @@ export async function exchangeOidcCode(
     Accept: 'application/json',
   };
 
-  // Attach client_secret in POST body and standard Basic Auth header if configured
+  // RFC 6749 Section 2.3 strictly forbids using more than one authentication method in each request.
+  // We use standard client_secret_post without Basic Auth header, or pure client_secret_basic if requested.
   if (config.clientSecret && config.clientSecret.trim().length > 0) {
     const secret = config.clientSecret.trim();
-    body.set('client_secret', secret);
-    const basicAuth = Buffer.from(`${config.clientId}:${secret}`).toString('base64');
-    headers['Authorization'] = `Basic ${basicAuth}`;
+    const supportedMethods = discovery.token_endpoint_auth_methods_supported;
+    if (supportedMethods && supportedMethods.includes('client_secret_basic') && !supportedMethods.includes('client_secret_post')) {
+      const basicAuth = Buffer.from(`${config.clientId}:${secret}`).toString('base64');
+      headers['Authorization'] = `Basic ${basicAuth}`;
+      body.delete('client_id');
+    } else {
+      body.set('client_secret', secret);
+    }
   }
 
   if (codeVerifier) {
