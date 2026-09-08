@@ -6,6 +6,9 @@ const user = Astro.locals.user;
 if (!user) {
   return Astro.redirect('/login?redirect=/new');
 }
+if (user.role !== 'admin') {
+  return Astro.redirect('/?denied=admin_required');
+}
 ---
 
 <Layout title="Provision Virtual Cluster - vCluster Operations Center">

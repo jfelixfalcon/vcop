@@ -79,9 +79,15 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return context.redirect('/');
   }
 
-  // 5. RBAC Guards for Viewers
+  // 5. RBAC Persona Guards for Viewers
   if (user.role !== 'admin') {
-    // Protect admin-only sections
+    // Viewers cannot access cluster provisioning (/new)
+    if (pathname === '/new' || pathname.startsWith('/new/')) {
+      authLog(`[Middleware] Blocking viewer from accessing provisioning wizard ${pathname}`);
+      return context.redirect('/?denied=admin_required');
+    }
+
+    // Protect admin-only pages and APIs
     if (pathname.startsWith('/admin/') || pathname.startsWith('/api/admin/')) {
       if (pathname.startsWith('/api/')) {
         return new Response(
@@ -98,15 +104,15 @@ export const onRequest = defineMiddleware(async (context, next) => {
       return context.redirect('/?denied=admin_required');
     }
 
-    // Block destructive modifications on clusters API for viewers (PATCH, PUT, DELETE)
-    // Note: POST is allowed so non-technical users can launch clusters from preconfigured baselines
-    if (pathname.startsWith('/api/vclusters') && !pathname.includes('/apps')) {
-      const method = request.method.toUpperCase();
-      if (['PATCH', 'PUT', 'DELETE'].includes(method)) {
+    // Viewers can view clusters and get kubeconfigs, but CANNOT perform any mutations (POST, PUT, PATCH, DELETE)
+    const method = request.method.toUpperCase();
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      if (pathname.startsWith('/api/vclusters') || pathname.startsWith('/api/appstore') || pathname.startsWith('/api/ai/config')) {
+        authLog(`[Middleware] Blocking viewer ${user.username} from mutating ${method} ${pathname}`);
         return new Response(
           JSON.stringify({
             success: false,
-            error: 'Forbidden: Administrator privileges required to modify or delete clusters.',
+            error: 'Forbidden: Viewer persona has read-only access. Administrator privileges required.',
           }),
           {
             status: 403,

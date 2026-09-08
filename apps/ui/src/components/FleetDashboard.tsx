@@ -92,7 +92,19 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
     return () => clearInterval(interval);
   }, []);
 
-  const isAdmin = !user || user.role === 'admin';
+  const [deniedAlert, setDeniedAlert] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('denied') === 'admin_required') {
+        setDeniedAlert('Access Denied: Administrator privileges required. The viewer persona has read-only access and cannot provision or modify clusters.');
+      }
+    }
+  }, []);
+
+  const isAdmin = user?.role === 'admin';
+  const isViewer = user?.role === 'viewer';
 
   // Extract all distinct cluster groups across fleet
   const availableGroups = Array.from(
@@ -282,6 +294,27 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
         </div>
       </div>
 
+      {/* Access Denied Warning Toast */}
+      {deniedAlert && (
+        <div className="bg-rose-950/70 border border-rose-500/50 rounded-2xl p-4 flex items-center justify-between gap-3 text-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-rose-500/20 text-rose-400 rounded-xl shrink-0">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-white font-mono">Restricted Action</h4>
+              <p className="text-rose-200/90 mt-0.5 font-mono">{deniedAlert}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setDeniedAlert(null)}
+            className="px-3 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-800 text-rose-300 font-mono text-xs transition-colors"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Viewer Access Mode Alert Banner */}
       {!isAdmin && user && (
         <div className="bg-cyan-950/30 border border-cyan-500/30 rounded-2xl p-4 flex items-center justify-between gap-3 text-xs animate-in fade-in duration-200">
@@ -290,14 +323,14 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
               <Shield className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="font-bold text-white flex items-center gap-2">
-                Viewer Access Mode
+              <h4 className="font-bold text-white flex items-center gap-2 font-mono">
+                Viewer Persona Active
                 <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800 uppercase font-semibold">
-                  Read-Only
+                  Read-Only & Kubeconfig Access
                 </span>
               </h4>
-              <p className="text-slate-300 mt-0.5">
-                Signed in as <strong className="text-white">{user.email || user.username}</strong>. Showing assigned virtual clusters.
+              <p className="text-slate-300 mt-0.5 font-mono text-[11px] leading-relaxed">
+                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have view access to all virtual clusters and metrics, and can retrieve cluster kubeconfigs via "Connect". Cluster provisioning and configuration modifications are reserved for administrators.
               </p>
             </div>
           </div>
@@ -455,7 +488,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
           <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
             {isAdmin
               ? 'No virtual clusters match your current filter criteria or none have been provisioned yet.'
-              : 'No virtual clusters have been assigned to your account or groups.'}
+              : 'No virtual clusters are currently provisioned in this fleet.'}
           </p>
           {isAdmin ? (
             <a
@@ -598,7 +631,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         >
                           <Terminal className="w-3.5 h-3.5 text-cyber-accent" />
                         </button>
-                        {isAdmin ? (
+                        {isAdmin && (
                           <>
                             <button
                               onClick={() => {
@@ -625,11 +658,6 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                               {isSleeping ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-400" />}
                             </button>
                           </>
-                        ) : (
-                          <span className="px-1.5 py-0.5 text-[9px] font-mono text-slate-400 bg-cyber-950 rounded border border-cyber-800 flex items-center gap-0.5 shrink-0">
-                            <Lock className="w-2.5 h-2.5 text-cyan-400" />
-                            <span>Read Only</span>
-                          </span>
                         )}
                         <a
                           href={`/clusters/${cluster.name}`}
@@ -813,14 +841,14 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                       Connect
                     </button>
 
-                    {isAdmin ? (
+                    {isAdmin && (
                       <>
                         <button
                           onClick={() => {
                             setSelectedCluster(cluster);
                             setActiveModal('upgrade');
                           }}
-                          className="px-2.5 py-1.5 bg-cyber-800 hover:bg-cyber-700 text-purple-300 text-xs font-medium rounded-lg border border-cyber-700 flex items-center gap-1.5 transition-colors"
+                          className="px-2.5 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-purple-300 text-xs font-medium rounded-lg border border-cyber-700 flex items-center gap-1.5 transition-colors"
                           title="Upgrade Kubernetes or vCluster Engine"
                         >
                           <ArrowUpCircle className="w-3.5 h-3.5" />
@@ -852,11 +880,6 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                           )}
                         </button>
                       </>
-                    ) : (
-                      <span className="px-2 py-1 text-[10px] font-mono text-slate-400 bg-cyber-950 rounded-lg border border-cyber-800 flex items-center gap-1">
-                        <Lock className="w-3 h-3 text-cyan-400" />
-                        <span>Read Only</span>
-                      </span>
                     )}
                   </div>
 
@@ -893,51 +916,56 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
         cluster={selectedCluster}
         isOpen={activeModal === 'kubeconfig'}
         onClose={() => setActiveModal(null)}
+        isAdmin={isAdmin}
       />
 
-      <SleepModal
-        cluster={selectedCluster}
-        isOpen={activeModal === 'sleep'}
-        onClose={() => setActiveModal(null)}
-        onSuccess={(updated) => {
-          setClusters((prev) => prev.map((c) => (c.name === updated.name ? updated : c)));
-        }}
-      />
+      {isAdmin && (
+        <>
+          <SleepModal
+            cluster={selectedCluster}
+            isOpen={activeModal === 'sleep'}
+            onClose={() => setActiveModal(null)}
+            onSuccess={(updated) => {
+              setClusters((prev) => prev.map((c) => (c.name === updated.name ? updated : c)));
+            }}
+          />
 
-      <UpgradeModal
-        cluster={selectedCluster}
-        isOpen={activeModal === 'upgrade'}
-        onClose={() => setActiveModal(null)}
-        onUpgradeSuccess={(updated) => {
-          setClusters((prev) => prev.map((c) => (c.name === updated.name ? updated : c)));
-        }}
-      />
+          <UpgradeModal
+            cluster={selectedCluster}
+            isOpen={activeModal === 'upgrade'}
+            onClose={() => setActiveModal(null)}
+            onUpgradeSuccess={(updated) => {
+              setClusters((prev) => prev.map((c) => (c.name === updated.name ? updated : c)));
+            }}
+          />
 
-      <DeleteModal
-        cluster={selectedCluster}
-        isOpen={activeModal === 'delete'}
-        onClose={() => setActiveModal(null)}
-        onDeleteSuccess={(deletedName) => {
-          setClusters((prev) => prev.filter((c) => c.name !== deletedName));
-        }}
-      />
+          <DeleteModal
+            cluster={selectedCluster}
+            isOpen={activeModal === 'delete'}
+            onClose={() => setActiveModal(null)}
+            onDeleteSuccess={(deletedName) => {
+              setClusters((prev) => prev.filter((c) => c.name !== deletedName));
+            }}
+          />
 
-      <ClusterGroupModal
-        cluster={groupModalTargetCluster}
-        isOpen={isGroupModalOpen}
-        onClose={() => {
-          setIsGroupModalOpen(false);
-          setGroupModalTargetCluster(null);
-        }}
-        onSuccess={(updated) => {
-          if (updated) {
-            setClusters((prev) => prev.map((c) => (c.name === updated.name ? updated : c)));
-          } else {
-            fetchClusters();
-          }
-        }}
-        allClusters={clusters}
-      />
+          <ClusterGroupModal
+            cluster={groupModalTargetCluster}
+            isOpen={isGroupModalOpen}
+            onClose={() => {
+              setIsGroupModalOpen(false);
+              setGroupModalTargetCluster(null);
+            }}
+            onSuccess={(updated) => {
+              if (updated) {
+                setClusters((prev) => prev.map((c) => (c.name === updated.name ? updated : c)));
+              } else {
+                fetchClusters();
+              }
+            }}
+            allClusters={clusters}
+          />
+        </>
+      )}
     </div>
   );
 };

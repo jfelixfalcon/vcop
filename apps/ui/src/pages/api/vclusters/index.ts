@@ -37,6 +37,16 @@ export const POST: APIRoute = async ({ request, locals }) => {
     );
   }
 
+  if (user.role !== 'admin') {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Forbidden: Administrator privileges required to provision virtual clusters.' }),
+      {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
   try {
     const body = await request.json();
     if (!body.clusterName) {

@@ -184,7 +184,8 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
     return () => clearInterval(interval);
   }, [clusterName]);
 
-  const isAdmin = !user || user.role === 'admin';
+  const isAdmin = user?.role === 'admin';
+  const isViewer = user?.role === 'viewer';
 
   if (loading && !cluster) {
     return (
@@ -253,19 +254,31 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <span>•</span>
               <span>Engine: <span className="text-cyan-400">vCluster {vclusterVer}</span></span>
               <span>•</span>
-              <button
-                onClick={() => openKubeconfigModal('endpoint')}
-                className="hover:text-cyan-300 hover:underline flex items-center gap-1 text-slate-300"
-                title="Click to view/change API server endpoint"
-              >
-                <Globe className="w-3 h-3 text-blue-400" />
-                Endpoint: <span className="text-slate-200">{cluster.metadata?.customEndpoint || cluster.status.endpoint || 'Internal'}</span>
-                {cluster.metadata?.customEndpoint && (
-                  <span className="text-[10px] px-1 bg-purple-500/20 text-purple-300 rounded border border-purple-500/30">
-                    custom
-                  </span>
-                )}
-              </button>
+              {isAdmin ? (
+                <button
+                  onClick={() => openKubeconfigModal('endpoint')}
+                  className="hover:text-cyan-300 hover:underline flex items-center gap-1 text-slate-300"
+                  title="Click to view/change API server endpoint"
+                >
+                  <Globe className="w-3 h-3 text-blue-400" />
+                  Endpoint: <span className="text-slate-200">{cluster.metadata?.customEndpoint || cluster.status.endpoint || 'Internal'}</span>
+                  {cluster.metadata?.customEndpoint && (
+                    <span className="text-[10px] px-1 bg-purple-500/20 text-purple-300 rounded border border-purple-500/30">
+                      custom
+                    </span>
+                  )}
+                </button>
+              ) : (
+                <span className="flex items-center gap-1 text-slate-300">
+                  <Globe className="w-3 h-3 text-blue-400" />
+                  Endpoint: <span className="text-slate-200">{cluster.metadata?.customEndpoint || cluster.status.endpoint || 'Internal'}</span>
+                  {cluster.metadata?.customEndpoint && (
+                    <span className="text-[10px] px-1 bg-purple-500/20 text-purple-300 rounded border border-purple-500/30">
+                      custom
+                    </span>
+                  )}
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -280,7 +293,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             Connect & Kubeconfig
           </button>
 
-          {isAdmin ? (
+          {isAdmin && (
             <>
               <button
                 onClick={() => setActiveModal('sleep')}
@@ -345,11 +358,6 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 Teardown
               </button>
             </>
-          ) : (
-            <span className="px-3 py-2 text-xs font-mono text-slate-400 bg-cyber-900/90 rounded-xl border border-cyber-700/80 flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Read-Only Mode</span>
-            </span>
           )}
         </div>
       </div>
@@ -362,14 +370,14 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <Shield className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="font-bold text-white flex items-center gap-2">
-                Viewer Access Role
+              <h4 className="font-bold text-white flex items-center gap-2 font-mono">
+                Viewer Persona Active
                 <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800 uppercase font-semibold">
-                  Read Only
+                  Read-Only & Kubeconfig Access
                 </span>
               </h4>
-              <p className="text-slate-300 mt-0.5">
-                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have read access to explore cluster topology, inspect installed apps, and export kubeconfig. Modifications require administrator authorization.
+              <p className="text-slate-300 mt-0.5 font-mono text-[11px] leading-relaxed">
+                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have read-only visibility into cluster state, workloads, and telemetry, and can retrieve kubeconfigs via "Connect & Kubeconfig". Resource mutations and administrative controls are reserved for administrators.
               </p>
             </div>
           </div>
@@ -1407,69 +1415,75 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 </h3>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => openInstallModal('catalog')}
-                  className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all"
-                >
-                  <Package className="w-4 h-4" />
-                  <span>Deploy App / Pack</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openInstallModal('direct')}
-                  className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 font-semibold text-xs rounded-xl border border-cyan-500/30 flex items-center gap-1.5 transition-all"
-                >
-                  <Terminal className="w-4 h-4" />
-                  <span>+ Deploy Custom App</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openInstallModal('add-app')}
-                  className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-200 font-semibold text-xs rounded-xl border border-cyber-700 flex items-center gap-1.5 transition-all"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>+ Add to Store</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openInstallModal('create-group')}
-                  className="px-3.5 py-2 bg-purple-950/70 hover:bg-purple-900/70 text-purple-300 font-semibold text-xs rounded-xl border border-purple-800/80 flex items-center gap-1.5 transition-all"
-                >
-                  <Layers className="w-4 h-4" />
-                  <span>+ Create App Group</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setSyncingApps(true);
-                    try {
-                      const res = await fetch(`/api/vclusters/${cluster.name}/apps`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ action: 'sync' }),
-                      });
-                      const data = await res.json();
-                      if (!res.ok || !data.success) {
-                        alert(data.error || 'Failed to sync applications');
-                        return;
+              {isAdmin ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openInstallModal('catalog')}
+                    className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all"
+                  >
+                    <Package className="w-4 h-4" />
+                    <span>Deploy App / Pack</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openInstallModal('direct')}
+                    className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 font-semibold text-xs rounded-xl border border-cyan-500/30 flex items-center gap-1.5 transition-all"
+                  >
+                    <Terminal className="w-4 h-4" />
+                    <span>+ Deploy Custom App</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openInstallModal('add-app')}
+                    className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-200 font-semibold text-xs rounded-xl border border-cyber-700 flex items-center gap-1.5 transition-all"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>+ Add to Store</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openInstallModal('create-group')}
+                    className="px-3.5 py-2 bg-purple-950/70 hover:bg-purple-900/70 text-purple-300 font-semibold text-xs rounded-xl border border-purple-800/80 flex items-center gap-1.5 transition-all"
+                  >
+                    <Layers className="w-4 h-4" />
+                    <span>+ Create App Group</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setSyncingApps(true);
+                      try {
+                        const res = await fetch(`/api/vclusters/${cluster.name}/apps`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'sync' }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok || !data.success) {
+                          alert(data.error || 'Failed to sync applications');
+                          return;
+                        }
+                        await fetchCluster();
+                      } catch (err: any) {
+                        alert(err.message || 'Error syncing applications');
+                      } finally {
+                        setSyncingApps(false);
                       }
-                      await fetchCluster();
-                    } catch (err: any) {
-                      alert(err.message || 'Error syncing applications');
-                    } finally {
-                      setSyncingApps(false);
-                    }
-                  }}
-                  disabled={syncingApps}
-                  className="px-3.5 py-2 bg-cyber-900 hover:bg-cyber-850 text-cyan-400 font-semibold text-xs rounded-xl border border-cyber-700 flex items-center gap-1.5 transition-all disabled:opacity-50"
-                  title="Reconcile and deploy all registered applications into the guest virtual cluster"
-                >
-                  <RefreshCw className={`w-4 h-4 ${syncingApps ? 'animate-spin' : ''}`} />
-                  <span>{syncingApps ? 'Syncing...' : 'Sync All Workloads'}</span>
-                </button>
-              </div>
+                    }}
+                    disabled={syncingApps}
+                    className="px-3.5 py-2 bg-cyber-900 hover:bg-cyber-850 text-cyan-400 font-semibold text-xs rounded-xl border border-cyber-700 flex items-center gap-1.5 transition-all disabled:opacity-50"
+                    title="Reconcile and deploy all registered applications into the guest virtual cluster"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${syncingApps ? 'animate-spin' : ''}`} />
+                    <span>{syncingApps ? 'Syncing...' : 'Sync All Workloads'}</span>
+                  </button>
+                </div>
+              ) : (
+                <span className="px-3 py-1.5 rounded-xl bg-cyber-950 text-slate-400 border border-cyber-800 font-mono text-xs">
+                  Read-Only Application View
+                </span>
+              )}
             </div>
 
             {/* Quick Metrics Bar */}
@@ -1664,32 +1678,34 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
 
                   {/* Actions */}
                   <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
-                    <button
-                      onClick={async () => {
-                        try {
-                          const res = await fetch(`/api/vclusters/${cluster.name}/apps`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              apps: [{ appId: app.appId, customValues: app.customValues }],
-                            }),
-                          });
-                          const data = await res.json();
-                          if (!res.ok || !data.success) {
-                            alert(data.error || 'Failed to sync application');
-                            return;
+                    {isAdmin && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(`/api/vclusters/${cluster.name}/apps`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                apps: [{ appId: app.appId, customValues: app.customValues }],
+                              }),
+                            });
+                            const data = await res.json();
+                            if (!res.ok || !data.success) {
+                              alert(data.error || 'Failed to sync application');
+                              return;
+                            }
+                            await fetchCluster();
+                          } catch (err: any) {
+                            alert(err.message || 'Error syncing application');
                           }
-                          await fetchCluster();
-                        } catch (err: any) {
-                          alert(err.message || 'Error syncing application');
-                        }
-                      }}
-                      className="px-2.5 py-1.5 bg-cyber-950 hover:bg-cyber-800 text-cyan-400 border border-cyber-800 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
-                      title="Redeploy and materialize in guest cluster"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Sync</span>
-                    </button>
+                        }}
+                        className="px-2.5 py-1.5 bg-cyber-950 hover:bg-cyber-800 text-cyan-400 border border-cyber-800 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+                        title="Redeploy and materialize in guest cluster"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Sync</span>
+                      </button>
+                    )}
 
                     <button
                       onClick={() => setInspectedApp(app)}
@@ -1699,35 +1715,37 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                       <span>Config & Values</span>
                     </button>
 
-                    <button
-                      onClick={async () => {
-                        if (
-                          confirm(
-                            `Are you sure you want to uninstall and remove ${app.name} from ${cluster.name}?`
-                          )
-                        ) {
-                          try {
-                            const res = await fetch(
-                              `/api/vclusters/${cluster.name}/apps/${app.appId}`,
-                              { method: 'DELETE' }
-                            );
-                            const data = await res.json();
-                            if (!res.ok || !data.success) {
-                              alert(data.error || 'Failed to uninstall app');
-                              return;
+                    {isAdmin && (
+                      <button
+                        onClick={async () => {
+                          if (
+                            confirm(
+                              `Are you sure you want to uninstall and remove ${app.name} from ${cluster.name}?`
+                            )
+                          ) {
+                            try {
+                              const res = await fetch(
+                                `/api/vclusters/${cluster.name}/apps/${app.appId}`,
+                                { method: 'DELETE' }
+                              );
+                              const data = await res.json();
+                              if (!res.ok || !data.success) {
+                                alert(data.error || 'Failed to uninstall app');
+                                return;
+                              }
+                              await fetchCluster();
+                            } catch (err: any) {
+                              alert(err.message || 'Error uninstalling app');
                             }
-                            await fetchCluster();
-                          } catch (err: any) {
-                            alert(err.message || 'Error uninstalling app');
                           }
-                        }
-                      }}
-                      className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold rounded-xl flex items-center gap-1 transition-all"
-                      title="Uninstall Application"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Uninstall</span>
-                    </button>
+                        }}
+                        className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold rounded-xl flex items-center gap-1 transition-all"
+                        title="Uninstall Application"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Uninstall</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1735,140 +1753,142 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
           )}
 
           {/* App Store Catalog & Quick-Deploy Suites Section */}
-          <div className="bg-cyber-900/60 border border-cyber-800 rounded-3xl p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-purple-400" />
-                  App Catalog
-                </h4>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => openInstallModal('add-app')}
-                  className="text-xs font-mono text-cyan-400 hover:underline flex items-center gap-1"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  + Add App
-                </button>
-                <span className="text-slate-700">|</span>
-                <button
-                  type="button"
-                  onClick={() => openInstallModal('create-group')}
-                  className="text-xs font-mono text-purple-400 hover:underline flex items-center gap-1"
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  + Create Group
-                </button>
-              </div>
-            </div>
-
-            {(!catalog || (catalog.apps.length === 0 && catalog.groups.length === 0)) ? (
-              <div className="p-6 rounded-2xl border border-dashed border-cyber-800 bg-cyber-950/40 text-center space-y-3">
-                <Package className="w-8 h-8 text-slate-600 mx-auto" />
-                <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  No applications or groups in catalog.
-                </p>
-                <div className="flex justify-center gap-2 pt-1">
+          {isAdmin && (
+            <div className="bg-cyber-900/60 border border-cyber-800 rounded-3xl p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-purple-400" />
+                    App Catalog
+                  </h4>
+                </div>
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => openInstallModal('add-app')}
-                    className="px-3.5 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-cyan-400 border border-cyan-500/30 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5"
+                    className="text-xs font-mono text-cyan-400 hover:underline flex items-center gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    + Add Application to Store
+                    + Add App
                   </button>
+                  <span className="text-slate-700">|</span>
                   <button
                     type="button"
                     onClick={() => openInstallModal('create-group')}
-                    className="px-3.5 py-1.5 bg-purple-950/70 hover:bg-purple-900/70 text-purple-300 border border-purple-800 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5"
+                    className="text-xs font-mono text-purple-400 hover:underline flex items-center gap-1"
                   >
                     <Layers className="w-3.5 h-3.5" />
-                    + Create App Group
+                    + Create Group
                   </button>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-4">
-                {/* Available Groups */}
-                {catalog.groups.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {catalog.groups.map((grp) => (
-                      <div
-                        key={grp.id}
-                        className="p-4 rounded-2xl bg-cyber-950 border border-cyber-800 hover:border-purple-500/40 transition-all flex flex-col justify-between"
-                      >
-                        <div>
-                          <div className="flex items-center justify-between">
-                            <h5 className="text-xs font-bold text-white">{grp.name}</h5>
-                            <span className="text-[10px] font-mono text-purple-400 bg-purple-950 px-2 py-0.5 rounded border border-purple-800">
-                              {grp.appIds.length} Apps
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{grp.description}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            openInstallModal('catalog');
-                          }}
-                          className="mt-3 w-full py-1.5 bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 text-xs font-mono font-semibold rounded-lg border border-purple-500/30 flex items-center justify-center gap-1 transition-all"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          Deploy Suite
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
 
-                {/* Available Individual Apps */}
-                {catalog.apps.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {catalog.apps.map((app) => {
-                      const isAlreadyInstalled = (cluster.metadata?.installedApps || []).some(
-                        (a) => a.appId === app.id
-                      );
-                      return (
-                        <div
-                          key={app.id}
-                          className="p-3.5 rounded-2xl bg-cyber-950 border border-cyber-800 flex items-center justify-between gap-3"
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="p-2 bg-cyber-900 border border-cyber-800 rounded-xl text-cyan-400 shrink-0">
-                              <Box className="w-4 h-4" />
-                            </div>
-                            <div className="min-w-0">
-                              <h5 className="text-xs font-bold text-white truncate">{app.name}</h5>
-                              <span className="text-[10px] font-mono text-slate-400">v{app.version}</span>
-                            </div>
-                          </div>
-                          {isAlreadyInstalled ? (
-                            <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1 shrink-0">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Installed
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                openInstallModal('catalog');
-                              }}
-                              className="px-2.5 py-1 bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 text-xs font-mono font-semibold rounded-lg border border-cyan-500/30 flex items-center gap-1 shrink-0 transition-all"
-                            >
-                              <Download className="w-3 h-3" />
-                              Deploy
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
+              {(!catalog || (catalog.apps.length === 0 && catalog.groups.length === 0)) ? (
+                <div className="p-6 rounded-2xl border border-dashed border-cyber-800 bg-cyber-950/40 text-center space-y-3">
+                  <Package className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    No applications or groups in catalog.
+                  </p>
+                  <div className="flex justify-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => openInstallModal('add-app')}
+                      className="px-3.5 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-cyan-400 border border-cyan-500/30 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      + Add Application to Store
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openInstallModal('create-group')}
+                      className="px-3.5 py-1.5 bg-purple-950/70 hover:bg-purple-900/70 text-purple-300 border border-purple-800 text-xs font-semibold rounded-xl inline-flex items-center gap-1.5"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      + Create App Group
+                    </button>
                   </div>
-                )}
-              </div>
-            )}
-          </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Available Groups */}
+                  {catalog.groups.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {catalog.groups.map((grp) => (
+                        <div
+                          key={grp.id}
+                          className="p-4 rounded-2xl bg-cyber-950 border border-cyber-800 hover:border-purple-500/40 transition-all flex flex-col justify-between"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <h5 className="text-xs font-bold text-white">{grp.name}</h5>
+                              <span className="text-[10px] font-mono text-purple-400 bg-purple-950 px-2 py-0.5 rounded border border-purple-800">
+                                {grp.appIds.length} Apps
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{grp.description}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              openInstallModal('catalog');
+                            }}
+                            className="mt-3 w-full py-1.5 bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 text-xs font-mono font-semibold rounded-lg border border-purple-500/30 flex items-center justify-center gap-1 transition-all"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            Deploy Suite
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Available Individual Apps */}
+                  {catalog.apps.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {catalog.apps.map((app) => {
+                        const isAlreadyInstalled = (cluster.metadata?.installedApps || []).some(
+                          (a) => a.appId === app.id
+                        );
+                        return (
+                          <div
+                            key={app.id}
+                            className="p-3.5 rounded-2xl bg-cyber-950 border border-cyber-800 flex items-center justify-between gap-3"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="p-2 bg-cyber-900 border border-cyber-800 rounded-xl text-cyan-400 shrink-0">
+                                <Box className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <h5 className="text-xs font-bold text-white truncate">{app.name}</h5>
+                                <span className="text-[10px] font-mono text-slate-400">v{app.version}</span>
+                              </div>
+                            </div>
+                            {isAlreadyInstalled ? (
+                              <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1 shrink-0">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Installed
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  openInstallModal('catalog');
+                                }}
+                                className="px-2.5 py-1 bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 text-xs font-mono font-semibold rounded-lg border border-cyan-500/30 flex items-center gap-1 shrink-0 transition-all"
+                              >
+                                <Download className="w-3 h-3" />
+                                Deploy
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1876,7 +1896,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
 
       {/* TAB CONTENT: Disaster Recovery */}
       {activeTab === 'dr' && (
-        <DisasterRecoveryTab cluster={cluster} onRefresh={fetchCluster} />
+        <DisasterRecoveryTab cluster={cluster} onRefresh={fetchCluster} isAdmin={isAdmin} />
       )}
 
       {/* TAB CONTENT: Effective vCluster 0.36 YAML */}
@@ -1899,78 +1919,83 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         initialTab={kubeconfigInitialTab}
         onClose={() => setActiveModal(null)}
         onClusterUpdated={fetchCluster}
+        isAdmin={isAdmin}
       />
 
-      <UpgradeModal
-        cluster={cluster}
-        isOpen={activeModal === 'upgrade'}
-        onClose={() => setActiveModal(null)}
-        onUpgradeSuccess={(updated) => setCluster(updated)}
-      />
+      {isAdmin && (
+        <>
+          <UpgradeModal
+            cluster={cluster}
+            isOpen={activeModal === 'upgrade'}
+            onClose={() => setActiveModal(null)}
+            onUpgradeSuccess={(updated) => setCluster(updated)}
+          />
 
-      <DeleteModal
-        cluster={cluster}
-        isOpen={activeModal === 'delete'}
-        onClose={() => setActiveModal(null)}
-        onDeleteSuccess={() => {
-          window.location.href = '/';
-        }}
-      />
+          <DeleteModal
+            cluster={cluster}
+            isOpen={activeModal === 'delete'}
+            onClose={() => setActiveModal(null)}
+            onDeleteSuccess={() => {
+              window.location.href = '/';
+            }}
+          />
 
-      <QuotaModal
-        cluster={cluster}
-        isOpen={activeModal === 'quota'}
-        onClose={() => setActiveModal(null)}
-        onUpdateSuccess={(updated) => setCluster(updated)}
-      />
+          <QuotaModal
+            cluster={cluster}
+            isOpen={activeModal === 'quota'}
+            onClose={() => setActiveModal(null)}
+            onUpdateSuccess={(updated) => setCluster(updated)}
+          />
 
-      <SleepModal
-        cluster={cluster}
-        isOpen={activeModal === 'sleep'}
-        onClose={() => setActiveModal(null)}
-        onSuccess={(updated) => setCluster(updated)}
-      />
+          <SleepModal
+            cluster={cluster}
+            isOpen={activeModal === 'sleep'}
+            onClose={() => setActiveModal(null)}
+            onSuccess={(updated) => setCluster(updated)}
+          />
 
-      <RbacModal
-        cluster={cluster}
-        isOpen={activeModal === 'rbac'}
-        onClose={() => setActiveModal(null)}
-        onSuccess={(updated) => setCluster(updated)}
-      />
+          <RbacModal
+            cluster={cluster}
+            isOpen={activeModal === 'rbac'}
+            onClose={() => setActiveModal(null)}
+            onSuccess={(updated) => setCluster(updated)}
+          />
 
-      <ClusterGroupModal
-        cluster={cluster}
-        isOpen={activeModal === 'group'}
-        onClose={() => setActiveModal(null)}
-        onSuccess={(updated) => {
-          if (updated) {
-            setCluster(updated);
-          } else {
-            fetchCluster();
-          }
-        }}
-      />
+          <ClusterGroupModal
+            cluster={cluster}
+            isOpen={activeModal === 'group'}
+            onClose={() => setActiveModal(null)}
+            onSuccess={(updated) => {
+              if (updated) {
+                setCluster(updated);
+              } else {
+                fetchCluster();
+              }
+            }}
+          />
 
-      <InstallAppModal
-        cluster={cluster}
-        isOpen={activeModal === 'install-app'}
-        initialTab={installAppTab}
-        onClose={() => setActiveModal(null)}
-        onSuccess={async () => {
-          await fetchCluster();
-          await fetchCatalog();
-        }}
-      />
+          <InstallAppModal
+            cluster={cluster}
+            isOpen={activeModal === 'install-app'}
+            initialTab={installAppTab}
+            onClose={() => setActiveModal(null)}
+            onSuccess={async () => {
+              await fetchCluster();
+              await fetchCatalog();
+            }}
+          />
 
-      <IstioModal
-        cluster={cluster}
-        isOpen={activeModal === 'istio'}
-        onClose={() => setActiveModal(null)}
-        onSuccess={(updated) => {
-          setCluster(updated);
-          fetchCluster();
-        }}
-      />
+          <IstioModal
+            cluster={cluster}
+            isOpen={activeModal === 'istio'}
+            onClose={() => setActiveModal(null)}
+            onSuccess={(updated) => {
+              setCluster(updated);
+              fetchCluster();
+            }}
+          />
+        </>
+      )}
 
       {/* View Inspected App Values / Manifests Modal */}
       {inspectedApp && (

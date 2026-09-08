@@ -23,9 +23,10 @@ import {
 interface Props {
   cluster: VirtualCluster;
   onRefresh: () => void;
+  isAdmin?: boolean;
 }
 
-export const DisasterRecoveryTab: React.FC<Props> = ({ cluster, onRefresh }) => {
+export const DisasterRecoveryTab: React.FC<Props> = ({ cluster, onRefresh, isAdmin = false }) => {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [copiedSnapshot, setCopiedSnapshot] = useState<string | null>(null);
@@ -338,31 +339,35 @@ export const DisasterRecoveryTab: React.FC<Props> = ({ cluster, onRefresh }) => 
             Refresh
           </button>
 
-          <button
-            onClick={() => setIsConfigModalOpen(true)}
-            className="px-3.5 py-2 text-xs font-semibold bg-cyber-900 hover:bg-cyber-800 text-cyber-300 hover:text-white rounded-lg border border-cyber-700 flex items-center gap-1.5 transition-all shadow-sm"
-          >
-            <Settings2 className="w-3.5 h-3.5 text-cyber-400" />
-            Configure Schedule
-          </button>
+          {isAdmin && (
+            <>
+              <button
+                onClick={() => setIsConfigModalOpen(true)}
+                className="px-3.5 py-2 text-xs font-semibold bg-cyber-900 hover:bg-cyber-800 text-cyber-300 hover:text-white rounded-lg border border-cyber-700 flex items-center gap-1.5 transition-all shadow-sm"
+              >
+                <Settings2 className="w-3.5 h-3.5 text-cyber-400" />
+                Configure Schedule
+              </button>
 
-          <button
-            onClick={handleTriggerBackupNow}
-            disabled={loadingAction === 'backup'}
-            className="px-4 py-2 text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-lg shadow-lg shadow-emerald-900/30 flex items-center gap-2 transition-all"
-          >
-            {loadingAction === 'backup' ? (
-              <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                Snapshotting...
-              </>
-            ) : (
-              <>
-                <Download className="w-3.5 h-3.5" />
-                Backup Now
-              </>
-            )}
-          </button>
+              <button
+                onClick={handleTriggerBackupNow}
+                disabled={loadingAction === 'backup'}
+                className="px-4 py-2 text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-lg shadow-lg shadow-emerald-900/30 flex items-center gap-2 transition-all"
+              >
+                {loadingAction === 'backup' ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    Snapshotting...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    Backup Now
+                  </>
+                )}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -407,7 +412,7 @@ export const DisasterRecoveryTab: React.FC<Props> = ({ cluster, onRefresh }) => 
                   <th className="py-3 px-4">Size</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4">Cluster Origin</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+                  {isAdmin && <th className="py-3 px-4 text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-cyber-800/50 text-slate-300">
@@ -470,19 +475,21 @@ export const DisasterRecoveryTab: React.FC<Props> = ({ cluster, onRefresh }) => 
                       <td className="py-3.5 px-4 font-mono text-slate-400">
                         {b.clusterOrigin || cluster.name}
                       </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => {
-                            setSelectedSnapshot(b);
-                            setIsRestoreModalOpen(true);
-                            setRestoreConfirmed(false);
-                          }}
-                          className="px-2.5 py-1 text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 hover:text-amber-200 border border-amber-500/30 rounded inline-flex items-center gap-1 transition-all"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                          Restore
-                        </button>
-                      </td>
+                      {isAdmin && (
+                        <td className="py-3.5 px-4 text-right">
+                          <button
+                            onClick={() => {
+                              setSelectedSnapshot(b);
+                              setIsRestoreModalOpen(true);
+                              setRestoreConfirmed(false);
+                            }}
+                            className="px-2.5 py-1 text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 hover:text-amber-200 border border-amber-500/30 rounded inline-flex items-center gap-1 transition-all"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            Restore
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

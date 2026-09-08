@@ -94,7 +94,7 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
   const [groupDesc, setGroupDesc] = useState('');
   const [groupAppIds, setGroupAppIds] = useState<string[]>([]);
 
-  const isAdmin = !currentUser || currentUser.role === 'admin';
+  const isAdmin = currentUser?.role === 'admin';
 
   const fetchCatalog = async () => {
     try {
@@ -789,7 +789,7 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
       )}
 
       {/* MODAL 2: Add or Edit Application */}
-      {(activeModal === 'add-app' || activeModal === 'edit-app') && (
+      {isAdmin && (activeModal === 'add-app' || activeModal === 'edit-app') && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
           <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="flex justify-between items-start mb-5">
@@ -1059,7 +1059,7 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
       )}
 
       {/* MODAL 3: Create App Group / Pack */}
-      {activeModal === 'add-group' && (
+      {isAdmin && activeModal === 'add-group' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
           <div className="relative w-full max-w-md bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden">
             <div className="flex justify-between items-start mb-5">

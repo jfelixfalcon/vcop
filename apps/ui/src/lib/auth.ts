@@ -471,53 +471,36 @@ export async function exchangeOidcCode(
 
 /**
  * Evaluates whether a user is authorized to VIEW a specific virtual cluster.
- * Admins see all clusters.
- * Viewers see only clusters matching their email, username, or groups.
+ * Admins and Viewers can see all virtual clusters, telemetry, and metrics across the fleet.
  */
-export function canUserViewCluster(user: UserSession, cluster: VirtualCluster): boolean {
-  if (user.role === 'admin') {
+export function canUserViewCluster(user: UserSession, cluster?: VirtualCluster): boolean {
+  if (user.role === 'admin' || user.role === 'viewer') {
     return true;
   }
-
-  const uEmail = user.email.toLowerCase().trim();
-  const uName = user.username.toLowerCase().trim();
-  const uEmailPrefix = uEmail.split('@')[0];
-  const uGroups = user.groups.map((g) => g.toLowerCase().trim());
-
-  const cOwner = (cluster.metadata?.owner || '').toLowerCase().trim();
-  const cGroups = (cluster.metadata?.allowedGroups || []).map((g) => g.toLowerCase().trim());
-  const cEmails = (cluster.metadata?.allowedEmails || []).map((e) => e.toLowerCase().trim());
-
-  // 1. Direct owner match
-  if (cOwner && (cOwner === uEmail || cOwner === uName || cOwner === uEmailPrefix)) {
-    return true;
-  }
-
-  // 2. Allowed emails match
-  if (cEmails.includes(uEmail) || cEmails.includes(uName) || cEmails.includes(uEmailPrefix)) {
-    return true;
-  }
-
-  // 3. Allowed groups match
-  for (const ug of uGroups) {
-    if (cGroups.includes(ug)) {
-      return true;
-    }
-  }
-
-  // 4. Substring fallback for legacy/demo clusters like "Dev" matching "dev"
-  if (cOwner && (cOwner.includes(uName) || uName.includes(cOwner))) {
-    return true;
-  }
-
   return false;
 }
 
 /**
+ * Evaluates whether a user is authorized to retrieve the cluster kubeconfig.
+ * Both Admins and Viewers can connect and download kubeconfigs.
+ */
+export function canUserGetKubeconfig(user: UserSession, cluster?: VirtualCluster): boolean {
+  return user.role === 'admin' || user.role === 'viewer';
+}
+
+/**
  * Evaluates whether a user is authorized to MANAGE a virtual cluster.
- * Strictly restricted to Admins. Viewers CANNOT modify resources or delete clusters.
+ * Strictly restricted to Admins. Viewers CANNOT modify resources, scale, sleep, wake, or delete clusters.
  */
 export function canUserManageCluster(user: UserSession): boolean {
+  return user.role === 'admin';
+}
+
+/**
+ * Evaluates whether a user is authorized to CREATE new virtual clusters.
+ * Strictly restricted to Admins. Viewers CANNOT provision new clusters.
+ */
+export function canUserCreateCluster(user: UserSession): boolean {
   return user.role === 'admin';
 }
 

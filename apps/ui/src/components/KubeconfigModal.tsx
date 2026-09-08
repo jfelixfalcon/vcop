@@ -30,6 +30,7 @@ interface Props {
   onClose: () => void;
   initialTab?: 'oidc' | 'admin' | 'endpoint' | 'settings';
   onClusterUpdated?: () => void;
+  isAdmin?: boolean;
 }
 
 export const KubeconfigModal: React.FC<Props> = ({
@@ -38,6 +39,7 @@ export const KubeconfigModal: React.FC<Props> = ({
   onClose,
   initialTab,
   onClusterUpdated,
+  isAdmin = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'oidc' | 'admin' | 'endpoint' | 'settings'>('oidc');
   const [copiedCli, setCopiedCli] = useState(false);
@@ -87,7 +89,7 @@ export const KubeconfigModal: React.FC<Props> = ({
   useEffect(() => {
     if (cluster && isOpen) {
       // Default to OIDC if enabled on cluster, otherwise initialTab or admin
-      if (initialTab) {
+      if (initialTab && (isAdmin || (initialTab !== 'endpoint' && initialTab !== 'settings'))) {
         setActiveTab(initialTab);
       } else if (cluster.metadata?.oidc?.enabled) {
         setActiveTab('oidc');
@@ -137,9 +139,11 @@ export const KubeconfigModal: React.FC<Props> = ({
 
       // Fetch credentials in parallel once per modal open
       fetchCredentials(cluster.name);
-      fetchFleetRegistry();
+      if (isAdmin) {
+        fetchFleetRegistry();
+      }
     }
-  }, [cluster?.name, isOpen]);
+  }, [cluster?.name, isOpen, isAdmin]);
 
   const fetchCredentials = (clusterName: string) => {
     setLoadingAdmin(true);
@@ -416,30 +420,34 @@ export const KubeconfigModal: React.FC<Props> = ({
             Admin / Breakglass
           </button>
 
-          <button
-            onClick={() => setActiveTab('endpoint')}
-            className={`px-3 py-2 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'endpoint'
-                ? 'bg-cyber-800 text-blue-400 border border-blue-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-850'
-            }`}
-          >
-            <Globe className="w-3.5 h-3.5 text-blue-400" />
-            Endpoint & Routing
-            {isUsingCustomEndpoint && <span className="w-2 h-2 rounded-full bg-purple-400"></span>}
-          </button>
+          {isAdmin && (
+            <>
+              <button
+                onClick={() => setActiveTab('endpoint')}
+                className={`px-3 py-2 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeTab === 'endpoint'
+                    ? 'bg-cyber-800 text-blue-400 border border-blue-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-850'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5 text-blue-400" />
+                Endpoint & Routing
+                {isUsingCustomEndpoint && <span className="w-2 h-2 rounded-full bg-purple-400"></span>}
+              </button>
 
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`px-3 py-2 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              activeTab === 'settings'
-                ? 'bg-cyber-800 text-amber-400 border border-amber-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-850'
-            }`}
-          >
-            <Settings className="w-3.5 h-3.5 text-amber-400" />
-            OIDC Provider Setup
-          </button>
+              <button
+                onClick={() => setActiveTab('settings')}
+                className={`px-3 py-2 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  activeTab === 'settings'
+                    ? 'bg-cyber-800 text-amber-400 border border-amber-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-850'
+                }`}
+              >
+                <Settings className="w-3.5 h-3.5 text-amber-400" />
+                OIDC Provider Setup
+              </button>
+            </>
+          )}
         </div>
 
         {/* Tab Body (Smooth single scroll container) */}
@@ -501,13 +509,15 @@ export const KubeconfigModal: React.FC<Props> = ({
                       </p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setActiveTab('settings')}
-                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg shrink-0 flex items-center gap-1 shadow-sm"
-                  >
-                    <Settings className="w-3.5 h-3.5" />
-                    Setup OIDC
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => setActiveTab('settings')}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg shrink-0 flex items-center gap-1 shadow-sm"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      Setup OIDC
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -666,7 +676,7 @@ export const KubeconfigModal: React.FC<Props> = ({
           {/* ======================================================== */}
           {/* TAB 3: API ENDPOINT & ROUTING                           */}
           {/* ======================================================== */}
-          {activeTab === 'endpoint' && (
+          {isAdmin && activeTab === 'endpoint' && (
             <div className="space-y-4 animate-in fade-in duration-100">
               <div className="bg-cyber-950/80 border border-cyber-800 rounded-xl p-4 space-y-3">
                 <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
@@ -760,7 +770,7 @@ export const KubeconfigModal: React.FC<Props> = ({
           {/* ======================================================== */}
           {/* TAB 4: OIDC PROVIDER SETUP                              */}
           {/* ======================================================== */}
-          {activeTab === 'settings' && (
+          {isAdmin && activeTab === 'settings' && (
             <div className="space-y-4 animate-in fade-in duration-100">
               <div className="bg-cyber-950/80 border border-cyber-800 rounded-xl p-4 space-y-4">
                 {/* Profile Mode Selector */}
