@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getInstalledApps, installAppsToCluster, syncClusterApps } from '../../../../../lib/cluster-apps';
 import { getVirtualCluster } from '../../../../../lib/k8s-client';
-import { canUserViewCluster, canUserManageCluster } from '../../../../../lib/auth';
+import { canUserViewCluster, canUserManageCluster, canUserDeployApps } from '../../../../../lib/auth';
 
 export const GET: APIRoute = async ({ params, locals }) => {
   const { name } = params;
@@ -63,11 +63,11 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
     });
   }
 
-  if (user && !canUserViewCluster(user, cluster)) {
+  if (!user || !canUserDeployApps(user)) {
     return new Response(
       JSON.stringify({
         success: false,
-        error: 'Forbidden: You do not have permission to deploy applications to this cluster.',
+        error: 'Forbidden: Administrator or Developer privileges required to deploy applications.',
       }),
       {
         status: 403,

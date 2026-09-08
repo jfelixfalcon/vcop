@@ -159,6 +159,25 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // Admins and Developers can create and mutate virtual clusters (quotas, RBAC, sleep/wake, apps, DR).
   // Viewers CANNOT perform any mutations (POST, PUT, PATCH, DELETE).
   const method = request.method.toUpperCase();
+
+  // Cluster deletion (DELETE /api/vclusters/:name) is STRICTLY ADMIN ONLY!
+  // Developers cannot delete virtual clusters under any circumstances.
+  if (method === 'DELETE' && /^\/api\/vclusters\/[^/]+$/.test(pathname)) {
+    if (!isAdmin) {
+      authLog(`[Middleware] Blocking non-admin ${user.username} (role=${user.role}) from deleting cluster ${pathname}`);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Forbidden: Virtual cluster deletion is strictly reserved for Administrators. Developers cannot delete vclusters.',
+        }),
+        {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+  }
+
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     if (isViewer) {
       if (pathname.startsWith('/api/vclusters')) {

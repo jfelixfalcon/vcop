@@ -8,7 +8,7 @@ import {
   updateVirtualClusterGroups,
   upgradeVirtualCluster,
 } from '../../../../lib/k8s-client';
-import { canUserViewCluster, canUserManageCluster } from '../../../../lib/auth';
+import { canUserViewCluster, canUserManageCluster, canUserDeleteCluster } from '../../../../lib/auth';
 
 export const GET: APIRoute = async ({ params, locals }) => {
   const { name } = params;
@@ -117,9 +117,12 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
 
 export const DELETE: APIRoute = async ({ params, locals }) => {
   const user = locals.user;
-  if (!user || !canUserManageCluster(user)) {
+  if (!user || !canUserDeleteCluster(user)) {
     return new Response(
-      JSON.stringify({ success: false, error: 'Forbidden: Administrator privileges required to teardown clusters.' }),
+      JSON.stringify({
+        success: false,
+        error: 'Forbidden: Administrator privileges required to teardown clusters. Developers cannot delete vclusters.',
+      }),
       {
         status: 403,
         headers: { 'Content-Type': 'application/json' },

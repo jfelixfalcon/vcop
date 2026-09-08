@@ -352,13 +352,16 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 Upgrade Engine
               </button>
 
-              <button
-                onClick={() => setActiveModal('delete')}
-                className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Teardown
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveModal('delete')}
+                  className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+                  title="Teardown Cluster (Admin Only)"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Teardown
+                </button>
+              )}
             </>
           )}
         </div>
@@ -375,11 +378,11 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <h4 className="font-bold text-white flex items-center gap-2 font-mono">
                 Developer Persona Active
                 <span className="text-[10px] font-mono text-amber-400 bg-amber-950 px-2 py-0.5 rounded border border-amber-800 uppercase font-semibold">
-                  Cluster Operations & Quota Management
+                  Cluster Operations & App Deployment
                 </span>
               </h4>
               <p className="text-slate-300 mt-0.5 font-mono text-[11px] leading-relaxed">
-                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have full permissions to modify this virtual cluster including quotas, RBAC, sleep/wake, apps, and Disaster Recovery. Global registries, baselines, and AI models are managed by administrators.
+                Signed in as <strong className="text-white">{user.email || user.username}</strong>. You have permissions to configure quotas, RBAC, sleep/wake, deploy catalog applications, and run Disaster Recovery. Cluster teardown, global registries, baselines, and AI models are strictly reserved for administrators.
               </p>
             </div>
           </div>
@@ -1345,19 +1348,22 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   <tr className="border-b border-cyber-800 text-slate-400">
                     <th className="pb-3 font-medium">Action / Operation</th>
                     <th className="pb-3 font-medium text-cyan-400">Platform Admin</th>
-                    <th className="pb-3 font-medium text-purple-400">Delegated Viewer (Owner/Group/Email)</th>
-                    <th className="pb-3 font-medium text-slate-500">Unassigned User</th>
+                    <th className="pb-3 font-medium text-amber-400">Developer Persona</th>
+                    <th className="pb-3 font-medium text-purple-400">Viewer Persona</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-cyber-800/40">
                   {[
-                    { op: 'View Cluster Topology & Status', admin: true, viewer: true, stranger: false },
-                    { op: 'Download / View Kubeconfig', admin: true, viewer: true, stranger: false },
-                    { op: 'Dynamic Quota & Limit Adjustments', admin: true, viewer: false, stranger: false },
-                    { op: 'Sleep / Wake Operations', admin: true, viewer: false, stranger: false },
-                    { op: 'Kubernetes Distro Engine Upgrades', admin: true, viewer: false, stranger: false },
-                    { op: 'Update RBAC & Access Delegation', admin: true, viewer: false, stranger: false },
-                    { op: 'Teardown / Delete Virtual Cluster', admin: true, viewer: false, stranger: false },
+                    { op: 'View Cluster Topology & Status', admin: true, dev: true, viewer: true },
+                    { op: 'Download / View Kubeconfig', admin: true, dev: true, viewer: true },
+                    { op: 'Deploy Applications from Catalog', admin: true, dev: true, viewer: false },
+                    { op: 'Dynamic Quota & Limit Adjustments', admin: true, dev: true, viewer: false },
+                    { op: 'Sleep / Wake Operations', admin: true, dev: true, viewer: false },
+                    { op: 'Kubernetes Distro Engine Upgrades', admin: true, dev: true, viewer: false },
+                    { op: 'Update RBAC & Access Delegation', admin: true, dev: true, viewer: false },
+                    { op: 'Disaster Recovery Snapshots & Restore', admin: true, dev: true, viewer: false },
+                    { op: 'Teardown / Delete Virtual Cluster', admin: true, dev: false, viewer: false },
+                    { op: 'Manage Registries, Baselines & AI', admin: true, dev: false, viewer: false },
                   ].map((row, idx) => (
                     <tr key={idx} className="hover:bg-cyber-800/20">
                       <td className="py-2.5 font-sans font-medium text-slate-200">{row.op}</td>
@@ -1366,6 +1372,19 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>Allowed</span>
                         </span>
+                      </td>
+                      <td className="py-2.5">
+                        {row.dev ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-400">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Allowed</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-rose-400">
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Restricted</span>
+                          </span>
+                        )}
                       </td>
                       <td className="py-2.5">
                         {row.viewer ? (
@@ -1379,12 +1398,6 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                             <span>Restricted</span>
                           </span>
                         )}
-                      </td>
-                      <td className="py-2.5">
-                        <span className="inline-flex items-center gap-1 text-slate-500">
-                          <XCircle className="w-3.5 h-3.5" />
-                          <span>Denied (403)</span>
-                        </span>
                       </td>
                     </tr>
                   ))}
@@ -1457,22 +1470,26 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                     <Terminal className="w-4 h-4" />
                     <span>+ Deploy Custom App</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => openInstallModal('add-app')}
-                    className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-200 font-semibold text-xs rounded-xl border border-cyber-700 flex items-center gap-1.5 transition-all"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>+ Add to Store</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openInstallModal('create-group')}
-                    className="px-3.5 py-2 bg-purple-950/70 hover:bg-purple-900/70 text-purple-300 font-semibold text-xs rounded-xl border border-purple-800/80 flex items-center gap-1.5 transition-all"
-                  >
-                    <Layers className="w-4 h-4" />
-                    <span>+ Create App Group</span>
-                  </button>
+                  {isAdmin && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openInstallModal('add-app')}
+                        className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-200 font-semibold text-xs rounded-xl border border-cyber-700 flex items-center gap-1.5 transition-all"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>+ Add to Store</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openInstallModal('create-group')}
+                        className="px-3.5 py-2 bg-purple-950/70 hover:bg-purple-900/70 text-purple-300 font-semibold text-xs rounded-xl border border-purple-800/80 flex items-center gap-1.5 transition-all"
+                      >
+                        <Layers className="w-4 h-4" />
+                        <span>+ Create App Group</span>
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={async () => {
@@ -1955,14 +1972,16 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             onUpgradeSuccess={(updated) => setCluster(updated)}
           />
 
-          <DeleteModal
-            cluster={cluster}
-            isOpen={activeModal === 'delete'}
-            onClose={() => setActiveModal(null)}
-            onDeleteSuccess={() => {
-              window.location.href = '/';
-            }}
-          />
+          {isAdmin && (
+            <DeleteModal
+              cluster={cluster}
+              isOpen={activeModal === 'delete'}
+              onClose={() => setActiveModal(null)}
+              onDeleteSuccess={() => {
+                window.location.href = '/';
+              }}
+            />
+          )}
 
           <QuotaModal
             cluster={cluster}
@@ -2002,6 +2021,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             cluster={cluster}
             isOpen={activeModal === 'install-app'}
             initialTab={installAppTab}
+            isAdmin={isAdmin}
             onClose={() => setActiveModal(null)}
             onSuccess={async () => {
               await fetchCluster();

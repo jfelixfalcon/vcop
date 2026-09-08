@@ -25,8 +25,10 @@ import {
   Info,
   ChevronRight,
   Sparkles,
+  Zap,
+  Loader2,
 } from 'lucide-react';
-import type { AppDefinition, AppGroup, AppCategory, AppStoreCatalog, UserSession } from '../lib/types';
+import type { AppDefinition, AppGroup, AppCategory, AppStoreCatalog, UserSession, VirtualCluster } from '../lib/types';
 
 interface Props {
   currentUser?: UserSession | null;
@@ -95,6 +97,104 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
   const [groupAppIds, setGroupAppIds] = useState<string[]>([]);
 
   const isAdmin = currentUser?.role === 'admin';
+  const isDeveloper = currentUser?.role === 'developers' || currentUser?.role === 'developer';
+  const canDeployApps = isAdmin || isDeveloper;
+
+  // Deploy to Cluster Modal state
+  const [deployTargetApp, setDeployTargetApp] = useState<AppDefinition | null>(null);
+  const [deployTargetGroup, setDeployTargetGroup] = useState<AppGroup | null>(null);
+  const [isDeployModalOpen, setIsDeployModalOpen] = useState(false);
+  const [availableClusters, setAvailableClusters] = useState<VirtualCluster[]>([]);
+  const [selectedTargetCluster, setSelectedTargetCluster] = useState<string>('');
+  const [deployCustomValues, setDeployCustomValues] = useState<string>('');
+  const [deployNamespace, setDeployNamespace] = useState<string>('default');
+  const [deploying, setDeploying] = useState(false);
+  const [deploySuccessMessage, setDeploySuccessMessage] = useState<string | null>(null);
+  const [deployError, setDeployError] = useState<string | null>(null);
+
+  const fetchClusters = async () => {
+    try {
+      const res = await fetch('/api/vclusters');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setAvailableClusters(data.data);
+        if (data.data.length > 0) {
+          setSelectedTargetCluster((prev) => prev || data.data[0].name);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load clusters:', err);
+    }
+  };
+
+  const openDeployModal = (app: AppDefinition) => {
+    setDeployTargetApp(app);
+    setDeployTargetGroup(null);
+    setDeployCustomValues(app.helm?.values || '');
+    setDeployNamespace(app.helm?.namespace || 'default');
+    setDeploySuccessMessage(null);
+    setDeployError(null);
+    setIsDeployModalOpen(true);
+    fetchClusters();
+  };
+
+  const openDeployGroupModal = (group: AppGroup) => {
+    setDeployTargetGroup(group);
+    setDeployTargetApp(null);
+    setDeployCustomValues('');
+    setDeployNamespace('default');
+    setDeploySuccessMessage(null);
+    setDeployError(null);
+    setIsDeployModalOpen(true);
+    fetchClusters();
+  };
+
+  const handleExecuteDeploy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTargetCluster) {
+      setDeployError('Please select a target virtual cluster.');
+      return;
+    }
+
+    setDeploying(true);
+    setDeployError(null);
+
+    try {
+      let payload: any;
+      if (deployTargetApp) {
+        payload = {
+          namespace: deployNamespace.trim() || 'default',
+          apps: [{ appId: deployTargetApp.id, customValues: deployCustomValues }],
+        };
+      } else if (deployTargetGroup) {
+        payload = {
+          namespace: deployNamespace.trim() || 'default',
+          apps: deployTargetGroup.appIds.map((id) => ({ appId: id })),
+        };
+      } else {
+        return;
+      }
+
+      const res = await fetch(`/api/vclusters/${selectedTargetCluster}/apps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to deploy application(s) to cluster');
+      }
+
+      setDeploySuccessMessage(
+        `Successfully installed ${deployTargetApp ? deployTargetApp.name : deployTargetGroup?.name} to cluster ${selectedTargetCluster}!`
+      );
+    } catch (err: any) {
+      setDeployError(err.message || 'Deployment error');
+    } finally {
+      setDeploying(false);
+    }
+  };
 
   const fetchCatalog = async () => {
     try {
@@ -421,15 +521,32 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
                     {group.description}
                   </p>
 
-                  <div className="mt-3 pt-2.5 border-t border-cyber-800 flex flex-wrap gap-1.5 items-center">
-                    {group.appIds.map((id) => (
-                      <span
-                        key={id}
-                        className="px-2 py-0.5 bg-cyber-950 rounded border border-cyber-800 font-mono text-[10px] text-slate-300"
+                  <div className="mt-3 pt-2.5 border-t border-cyber-800 flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      {group.appIds.map((id) => (
+                        <span
+                          key={id}
+                          className="px-2 py-0.5 bg-cyber-950 rounded border border-cyber-800 font-mono text-[10px] text-slate-300"
+                        >
+                          {id}
+                        </span>
+                      ))}
+                    </div>
+
+                    {canDeployApps && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDeployGroupModal(group);
+                        }}
+                        className="px-2.5 py-1 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 text-[11px] font-semibold rounded-lg flex items-center gap-1 transition-all shrink-0"
+                        title="Deploy all apps in this pack to a cluster"
                       >
-                        {id}
-                      </span>
-                    ))}
+                        <Zap className="w-3 h-3 text-purple-400" />
+                        <span>Deploy Pack</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -631,13 +748,26 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
 
                 {/* Card Actions */}
                 <div className="pt-3 border-t border-cyber-800/80 flex items-center justify-between gap-2">
-                  <button
-                    onClick={() => openInspectModal(app)}
-                    className="px-3 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-slate-200 border border-cyber-700 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
-                  >
-                    <FileCode className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Inspect Config</span>
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => openInspectModal(app)}
+                      className="px-2.5 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-slate-200 border border-cyber-700 text-xs font-semibold rounded-xl flex items-center gap-1 transition-all"
+                    >
+                      <FileCode className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Inspect</span>
+                    </button>
+
+                    {canDeployApps && (
+                      <button
+                        onClick={() => openDeployModal(app)}
+                        className="px-2.5 py-1.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1 transition-all"
+                        title="Deploy this application to a virtual cluster"
+                      >
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>Deploy</span>
+                      </button>
+                    )}
+                  </div>
 
                   {isAdmin && (
                     <div className="flex items-center gap-1.5">
@@ -776,7 +906,21 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
               )}
             </div>
 
-            <div className="mt-5 pt-4 border-t border-cyber-800 flex justify-end">
+            <div className="mt-5 pt-4 border-t border-cyber-800 flex items-center justify-between">
+              {canDeployApps ? (
+                <button
+                  onClick={() => {
+                    const app = selectedApp;
+                    setActiveModal(null);
+                    if (app) openDeployModal(app);
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all"
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>Deploy to Virtual Cluster...</span>
+                </button>
+              ) : <div />}
+
               <button
                 onClick={() => setActiveModal(null)}
                 className="px-4 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-300 text-xs font-medium rounded-xl border border-cyber-700 transition-colors"
@@ -1183,6 +1327,184 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Deploy Application or Group to Cluster */}
+      {isDeployModalOpen && (deployTargetApp || deployTargetGroup) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-start mb-5">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                  <Zap className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    Deploy {deployTargetApp ? deployTargetApp.name : deployTargetGroup?.name}
+                    {deployTargetApp && (
+                      <span className="text-xs font-mono font-normal text-slate-400">
+                        v{deployTargetApp.version}
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {deployTargetApp
+                      ? deployTargetApp.description
+                      : `Pack bundling ${deployTargetGroup?.appIds.length} catalog applications.`}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsDeployModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-cyber-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {deployError && (
+              <div className="mb-4 p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{deployError}</span>
+              </div>
+            )}
+
+            {deploySuccessMessage ? (
+              <div className="py-6 space-y-4 text-center animate-in fade-in">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-white font-mono">Deployment Successful!</h4>
+                  <p className="text-xs text-slate-300 mt-1">{deploySuccessMessage}</p>
+                </div>
+                <div className="pt-2 flex justify-center gap-3">
+                  <a
+                    href={`/clusters/${selectedTargetCluster}`}
+                    className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all"
+                  >
+                    <span>View Cluster Applications</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                  <button
+                    onClick={() => {
+                      setIsDeployModalOpen(false);
+                      setDeploySuccessMessage(null);
+                    }}
+                    className="px-4 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-300 text-xs font-medium rounded-xl border border-cyber-700 transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleExecuteDeploy} className="overflow-y-auto space-y-4 flex-1 pr-1">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider font-mono mb-1.5">
+                    Target Virtual Cluster <span className="text-rose-400">*</span>
+                  </label>
+                  {availableClusters.length > 0 ? (
+                    <select
+                      value={selectedTargetCluster}
+                      onChange={(e) => setSelectedTargetCluster(e.target.value)}
+                      className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                      required
+                    >
+                      {availableClusters.map((c) => (
+                        <option key={c.name} value={c.name}>
+                          {c.name} ({c.status?.phase || 'Active'} • {c.metadata?.environment || 'dev'} • {c.spec?.distro || 'k3s'})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="p-3 bg-cyber-950 border border-cyber-800 rounded-xl text-xs text-amber-300 font-mono flex items-center justify-between">
+                      <span>No virtual clusters found in fleet.</span>
+                      <a href="/new" className="text-cyan-400 hover:underline">Provision one now &rarr;</a>
+                    </div>
+                  )}
+                </div>
+
+                {deployTargetApp?.helm && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider font-mono mb-1.5">
+                        Target Guest Namespace
+                      </label>
+                      <input
+                        type="text"
+                        value={deployNamespace}
+                        onChange={(e) => setDeployNamespace(e.target.value)}
+                        placeholder="default"
+                        className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">
+                          Custom values.yaml (Optional Override)
+                        </label>
+                        <span className="text-[10px] text-slate-500 font-mono">Helm Values</span>
+                      </div>
+                      <textarea
+                        value={deployCustomValues}
+                        onChange={(e) => setDeployCustomValues(e.target.value)}
+                        rows={6}
+                        placeholder="# Custom YAML values override for this installation"
+                        className="w-full bg-cyber-950 border border-cyber-700 rounded-xl p-3 text-xs font-mono text-slate-200 focus:outline-none focus:border-cyan-500 transition-colors leading-relaxed"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {deployTargetGroup && (
+                  <div className="p-3.5 bg-cyber-950 rounded-xl border border-cyber-800 space-y-2">
+                    <span className="text-xs font-mono text-purple-400 font-semibold block">
+                      Applications included in this pack:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {deployTargetGroup.appIds.map((id) => (
+                        <span
+                          key={id}
+                          className="px-2.5 py-1 bg-cyber-900 border border-cyber-700 rounded-lg text-xs font-mono text-white"
+                        >
+                          {id}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-5 pt-4 border-t border-cyber-800 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsDeployModalOpen(false)}
+                    className="px-4 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-300 text-xs font-medium rounded-xl border border-cyber-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={deploying || !selectedTargetCluster || availableClusters.length === 0}
+                    className="px-5 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-2 transition-all disabled:opacity-50"
+                  >
+                    {deploying ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Deploying...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4" />
+                        <span>Deploy Application</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

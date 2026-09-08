@@ -690,14 +690,14 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
-                        {canManage && (
+                        {isAdmin && (
                           <button
                             onClick={() => {
                               setSelectedCluster(cluster);
                               setActiveModal('delete');
                             }}
                             className="w-7 h-7 flex items-center justify-center shrink-0 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
-                            title="Delete Cluster"
+                            title="Delete Cluster (Admin Only)"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -915,14 +915,14 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
-                    {canManage && (
+                    {isAdmin && (
                       <button
                         onClick={() => {
                           setSelectedCluster(cluster);
                           setActiveModal('delete');
                         }}
                         className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors"
-                        title="Teardown Cluster"
+                        title="Teardown Cluster (Admin Only)"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -963,14 +963,16 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
             }}
           />
 
-          <DeleteModal
-            cluster={selectedCluster}
-            isOpen={activeModal === 'delete'}
-            onClose={() => setActiveModal(null)}
-            onDeleteSuccess={(deletedName) => {
-              setClusters((prev) => prev.filter((c) => c.name !== deletedName));
-            }}
-          />
+          {isAdmin && (
+            <DeleteModal
+              cluster={selectedCluster}
+              isOpen={activeModal === 'delete'}
+              onClose={() => setActiveModal(null)}
+              onDeleteSuccess={(deletedName) => {
+                setClusters((prev) => prev.filter((c) => c.name !== deletedName));
+              }}
+            />
+          )}
 
           <ClusterGroupModal
             cluster={groupModalTargetCluster}

@@ -154,7 +154,7 @@ const displayError = error ? (errorMessages[error] || decodeURIComponent(error))
               <span class="text-purple-400 font-bold">Admin:</span> Full platform control (provisioning, version registry, OIDC policies, baselines, AI models, and all cluster lifecycle operations).
             </div>
             <div class="p-2.5 rounded-lg bg-cyber-950/60 border border-cyber-800/60">
-              <span class="text-amber-400 font-bold">Developers:</span> Self-service cluster provisioning using predefined baselines, and full cluster management (quotas, RBAC, sleep/wake, apps, DR). Global platform registries, baselines, and AI models are read-only or restricted.
+              <span class="text-amber-400 font-bold">Developers:</span> Self-service cluster provisioning via predefined baselines, cluster management (quotas, RBAC, sleep/wake, DR), and catalog app deployments. Virtual cluster teardown is strictly locked (Admin only). Global registries, baselines, and AI models are restricted.
             </div>
             <div class="p-2.5 rounded-lg bg-cyber-950/60 border border-cyber-800/60">
               <span class="text-cyan-400 font-bold">Viewer:</span> View all virtual clusters and metrics, and retrieve kubeconfigs via "Connect". Cluster provisioning and modifications are blocked.

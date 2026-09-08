@@ -37,6 +37,7 @@ interface Props {
   onClose: () => void;
   onSuccess: (updatedApps: InstalledApp[]) => void;
   initialTab?: 'catalog' | 'direct' | 'add-app' | 'create-group';
+  isAdmin?: boolean;
 }
 
 const CATEGORIES: AppCategory[] = [
@@ -53,8 +54,10 @@ export const InstallAppModal: React.FC<Props> = ({
   onClose,
   onSuccess,
   initialTab = 'catalog',
+  isAdmin = false,
 }) => {
-  const [activeTab, setActiveTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>(initialTab);
+  const effectiveTab = (!isAdmin && (initialTab === 'add-app' || initialTab === 'create-group')) ? 'catalog' : initialTab;
+  const [activeTab, setActiveTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>(effectiveTab);
   const [catalog, setCatalog] = useState<AppStoreCatalog | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -241,8 +244,8 @@ export const InstallAppModal: React.FC<Props> = ({
         manifests: directHasManifests && directManifests.trim() ? directManifests.trim() : undefined,
       };
 
-      // 1. Save to App Store if checkbox is checked
-      if (directSaveToStore) {
+      // 1. Save to App Store if checkbox is checked and user is admin
+      if (isAdmin && directSaveToStore) {
         await fetch('/api/appstore/apps', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -451,31 +454,35 @@ export const InstallAppModal: React.FC<Props> = ({
             <span>Deploy Custom App</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('add-app')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              activeTab === 'add-app'
-                ? 'bg-cyan-500 text-slate-950 font-bold shadow-glow-sm'
-                : 'bg-cyber-950 text-slate-400 hover:text-white border border-cyber-800'
-            }`}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>+ Add App to Store</span>
-          </button>
+          {isAdmin && (
+            <>
+              <button
+                type="button"
+                onClick={() => setActiveTab('add-app')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                  activeTab === 'add-app'
+                    ? 'bg-cyan-500 text-slate-950 font-bold shadow-glow-sm'
+                    : 'bg-cyber-950 text-slate-400 hover:text-white border border-cyber-800'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ Add App to Store</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('create-group')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
-              activeTab === 'create-group'
-                ? 'bg-purple-500 text-slate-950 font-bold shadow-glow-sm'
-                : 'bg-cyber-950 text-purple-300 hover:text-white border border-cyber-800'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>+ Create Group</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('create-group')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                  activeTab === 'create-group'
+                    ? 'bg-purple-500 text-slate-950 font-bold shadow-glow-sm'
+                    : 'bg-cyber-950 text-purple-300 hover:text-white border border-cyber-800'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>+ Create Group</span>
+              </button>
+            </>
+          )}
         </div>
 
         {error && (
@@ -890,20 +897,22 @@ export const InstallAppModal: React.FC<Props> = ({
               </div>
             )}
 
-            {/* Save to Store Checkbox */}
-            <div className="p-3 bg-cyber-950 rounded-xl border border-cyber-800">
-              <label className="flex items-center gap-2.5 cursor-pointer text-xs text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={directSaveToStore}
-                  onChange={(e) => setDirectSaveToStore(e.target.checked)}
-                  className="rounded border-cyber-700 bg-cyber-900 text-cyan-500 focus:ring-cyan-500 w-4 h-4"
-                />
-                <span className="font-semibold text-white">
-                  Also publish to App Store Catalog (reusable across all virtual clusters)
-                </span>
-              </label>
-            </div>
+            {/* Save to Store Checkbox (Admin Only) */}
+            {isAdmin && (
+              <div className="p-3 bg-cyber-950 rounded-xl border border-cyber-800">
+                <label className="flex items-center gap-2.5 cursor-pointer text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={directSaveToStore}
+                    onChange={(e) => setDirectSaveToStore(e.target.checked)}
+                    className="rounded border-cyber-700 bg-cyber-900 text-cyan-500 focus:ring-cyan-500 w-4 h-4"
+                  />
+                  <span className="font-semibold text-white">
+                    Also publish to App Store Catalog (reusable across all virtual clusters)
+                  </span>
+                </label>
+              </div>
+            )}
 
             {/* Submit Actions */}
             <div className="pt-3 border-t border-cyber-800 flex justify-end gap-3">

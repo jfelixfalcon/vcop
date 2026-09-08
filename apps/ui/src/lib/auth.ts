@@ -529,6 +529,22 @@ export function canUserCreateCluster(user: UserSession): boolean {
 }
 
 /**
+ * Evaluates whether a user is authorized to DELETE virtual clusters.
+ * Strictly restricted to Admins. Developers CANNOT delete vclusters.
+ */
+export function canUserDeleteCluster(user: UserSession): boolean {
+  return user.role === 'admin';
+}
+
+/**
+ * Evaluates whether a user is authorized to deploy applications from the catalog.
+ * Allowed for Admins and Developers. Viewers CANNOT deploy applications.
+ */
+export function canUserDeployApps(user: UserSession): boolean {
+  return user.role === 'admin' || user.role === 'developers' || user.role === 'developer';
+}
+
+/**
  * Evaluates whether a user is an administrator.
  */
 export function isUserAdmin(user: UserSession): boolean {
