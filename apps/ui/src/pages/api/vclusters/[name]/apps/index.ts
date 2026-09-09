@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { getInstalledApps, installAppsToCluster, syncClusterApps } from '../../../../../lib/cluster-apps';
 import { getVirtualCluster } from '../../../../../lib/k8s-client';
 import { canUserViewCluster, canUserManageCluster, canUserDeployApps } from '../../../../../lib/auth';
+import { recordAuditLog } from '../../../../../lib/audit-logger';
 
 export const GET: APIRoute = async ({ params, locals }) => {
   const { name } = params;
@@ -81,6 +82,19 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
 
     if (action === 'sync') {
       const synced = await syncClusterApps(name, namespace);
+      await recordAuditLog({
+        action: 'CLUSTER_APP_SYNC',
+        category: 'APP',
+        resourceType: 'virtualcluster',
+        resourceName: name,
+        username: user.username,
+        userRole: user.role,
+        userId: user.id,
+        status: 'SUCCESS',
+        details: { clusterName: name },
+        request,
+      });
+
       return new Response(
         JSON.stringify({
           success: true,
@@ -105,6 +119,22 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
     }
 
     const updatedApps = await installAppsToCluster(name, apps, user, namespace);
+
+    await recordAuditLog({
+      action: 'CLUSTER_APP_INSTALL',
+      category: 'APP',
+      resourceType: 'virtualcluster',
+      resourceName: name,
+      username: user.username,
+      userRole: user.role,
+      userId: user.id,
+      status: 'SUCCESS',
+      details: {
+        clusterName: name,
+        appsInstalled: apps.map((a) => a.appId),
+      },
+      request,
+    });
 
     return new Response(
       JSON.stringify({

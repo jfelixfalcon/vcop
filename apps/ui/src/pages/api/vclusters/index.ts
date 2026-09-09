@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { listVirtualClusters, createVirtualCluster } from '../../../lib/k8s-client';
 import { canUserViewCluster, isUserAdmin, isUserDeveloper } from '../../../lib/auth';
 import { getVersionRegistry, getMissingCoreComponents } from '../../../lib/version-registry';
+import { recordAuditLog } from '../../../lib/audit-logger';
 
 export const GET: APIRoute = async ({ locals }) => {
   try {
@@ -98,11 +99,46 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     const cluster = await createVirtualCluster(body);
+
+    await recordAuditLog({
+      action: 'CLUSTER_CREATE',
+      category: 'CLUSTER',
+      resourceType: 'virtualcluster',
+      resourceName: cluster.name,
+      username: user.username,
+      userRole: user.role,
+      userId: user.id,
+      status: 'SUCCESS',
+      details: {
+        clusterName: cluster.name,
+        namespace: cluster.namespace,
+        baselineId: body.baselineId,
+        preset: body.preset,
+        environment: body.environment,
+        appsCount: body.installedApps?.length || 0,
+        owner: body.owner,
+      },
+      request,
+    });
+
     return new Response(JSON.stringify({ success: true, data: cluster }), {
       status: 201,
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error: any) {
+    await recordAuditLog({
+      action: 'CLUSTER_CREATE_FAILED',
+      category: 'CLUSTER',
+      resourceType: 'virtualcluster',
+      resourceName: 'unknown',
+      username: user.username,
+      userRole: user.role,
+      userId: user.id,
+      status: 'FAILURE',
+      details: { error: error.message },
+      request,
+    });
+
     return new Response(JSON.stringify({ success: false, error: error.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },

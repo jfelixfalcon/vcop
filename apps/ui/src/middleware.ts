@@ -1,6 +1,7 @@
 import { defineMiddleware } from 'astro:middleware';
 import { SESSION_COOKIE_NAME, verifySessionToken, authLog, isAuthDebug } from './lib/auth';
 import { startMetricsDaemon } from './lib/metrics-collector';
+import { recordAuditLog } from './lib/audit-logger';
 
 // Start continuous background telemetry & metrics collection to PostgreSQL
 startMetricsDaemon();
@@ -60,6 +61,18 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
     if (pathname.startsWith('/api/')) {
       authLog(`[Middleware] Unauthorized API call to ${pathname}`);
+      recordAuditLog({
+        action: 'API_UNAUTHORIZED',
+        category: 'SECURITY',
+        resourceType: 'api',
+        resourceName: pathname,
+        username: 'anonymous',
+        userRole: 'none',
+        status: 'FAILURE',
+        details: { path: pathname, method: request.method },
+        request,
+      });
+
       return new Response(
         JSON.stringify({ success: false, error: 'Unauthorized: Authentication required' }),
         {
@@ -89,6 +102,18 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (pathname === '/new' || pathname.startsWith('/new/')) {
     if (isViewer) {
       authLog(`[Middleware] Blocking viewer from accessing provisioning wizard ${pathname}`);
+      recordAuditLog({
+        action: 'ACCESS_DENIED',
+        category: 'SECURITY',
+        resourceType: 'ui_page',
+        resourceName: pathname,
+        username: user.username,
+        userRole: user.role,
+        userId: user.id,
+        status: 'FAILURE',
+        details: { path: pathname, reason: 'viewer_cannot_provision' },
+        request,
+      });
       return context.redirect('/?denied=admin_required');
     }
   }
@@ -100,6 +125,19 @@ export const onRequest = defineMiddleware(async (context, next) => {
     const isBaselinesRead = pathname === '/api/admin/baselines' && request.method.toUpperCase() === 'GET';
     if (!isAdmin && !isBaselinesRead) {
       authLog(`[Middleware] Blocking non-admin user (${user.username}, role=${user.role}) from admin route ${request.method} ${pathname}`);
+      recordAuditLog({
+        action: 'ACCESS_DENIED',
+        category: 'SECURITY',
+        resourceType: 'admin_route',
+        resourceName: pathname,
+        username: user.username,
+        userRole: user.role,
+        userId: user.id,
+        status: 'FAILURE',
+        details: { path: pathname, method: request.method, reason: 'admin_required' },
+        request,
+      });
+
       if (pathname.startsWith('/api/')) {
         return new Response(
           JSON.stringify({
@@ -165,6 +203,19 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (method === 'DELETE' && /^\/api\/vclusters\/[^/]+$/.test(pathname)) {
     if (!isAdmin) {
       authLog(`[Middleware] Blocking non-admin ${user.username} (role=${user.role}) from deleting cluster ${pathname}`);
+      recordAuditLog({
+        action: 'CLUSTER_DELETE_DENIED',
+        category: 'SECURITY',
+        resourceType: 'virtualcluster',
+        resourceName: pathname,
+        username: user.username,
+        userRole: user.role,
+        userId: user.id,
+        status: 'FAILURE',
+        details: { reason: 'developer_cannot_delete_vcluster', path: pathname },
+        request,
+      });
+
       return new Response(
         JSON.stringify({
           success: false,
@@ -182,6 +233,19 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (isViewer) {
       if (pathname.startsWith('/api/vclusters')) {
         authLog(`[Middleware] Blocking viewer ${user.username} from mutating ${method} ${pathname}`);
+        recordAuditLog({
+          action: 'MUTATION_DENIED',
+          category: 'SECURITY',
+          resourceType: 'virtualcluster',
+          resourceName: pathname,
+          username: user.username,
+          userRole: user.role,
+          userId: user.id,
+          status: 'FAILURE',
+          details: { reason: 'viewer_read_only', method, path: pathname },
+          request,
+        });
+
         return new Response(
           JSON.stringify({
             success: false,

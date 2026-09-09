@@ -663,3 +663,45 @@ export interface StorageClassInfo {
   allowVolumeExpansion?: boolean;
 }
 
+export type AuditCategory = 'AUTH' | 'CLUSTER' | 'APP' | 'ADMIN' | 'SECURITY' | 'SYSTEM';
+export type AuditStatus = 'SUCCESS' | 'FAILURE' | 'WARNING';
+
+export interface AuditEvent {
+  id: string | number;
+  timestamp: string; // ISO 8601
+  userId?: string;
+  username: string;
+  userRole: string;
+  action: string;
+  category: AuditCategory;
+  resourceType: string;
+  resourceName?: string;
+  status: AuditStatus;
+  details?: Record<string, any>;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+export interface AuditLogQueryFilters {
+  search?: string;
+  category?: AuditCategory | 'ALL';
+  status?: AuditStatus | 'ALL';
+  username?: string;
+  resourceType?: string;
+  resourceName?: string;
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AuditLogStats {
+  totalEvents: number;
+  totalLogins: number;
+  failedLogins: number;
+  clusterMutations: number;
+  activeUsersCount: number;
+  recentActivityDistribution: Record<AuditCategory, number>;
+}
+
+

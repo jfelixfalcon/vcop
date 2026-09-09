@@ -2,8 +2,9 @@ import type { APIRoute } from 'astro';
 import { uninstallAppFromCluster } from '../../../../../lib/cluster-apps';
 import { getVirtualCluster } from '../../../../../lib/k8s-client';
 import { canUserViewCluster } from '../../../../../lib/auth';
+import { recordAuditLog } from '../../../../../lib/audit-logger';
 
-export const DELETE: APIRoute = async ({ params, locals }) => {
+export const DELETE: APIRoute = async ({ params, locals, request }) => {
   const user = locals.user;
   const { name, appId } = params;
   if (!name || !appId) {
@@ -36,6 +37,21 @@ export const DELETE: APIRoute = async ({ params, locals }) => {
 
   try {
     const remainingApps = await uninstallAppFromCluster(name, appId);
+
+    if (user) {
+      await recordAuditLog({
+        action: 'CLUSTER_APP_UNINSTALL',
+        category: 'APP',
+        resourceType: 'virtualcluster',
+        resourceName: name,
+        username: user.username,
+        userRole: user.role,
+        userId: user.id,
+        status: 'SUCCESS',
+        details: { clusterName: name, uninstalledAppId: appId },
+        request,
+      });
+    }
 
     return new Response(
       JSON.stringify({

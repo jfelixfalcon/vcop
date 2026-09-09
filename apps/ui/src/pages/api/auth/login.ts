@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { validateBreakglass, createSessionToken, SESSION_COOKIE_NAME } from '../../../lib/auth';
+import { recordAuditLog } from '../../../lib/audit-logger';
 
 export const POST: APIRoute = async ({ request, cookies, redirect }) => {
   try {
@@ -20,6 +21,18 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
     }
 
     if (!username || !password) {
+      await recordAuditLog({
+        action: 'LOGIN_FAILED',
+        category: 'AUTH',
+        resourceType: 'auth',
+        resourceName: 'local',
+        username: username || 'anonymous',
+        userRole: 'unknown',
+        status: 'FAILURE',
+        details: { reason: 'missing_credentials' },
+        request,
+      });
+
       if (isFormData) {
         return redirect('/login?error=missing_credentials');
       }
@@ -31,6 +44,18 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
 
     const user = validateBreakglass(username, password);
     if (!user) {
+      await recordAuditLog({
+        action: 'LOGIN_FAILED',
+        category: 'AUTH',
+        resourceType: 'auth',
+        resourceName: 'local',
+        username,
+        userRole: 'unknown',
+        status: 'FAILURE',
+        details: { reason: 'invalid_credentials' },
+        request,
+      });
+
       if (isFormData) {
         return redirect('/login?error=invalid_credentials');
       }
@@ -39,6 +64,23 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+
+    await recordAuditLog({
+      action: 'LOGIN_SUCCESS',
+      category: 'AUTH',
+      resourceType: 'auth',
+      resourceName: 'local',
+      username: user.username,
+      userRole: user.role,
+      userId: user.id,
+      status: 'SUCCESS',
+      details: {
+        method: user.method,
+        email: user.email,
+        role: user.role,
+      },
+      request,
+    });
 
     const token = createSessionToken(user);
     cookies.set(SESSION_COOKIE_NAME, token, {

@@ -9,6 +9,7 @@ import {
   upgradeVirtualCluster,
 } from '../../../../lib/k8s-client';
 import { canUserViewCluster, canUserManageCluster, canUserDeleteCluster } from '../../../../lib/auth';
+import { recordAuditLog } from '../../../../lib/audit-logger';
 
 export const GET: APIRoute = async ({ params, locals }) => {
   const { name } = params;
@@ -103,6 +104,43 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
       );
     }
 
+    // Determine specific action type
+    let auditAction = 'CLUSTER_UPDATE';
+    if (sleep !== undefined || paused !== undefined) {
+      auditAction = Boolean(sleep ?? paused) ? 'CLUSTER_SLEEP' : 'CLUSTER_WAKE';
+    } else if (policies) {
+      auditAction = 'CLUSTER_UPDATE_QUOTA';
+    } else if (rbac || owner !== undefined || allowedGroups !== undefined || allowedEmails !== undefined) {
+      auditAction = 'CLUSTER_UPDATE_RBAC';
+    } else if (clusterGroups !== undefined || clusterGroup !== undefined) {
+      auditAction = 'CLUSTER_UPDATE_GROUPS';
+    } else if (body.kubernetesVersion || body.vclusterVersion) {
+      auditAction = 'CLUSTER_UPGRADE';
+    }
+
+    await recordAuditLog({
+      action: auditAction,
+      category: 'CLUSTER',
+      resourceType: 'virtualcluster',
+      resourceName: name,
+      username: user.username,
+      userRole: user.role,
+      userId: user.id,
+      status: 'SUCCESS',
+      details: {
+        clusterName: name,
+        namespace,
+        updates: {
+          sleep: sleep !== undefined || paused !== undefined ? Boolean(sleep ?? paused) : undefined,
+          hasPolicies: Boolean(policies),
+          hasRbac: Boolean(rbac || owner || allowedGroups || allowedEmails),
+          hasGroups: Boolean(clusterGroups !== undefined || clusterGroup !== undefined),
+          upgrade: body.kubernetesVersion || body.vclusterVersion ? { k8s: body.kubernetesVersion, vcluster: body.vclusterVersion } : undefined,
+        },
+      },
+      request,
+    });
+
     return new Response(JSON.stringify({ success: true, data: updated }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -115,7 +153,7 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
   }
 };
 
-export const DELETE: APIRoute = async ({ params, locals }) => {
+export const DELETE: APIRoute = async ({ params, locals, request }) => {
   const user = locals.user;
   if (!user || !canUserDeleteCluster(user)) {
     return new Response(
@@ -145,6 +183,19 @@ export const DELETE: APIRoute = async ({ params, locals }) => {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  await recordAuditLog({
+    action: 'CLUSTER_DELETE',
+    category: 'CLUSTER',
+    resourceType: 'virtualcluster',
+    resourceName: name,
+    username: user.username,
+    userRole: user.role,
+    userId: user.id,
+    status: 'SUCCESS',
+    details: { clusterName: name },
+    request,
+  });
 
   return new Response(JSON.stringify({ success: true, message: `Cluster ${name} scheduled for teardown` }), {
     status: 200,

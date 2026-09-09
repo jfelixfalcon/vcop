@@ -10,6 +10,7 @@ import {
   authLog,
   type UserSession,
 } from '../../../lib/auth';
+import { recordAuditLog } from '../../../lib/audit-logger';
 
 /**
  * Universal OIDC Callback Handler
@@ -123,6 +124,19 @@ async function handleCallback(context: {
         maxAge: 86400, // 24 hours
       });
 
+      await recordAuditLog({
+        action: 'OIDC_LOGIN_SUCCESS',
+        category: 'AUTH',
+        resourceType: 'auth',
+        resourceName: 'oidc-token',
+        username: user.username,
+        userRole: user.role,
+        userId: user.id,
+        status: 'SUCCESS',
+        details: { method: 'oidc-token', email: user.email, groups: user.groups },
+        request,
+      });
+
       console.log(`[OIDC] Session cookie created (${SESSION_COOKIE_NAME}, length=${sessionToken.length} bytes). Redirecting authenticated browser session to /`);
       authLog('Direct token authentication succeeded. User:', user.username, 'Role:', user.role);
 
@@ -136,6 +150,18 @@ async function handleCallback(context: {
       return redirect('/');
     } catch (err: any) {
       console.error('[AUTH-DEBUG] Direct token authentication failed:', err);
+      await recordAuditLog({
+        action: 'OIDC_LOGIN_FAILED',
+        category: 'AUTH',
+        resourceType: 'auth',
+        resourceName: 'oidc-token',
+        username: 'unknown',
+        userRole: 'unknown',
+        status: 'FAILURE',
+        details: { error: err.message || 'token_authentication_failed' },
+        request,
+      });
+
       if (isJsonRequest) {
         return new Response(
           JSON.stringify({ success: false, error: err.message || 'token_authentication_failed' }),
@@ -164,6 +190,18 @@ async function handleCallback(context: {
     // Validate state if previously generated
     if (savedState && state && savedState !== state) {
       console.warn('[AUTH-DEBUG] OIDC state verification failed:', { savedState, receivedState: state });
+      await recordAuditLog({
+        action: 'OIDC_LOGIN_FAILED',
+        category: 'AUTH',
+        resourceType: 'auth',
+        resourceName: 'oidc-code',
+        username: 'unknown',
+        userRole: 'unknown',
+        status: 'FAILURE',
+        details: { error: 'invalid_state' },
+        request,
+      });
+
       if (isJsonRequest) {
         return new Response(JSON.stringify({ success: false, error: 'invalid_state' }), {
           status: 400,
@@ -187,6 +225,19 @@ async function handleCallback(context: {
         maxAge: 86400, // 24 hours
       });
 
+      await recordAuditLog({
+        action: 'OIDC_LOGIN_SUCCESS',
+        category: 'AUTH',
+        resourceType: 'auth',
+        resourceName: 'oidc-code',
+        username: user.username,
+        userRole: user.role,
+        userId: user.id,
+        status: 'SUCCESS',
+        details: { method: 'oidc', email: user.email, groups: user.groups },
+        request,
+      });
+
       if (isJsonRequest) {
         return new Response(JSON.stringify({ success: true, user, redirect: '/' }), {
           status: 200,
@@ -198,6 +249,18 @@ async function handleCallback(context: {
       return redirect('/');
     } catch (err: any) {
       console.error('[AUTH-DEBUG] OIDC code exchange failed:', err);
+      await recordAuditLog({
+        action: 'OIDC_LOGIN_FAILED',
+        category: 'AUTH',
+        resourceType: 'auth',
+        resourceName: 'oidc-code',
+        username: 'unknown',
+        userRole: 'unknown',
+        status: 'FAILURE',
+        details: { error: err.message || 'oidc_exchange_failed' },
+        request,
+      });
+
       if (isJsonRequest) {
         return new Response(
           JSON.stringify({ success: false, error: err.message || 'oidc_exchange_failed' }),

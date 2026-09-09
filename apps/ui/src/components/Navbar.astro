@@ -16,6 +16,7 @@ import {
   Terminal,
   Bot,
   Sliders,
+  History,
 } from 'lucide-react';
 
 const pathname = Astro.url.pathname;
@@ -28,6 +29,7 @@ const canCreate = isAdmin || isDeveloper;
 const isClustersActive = pathname === '/' || pathname.startsWith('/clusters');
 const isCapacityActive = pathname.startsWith('/capacity');
 const isAppsActive = pathname.startsWith('/apps');
+const isAuditActive = pathname === '/audit' || pathname.startsWith('/audit') || pathname.startsWith('/admin/audit');
 const isVersionsActive = pathname.startsWith('/admin/versions');
 const isOidcActive = pathname.startsWith('/admin/oidc');
 const isAiActive = pathname.startsWith('/admin/ai');
@@ -46,6 +48,8 @@ if (pathname.startsWith('/clusters/')) {
   currentSection = 'Capacity & Headroom';
 } else if (isAppsActive) {
   currentSection = 'App Catalog';
+} else if (isAuditActive) {
+  currentSection = 'Audit Trail';
 } else if (isVersionsActive) {
   currentSection = 'Version Registry';
 } else if (isOidcActive) {
@@ -211,6 +215,13 @@ if (pathname.startsWith('/clusters/')) {
                 <Package class="w-3.5 h-3.5 text-slate-400" />
                 <span>App Store</span>
               </a>
+              <a
+                href="/audit"
+                class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono"
+              >
+                <History class="w-3.5 h-3.5 text-cyan-400" />
+                <span>Audit Trail</span>
+              </a>
               {isAdmin && (
                 <a
                   href="/admin/versions"
@@ -325,6 +336,19 @@ if (pathname.startsWith('/clusters/')) {
           <span>App Catalog</span>
         </a>
 
+        <!-- Audit Trail -->
+        <a
+          href="/audit"
+          class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
+            isAuditActive
+              ? 'bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-900/60 border border-transparent'
+          }`}
+        >
+          <History class={`w-3.5 h-3.5 transition-colors ${isAuditActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+          <span>Audit Trail</span>
+        </a>
+
         {isAdmin && (
           <div class="h-4 w-px bg-cyber-800/80 my-auto mx-1"></div>
         )}
@@ -406,6 +430,10 @@ if (pathname.startsWith('/clusters/')) {
     <a href="/apps" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
       <Package class="w-4 h-4 text-purple-400" />
       <span>App Store</span>
+    </a>
+    <a href="/audit" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
+      <History class="w-4 h-4 text-cyan-400" />
+      <span>Audit Trail</span>
     </a>
     {isAdmin && (
       <>

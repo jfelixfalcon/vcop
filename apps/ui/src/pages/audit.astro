@@ -1,0 +1,15 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { AuditLogsViewer } from '../components/AuditLogsViewer';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login?redirect=/audit');
+}
+---
+
+<Layout title="Audit Trail & Activity Logs - vCluster Operations Center">
+  <div class="space-y-6">
+    <AuditLogsViewer client:load currentUser={user} />
+  </div>
+</Layout>
