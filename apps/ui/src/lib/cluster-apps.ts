@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { InstalledApp, VirtualCluster, UserSession, AppDefinition } from './types';
 import { getAppStoreCatalog } from './appstore';
-import { k8sRequest, getVirtualCluster, getKubeconfig } from './k8s-client';
+import { k8sRequest, getVirtualCluster, getKubeconfig, compactInstalledAppsForAnnotation, sanitizeAnnotations } from './k8s-client';
 
 const execFileAsync = promisify(execFile);
 
@@ -78,12 +78,22 @@ export async function executeAppDeployment(
     fs.writeFileSync(kcPath, internalKc, { mode: 0o600 });
 
     // 1. Deploy manifests if defined
-    if (app.manifests && app.manifests.trim()) {
+    let manifests = app.manifests;
+    if ((!manifests || !manifests.trim()) && app.appId) {
+      try {
+        const catalog = await getAppStoreCatalog();
+        manifests = catalog.apps.find((a) => a.id === app.appId)?.manifests;
+      } catch (err: any) {
+        console.warn(`Failed to lookup manifests from catalog for app ${app.appId}:`, err?.message);
+      }
+    }
+
+    if (manifests && manifests.trim()) {
       const manifestsPath = path.join(tempDir, 'manifests.yaml');
-      fs.writeFileSync(manifestsPath, app.manifests.trim(), 'utf8');
+      fs.writeFileSync(manifestsPath, manifests.trim(), 'utf8');
 
       // Pre-create any non-default namespaces referenced in manifests
-      const nsMatches = Array.from(app.manifests.matchAll(/^\s*namespace:\s*([a-z0-9-]+)/gim)).map((m) => m[1]);
+      const nsMatches = Array.from(manifests.matchAll(/^\s*namespace:\s*([a-z0-9-]+)/gim)).map((m) => m[1]);
       const uniqueNamespaces = Array.from(new Set(nsMatches)).filter((n) => n && n !== 'default' && n !== 'kube-system');
       for (const ns of uniqueNamespaces) {
         try {
@@ -92,10 +102,14 @@ export async function executeAppDeployment(
       }
 
       try {
-        const res = await execFileAsync('kubectl', ['--kubeconfig', kcPath, '--namespace', guestNamespace, 'apply', '-f', manifestsPath], {
-          env: defaultEnv,
-          timeout: 60000,
-        });
+        const res = await execFileAsync(
+          'kubectl',
+          ['--kubeconfig', kcPath, '--namespace', guestNamespace, 'apply', '--server-side', '--force-conflicts', '-f', manifestsPath],
+          {
+            env: defaultEnv,
+            timeout: 60000,
+          }
+        );
         const parsed = parseKubectlOutput(res.stdout || '');
         resourcesCreated.push(...parsed);
       } catch (err: any) {
@@ -185,9 +199,19 @@ export async function executeAppUninstall(
     fs.writeFileSync(kcPath, internalKc, { mode: 0o600 });
 
     // 1. Delete manifests if present
-    if (app.manifests && app.manifests.trim()) {
+    let manifests = app.manifests;
+    if ((!manifests || !manifests.trim()) && app.appId) {
+      try {
+        const catalog = await getAppStoreCatalog();
+        manifests = catalog.apps.find((a) => a.id === app.appId)?.manifests;
+      } catch (err: any) {
+        console.warn(`Failed to lookup manifests from catalog for uninstall ${app.appId}:`, err?.message);
+      }
+    }
+
+    if (manifests && manifests.trim()) {
       const manifestsPath = path.join(tempDir, 'manifests.yaml');
-      fs.writeFileSync(manifestsPath, app.manifests.trim(), 'utf8');
+      fs.writeFileSync(manifestsPath, manifests.trim(), 'utf8');
       try {
         await execFileAsync('kubectl', ['--kubeconfig', kcPath, '--namespace', guestNamespace, 'delete', '-f', manifestsPath, '--ignore-not-found=true'], {
           env: defaultEnv,
@@ -314,11 +338,11 @@ export async function installAppsToCluster(
 
   const cr = getRes.data;
   const annotations = cr.metadata?.annotations || {};
-  annotations[INSTALLED_APPS_ANNOTATION] = JSON.stringify(updatedAppsList);
+  annotations[INSTALLED_APPS_ANNOTATION] = JSON.stringify(compactInstalledAppsForAnnotation(updatedAppsList));
 
   const patch = {
     metadata: {
-      annotations,
+      annotations: sanitizeAnnotations(annotations),
     },
   };
 
@@ -379,11 +403,11 @@ export async function uninstallAppFromCluster(
 
   const cr = getRes.data;
   const annotations = cr.metadata?.annotations || {};
-  annotations[INSTALLED_APPS_ANNOTATION] = JSON.stringify(updatedAppsList);
+  annotations[INSTALLED_APPS_ANNOTATION] = JSON.stringify(compactInstalledAppsForAnnotation(updatedAppsList));
 
   const patch = {
     metadata: {
-      annotations,
+      annotations: sanitizeAnnotations(annotations),
     },
   };
 
@@ -453,11 +477,11 @@ export async function syncClusterApps(
   if (getRes.statusCode === 200 && getRes.data) {
     const cr = getRes.data;
     const annotations = cr.metadata?.annotations || {};
-    annotations[INSTALLED_APPS_ANNOTATION] = JSON.stringify(updatedApps);
+    annotations[INSTALLED_APPS_ANNOTATION] = JSON.stringify(compactInstalledAppsForAnnotation(updatedApps));
     await k8sRequest(
       `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${clusterName}`,
       'PATCH',
-      { metadata: { annotations } },
+      { metadata: { annotations: sanitizeAnnotations(annotations) } },
       'application/merge-patch+json'
     );
   }

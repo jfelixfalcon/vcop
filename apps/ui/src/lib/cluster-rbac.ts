@@ -81,9 +81,9 @@ export async function syncGuestClusterRBAC(
         }
       }
 
-      // 3. Allowed groups
+      // 3. Allowed groups (capped at 50 to prevent massive RBAC manifests)
       if (allowedGroups && Array.isArray(allowedGroups)) {
-        for (const grp of allowedGroups) {
+        for (const grp of allowedGroups.slice(0, 50)) {
           const trimmed = grp.trim();
           if (trimmed) {
             const key = `Group:${trimmed}`;
@@ -133,7 +133,7 @@ ${subjectsYaml}
       const manifestPath = path.join(tempDir, 'crb.yaml');
       fs.writeFileSync(manifestPath, manifest, 'utf8');
 
-      await execFileAsync('kubectl', ['--kubeconfig', kcPath, 'apply', '-f', manifestPath], {
+      await execFileAsync('kubectl', ['--kubeconfig', kcPath, 'apply', '--server-side', '--force-conflicts', '-f', manifestPath], {
         timeout: 15000,
       });
 

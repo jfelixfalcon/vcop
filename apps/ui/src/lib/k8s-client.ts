@@ -443,6 +443,139 @@ export async function getVirtualClusterEvents(namespace: string, name: string): 
   return [];
 }
 
+/**
+ * Compacts installed app metadata for safe persistence inside Kubernetes metadata.annotations.
+ * Strips bulky raw YAML manifests and raw Helm custom values, keeping only essential metadata,
+ * status, Helm release references, and created resource names.
+ */
+export function compactInstalledAppsForAnnotation(apps: InstalledApp[]): InstalledApp[] {
+  return apps.map((app) => ({
+    appId: app.appId,
+    name: app.name,
+    version: app.version,
+    category: app.category,
+    installedAt: app.installedAt,
+    installedBy: app.installedBy,
+    status: app.status,
+    error: app.error ? String(app.error).slice(0, 300) : undefined,
+    helm: app.helm
+      ? {
+          name: app.helm.name,
+          repo: app.helm.repo,
+          version: app.helm.version,
+          releaseName: app.helm.releaseName,
+          namespace: app.helm.namespace,
+        }
+      : undefined,
+    resourcesCreated: app.resourcesCreated,
+  }));
+}
+
+/**
+ * Ensures metadata.annotations stay well within the Kubernetes hard limit of 262,144 bytes (256 KiB).
+ * Strips duplicate CA certificates, truncates excessive group lists, compacts installed apps,
+ * and prunes non-critical annotations if total payload size approaches the limit.
+ */
+export function sanitizeAnnotations(annotations: Record<string, string | null | undefined>): Record<string, string | null> {
+  const result: Record<string, string | null> = {};
+  for (const [k, v] of Object.entries(annotations)) {
+    if (v === null) {
+      result[k] = null;
+    } else if (v !== undefined) {
+      result[k] = String(v);
+    }
+  }
+
+  // 1. CA Certificate Deduplication
+  // If custom-ca-cert is present and non-empty, remove redundant oidc-ca-cert
+  if (result['vops.gitops.io/custom-ca-cert'] && result['vops.gitops.io/oidc-ca-cert']) {
+    delete result['vops.gitops.io/oidc-ca-cert'];
+  }
+
+  // 2. Strip redundant caCertificate embedded inside oidc-config JSON
+  if (typeof result['vops.gitops.io/oidc-config'] === 'string') {
+    try {
+      const parsed = JSON.parse(result['vops.gitops.io/oidc-config']);
+      if (
+        parsed.caCertificate &&
+        (result['vops.gitops.io/custom-ca-cert'] ||
+          result['vops.gitops.io/oidc-ca-cert'] ||
+          parsed.caSecretName ||
+          parsed.caConfigMapName)
+      ) {
+        delete parsed.caCertificate;
+        result['vops.gitops.io/oidc-config'] = JSON.stringify(parsed);
+      }
+    } catch {}
+  }
+
+  // 3. Cap allowed-groups to avoid directory explosion (e.g. 1000+ AD/LDAP groups)
+  if (typeof result['vops.gitops.io/allowed-groups'] === 'string') {
+    const groups = result['vops.gitops.io/allowed-groups']
+      .split(',')
+      .map((g) => g.trim())
+      .filter(Boolean);
+    if (groups.length > 50) {
+      result['vops.gitops.io/allowed-groups'] = groups.slice(0, 50).join(',');
+    }
+  }
+
+  // 4. Cap allowed-emails if excessive
+  if (typeof result['vops.gitops.io/allowed-emails'] === 'string') {
+    const emails = result['vops.gitops.io/allowed-emails']
+      .split(',')
+      .map((e) => e.trim())
+      .filter(Boolean);
+    if (emails.length > 100) {
+      result['vops.gitops.io/allowed-emails'] = emails.slice(0, 100).join(',');
+    }
+  }
+
+  // 5. Compact installed-apps JSON (ensure no raw manifests or raw values)
+  if (typeof result['vops.gitops.io/installed-apps'] === 'string') {
+    try {
+      const raw = JSON.parse(result['vops.gitops.io/installed-apps']);
+      if (Array.isArray(raw)) {
+        const compacted = compactInstalledAppsForAnnotation(raw);
+        result['vops.gitops.io/installed-apps'] = JSON.stringify(compacted);
+      }
+    } catch {}
+  }
+
+  // 6. Hard safety check against the 262,144 byte Kubernetes limit
+  // Threshold: 192 KiB to leave plenty of headroom for system annotations like last-applied-configuration
+  const MAX_SAFE_BYTES = 192 * 1024;
+  let totalBytes = 0;
+  for (const [k, v] of Object.entries(result)) {
+    if (v !== null) {
+      totalBytes += Buffer.byteLength(k, 'utf8') + Buffer.byteLength(v, 'utf8');
+    }
+  }
+
+  if (totalBytes > MAX_SAFE_BYTES) {
+    console.warn(
+      `[sanitizeAnnotations] Annotations total size (${totalBytes} bytes) exceeds safe limit (${MAX_SAFE_BYTES} bytes). Pruning non-essential keys...`
+    );
+    const nonEssential = [
+      'vops.gitops.io/installed-apps',
+      'vops.gitops.io/oidc-config',
+      'vops.gitops.io/restore-snapshot',
+      'vops.gitops.io/restored-at',
+      'vops.gitops.io/restored-from',
+    ];
+    for (const key of nonEssential) {
+      if (totalBytes <= MAX_SAFE_BYTES) break;
+      if (result[key]) {
+        const itemBytes = Buffer.byteLength(key, 'utf8') + Buffer.byteLength(result[key]!, 'utf8');
+        delete result[key];
+        totalBytes -= itemBytes;
+      }
+    }
+  }
+
+  return result;
+}
+
 export async function createVirtualCluster(data: {
   clusterName: string;
   preset: SizePreset;
@@ -603,7 +736,11 @@ export async function createVirtualCluster(data: {
   }
 
   if (effectiveOidc) {
-    annotations['vops.gitops.io/oidc-config'] = JSON.stringify(effectiveOidc);
+    const oidcToStore = { ...effectiveOidc };
+    if (oidcToStore.caCertificate && (data.customCaCert || oidcToStore.caSecretName || oidcToStore.caConfigMapName)) {
+      delete oidcToStore.caCertificate;
+    }
+    annotations['vops.gitops.io/oidc-config'] = JSON.stringify(oidcToStore);
     if (effectiveOidc.issuerUrl) annotations['vops.gitops.io/oidc-issuer-url'] = effectiveOidc.issuerUrl;
     if (effectiveOidc.clientId) annotations['vops.gitops.io/oidc-client-id'] = effectiveOidc.clientId;
     if (effectiveOidc.usernameClaim) annotations['vops.gitops.io/oidc-username-claim'] = effectiveOidc.usernameClaim;
@@ -615,7 +752,6 @@ export async function createVirtualCluster(data: {
   const customCa = data.customCaCert || effectiveOidc?.caCertificate;
   if (customCa && customCa.trim()) {
     annotations['vops.gitops.io/custom-ca-cert'] = customCa.trim();
-    annotations['vops.gitops.io/oidc-ca-cert'] = customCa.trim();
     annotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
   }
   const customSec = data.customCaSecret || effectiveOidc?.caSecretName;
@@ -745,7 +881,8 @@ export async function createVirtualCluster(data: {
         }
       }
 
-      annotations['vops.gitops.io/installed-apps'] = JSON.stringify(appsToSave);
+      // Store compacted installed apps metadata in annotations (strips raw manifests and custom values)
+      annotations['vops.gitops.io/installed-apps'] = JSON.stringify(compactInstalledAppsForAnnotation(appsToSave));
 
       const helmDeployments = appsToSave
         .filter((a) => a.helm)
@@ -817,6 +954,8 @@ export async function createVirtualCluster(data: {
       }
     }
   }
+
+  body.metadata.annotations = sanitizeAnnotations(annotations);
 
   const res = await k8sRequest<any>(
     `/apis/vops.gitops.io/v1alpha1/namespaces/${namespace}/virtualclusters`,
@@ -975,7 +1114,7 @@ export async function updateVirtualClusterRBAC(
 
   const patch = {
     metadata: {
-      annotations: updatedAnnotations,
+      annotations: sanitizeAnnotations(updatedAnnotations),
       labels: updatedLabels,
     },
   };
@@ -1502,7 +1641,7 @@ export async function updateVirtualClusterEndpointAndOidc(
     const trimmed = data.customCaCert.trim();
     if (trimmed) {
       updatedAnnotations['vops.gitops.io/custom-ca-cert'] = trimmed;
-      updatedAnnotations['vops.gitops.io/oidc-ca-cert'] = trimmed;
+      delete updatedAnnotations['vops.gitops.io/oidc-ca-cert'];
       updatedAnnotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
     } else {
       delete updatedAnnotations['vops.gitops.io/custom-ca-cert'];
@@ -1512,7 +1651,7 @@ export async function updateVirtualClusterEndpointAndOidc(
     const trimmed = data.oidc.caCertificate.trim();
     if (trimmed) {
       updatedAnnotations['vops.gitops.io/custom-ca-cert'] = trimmed;
-      updatedAnnotations['vops.gitops.io/oidc-ca-cert'] = trimmed;
+      delete updatedAnnotations['vops.gitops.io/oidc-ca-cert'];
       updatedAnnotations['vops.gitops.io/oidc-ca-file'] = '/etc/ssl/custom-ca/ca.crt';
     } else {
       delete updatedAnnotations['vops.gitops.io/custom-ca-cert'];
@@ -1582,7 +1721,7 @@ export async function updateVirtualClusterEndpointAndOidc(
 
   const patch = {
     metadata: {
-      annotations: patchAnnotations,
+      annotations: sanitizeAnnotations(patchAnnotations),
     },
     spec: {
       rawConfig,
