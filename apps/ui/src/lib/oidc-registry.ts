@@ -12,6 +12,7 @@ export const DEFAULT_OIDC_REGISTRY: OidcRegistry = {
     scope: 'global',
     enabled: false,
     issuerUrl: '',
+    userInfoUrl: '',
     clientId: '',
     usernameClaim: 'email',
     usernamePrefix: '',

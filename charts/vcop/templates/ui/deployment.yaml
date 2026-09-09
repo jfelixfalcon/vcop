@@ -44,6 +44,10 @@ spec:
               value: "true"
             - name: OIDC_ISSUER_URL
               value: {{ .Values.ui.auth.oidc.issuerUrl | quote }}
+            {{- if .Values.ui.auth.oidc.userInfoUrl }}
+            - name: OIDC_USERINFO_URL
+              value: {{ .Values.ui.auth.oidc.userInfoUrl | quote }}
+            {{- end }}
             - name: OIDC_CLIENT_ID
               value: {{ .Values.ui.auth.oidc.clientId | quote }}
             - name: OIDC_CLIENT_SECRET

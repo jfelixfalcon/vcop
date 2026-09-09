@@ -49,6 +49,7 @@ export function authLog(message: string, ...args: any[]) {
 export const OIDC_CONFIG = {
   enabled: process.env.OIDC_ENABLED === 'true' || Boolean(process.env.OIDC_ISSUER_URL),
   issuerUrl: (process.env.OIDC_ISSUER_URL || '').replace(/\/$/, ''),
+  userInfoUrl: (process.env.OIDC_USERINFO_URL || '').trim(),
   clientId: process.env.OIDC_CLIENT_ID || '',
   clientSecret: process.env.OIDC_CLIENT_SECRET || '',
   redirectUri: process.env.OIDC_REDIRECT_URI || '',
@@ -100,6 +101,7 @@ export async function getEffectiveOidcConfig() {
       const config = {
         enabled: true,
         issuerUrl: reg.global.issuerUrl,
+        userInfoUrl: reg.global.userInfoUrl || OIDC_CONFIG.userInfoUrl || '',
         clientId: reg.global.clientId || 'vcop-ui',
         clientSecret: reg.global.clientSecret || OIDC_CONFIG.clientSecret || '',
         redirectUri: OIDC_CONFIG.redirectUri,
@@ -113,6 +115,7 @@ export async function getEffectiveOidcConfig() {
       };
       authLog('Effective OIDC config from ConfigMap:', {
         issuerUrl: config.issuerUrl,
+        userInfoUrl: config.userInfoUrl,
         clientId: config.clientId,
         hasSecret: Boolean(config.clientSecret),
         redirectUri: config.redirectUri,
@@ -580,7 +583,7 @@ export async function fetchOidcUserInfo(
   try {
     const config = await getEffectiveOidcConfig();
     let issuer = (customIssuerUrl || config.issuerUrl || '').replace(/\/$/, '');
-    let endpoint = discovery?.userinfo_endpoint;
+    let endpoint = config.userInfoUrl || discovery?.userinfo_endpoint;
 
     if (!endpoint && issuer) {
       const disc = await getOidcDiscovery(issuer);

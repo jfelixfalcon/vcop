@@ -101,6 +101,7 @@ ui:
     oidc:
       enabled: true
       issuerUrl: "https://keycloak.example.com:8443/realms/master"
+      userInfoUrl: "" # Optional override; defaults to auto-discovery from issuerUrl (e.g. https://keycloak.../protocol/openid-connect/userinfo)
       clientId: "dso"
       clientSecret: "8b71c15a8f5c4cf1934b951624ff85f3"
       redirectUri: ""

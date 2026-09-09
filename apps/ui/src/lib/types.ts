@@ -69,6 +69,7 @@ export interface QuotaStatus {
 export interface OidcConfig {
   enabled: boolean;
   issuerUrl: string;
+  userInfoUrl?: string;
   clientId: string;
   usernameClaim?: string;
   usernamePrefix?: string;
@@ -90,6 +91,7 @@ export interface OidcProfile {
   targetGroup?: string;
   enabled: boolean;
   issuerUrl: string;
+  userInfoUrl?: string;
   clientId: string;
   clientSecret?: string;
   usernameClaim?: string;

@@ -51,6 +51,8 @@ spec:
               value: "true"
             - name: OIDC_ISSUER_URL
               value: "https://keycloak.example.com:8443/realms/master"
+            - name: OIDC_USERINFO_URL
+              value: "" # Optional override; auto-discovered from issuerUrl if empty
             - name: OIDC_CLIENT_ID
               value: "dso"
             - name: OIDC_CLIENT_SECRET
