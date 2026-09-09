@@ -111,7 +111,11 @@ if (pathname.startsWith('/clusters/')) {
       {canCreate && (
         <a
           href="/new"
-          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-[0_0_14px_rgba(6,182,212,0.3)] hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] transition-all font-mono"
+          class={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all font-mono ${
+            isProvisionActive
+              ? 'bg-cyan-300 text-slate-950 shadow-[0_0_20px_rgba(6,182,212,0.6)] ring-2 ring-cyan-400'
+              : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 shadow-[0_0_14px_rgba(6,182,212,0.3)] hover:shadow-[0_0_20px_rgba(6,182,212,0.5)]'
+          }`}
         >
           <Plus class="w-3.5 h-3.5 stroke-[2.5]" />
           <span class="hidden sm:inline">New Cluster</span>
@@ -300,7 +304,7 @@ if (pathname.startsWith('/clusters/')) {
   <!-- Sub-Header Navigation Bar (Fluid Horizontal Flow) -->
   <div class="border-t border-cyber-800/60 bg-cyber-950/60 backdrop-blur-md">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <nav class="flex items-center gap-1 overflow-x-auto scrollbar-none py-1 text-xs">
+      <nav class="flex items-center flex-wrap gap-1 py-1 text-xs overflow-x-hidden">
         <!-- Fleet Clusters -->
         <a
           href="/"
@@ -401,21 +405,6 @@ if (pathname.startsWith('/clusters/')) {
           >
             <Bot class={`w-3.5 h-3.5 transition-colors ${isAiActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
             <span>AI Models</span>
-          </a>
-        )}
-
-        <!-- Quick Deploy: Provisioning (Admins & Developers) -->
-        {canCreate && (
-          <a
-            href="/new"
-            class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
-              isProvisionActive
-                ? 'bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-900/60 border border-transparent'
-            }`}
-          >
-            <Plus class={`w-3.5 h-3.5 transition-colors ${isProvisionActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
-            <span>New Cluster</span>
           </a>
         )}
       </nav>
