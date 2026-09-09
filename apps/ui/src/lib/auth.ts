@@ -317,67 +317,44 @@ export function extractGroupsFromClaims(
 }
 
 /**
- * Resolves whether an OIDC user is assigned Admin, Developers, or Viewer role based on email or groups.
+/**
+ * Resolves whether an OIDC user is assigned Admin, Developers, or Viewer role based on email, username, or groups.
+ * Consults the active PlatformAccessPolicy stored in Kubernetes ConfigMap.
  */
-export function resolveOidcRole(email: string, groups: string[]): UserRole {
-  const normEmail = email.toLowerCase().trim();
-  const normGroups = groups.map((g) => g.toLowerCase().trim());
-
-  if (OIDC_CONFIG.adminEmails.includes(normEmail)) {
-    return 'admin';
-  }
-
-  for (const adminGroup of OIDC_CONFIG.adminGroups) {
-    if (normGroups.includes(adminGroup)) {
-      return 'admin';
+export function resolveOidcRole(email: string, groups: string[], username?: string): UserRole {
+  try {
+    const { resolveRoleWithPolicy } = require('./access-policy');
+    const result = resolveRoleWithPolicy(email, groups, username);
+    return result.role;
+  } catch {
+    // Fallback if access-policy module is not loaded yet
+    const normEmail = email.toLowerCase().trim();
+    const normGroups = groups.map((g) => g.toLowerCase().trim());
+    if (OIDC_CONFIG.adminEmails.includes(normEmail)) return 'admin';
+    for (const ag of OIDC_CONFIG.adminGroups) {
+      if (normGroups.includes(ag)) return 'admin';
     }
+    if (normGroups.some((g) => g === 'developers' || g === 'devs' || g === 'engineering')) return 'developers';
+    return 'viewer';
   }
+}
 
-  // Also check if any group matches common administrator keywords
-  if (
-    normGroups.some(
-      (g) =>
-        g === 'admin' ||
-        g === 'admins' ||
-        g === 'administrator' ||
-        g === 'administrators' ||
-        g.endsWith('-admin') ||
-        g.endsWith('-admins') ||
-        g.startsWith('admin-')
-    )
-  ) {
-    return 'admin';
+/**
+ * Async version of resolveOidcRole that ensures the latest Kubernetes ConfigMap access policy is fetched.
+ */
+export async function resolveOidcRoleAsync(
+  email: string,
+  groups: string[],
+  username?: string
+): Promise<{ role: UserRole; reason: string }> {
+  try {
+    const { getAccessPolicy, resolveRoleWithPolicy } = await import('./access-policy');
+    const policy = await getAccessPolicy();
+    return resolveRoleWithPolicy(email, groups, username, policy);
+  } catch (err) {
+    authLog('Failed fetching access policy from ConfigMap, using fallback:', err);
+    return { role: resolveOidcRole(email, groups, username), reason: 'Fallback to environment policy' };
   }
-
-  // Check Developer groups (configurable via env OIDC_DEV_GROUPS)
-  const devEnv = (process.env.OIDC_DEV_GROUPS || process.env.OIDC_DEVELOPER_GROUPS || '')
-    .toLowerCase()
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const devGroups = [
-    'developers',
-    'devs',
-    'developer',
-    'engineering',
-    'dev',
-    'vcluster-developers',
-    'platform-devs',
-    'devops',
-    ...devEnv,
-  ];
-
-  for (const dg of devGroups) {
-    if (
-      normGroups.includes(dg) ||
-      normGroups.some((g) => g === dg || g.endsWith(`-${dg}`) || g.startsWith(`${dg}-`))
-    ) {
-      return 'developers';
-    }
-  }
-
-  return 'viewer';
 }
 
 interface OidcDiscovery {
@@ -607,8 +584,8 @@ export async function authenticateFromTokens(
   // Extract groups and roles across all claims, UserInfo payloads, and token data
   const groups = extractGroupsFromClaims(claims, config.groupsClaim, config.clientId);
 
-  const role = resolveOidcRole(email, groups);
-  authLog(`Assigned role '${role}' to user '${username}' (${email}) with extracted groups:`, groups);
+  const { role, reason } = await resolveOidcRoleAsync(email, groups, username);
+  authLog(`Assigned role '${role}' to user '${username}' (${email}) [${reason}] with extracted groups:`, groups);
 
   return {
     id: claims.sub || `oidc-${username}`,

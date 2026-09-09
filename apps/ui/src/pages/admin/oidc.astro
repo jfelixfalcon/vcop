@@ -1,6 +1,6 @@
 ---
 import Layout from '../../layouts/Layout.astro';
-import { OidcManager } from '../../components/OidcManager';
+import { AccessAndOidcContainer } from '../../components/AccessAndOidcContainer';
 import { getOidcRegistry } from '../../lib/oidc-registry';
 
 const user = Astro.locals.user;
@@ -12,8 +12,8 @@ const isAdmin = user?.role === 'admin';
 const registry = await getOidcRegistry();
 ---
 
-<Layout title="Global & Group OIDC Policy - vCluster Operations Center">
+<Layout title="Access Control & OIDC Identity - vCluster Operations Center">
   <div class="space-y-6">
-    <OidcManager client:load initialRegistry={registry} isAdmin={isAdmin} />
+    <AccessAndOidcContainer client:load initialRegistry={registry} isAdmin={isAdmin} />
   </div>
 </Layout>

@@ -5,6 +5,7 @@ import {
   fetchOidcUserInfo,
   extractGroupsFromClaims,
   resolveOidcRole,
+  resolveOidcRoleAsync,
   getEffectiveOidcConfig,
   authLog,
   type UserSession,
@@ -73,7 +74,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
     const mergedGroups = Array.from(new Set([...user.groups, ...userinfoGroups]));
 
     // Re-resolve user role based on refreshed groups
-    const newRole = resolveOidcRole(user.email, mergedGroups);
+    const { role: newRole } = await resolveOidcRoleAsync(user.email, mergedGroups, user.username);
 
     const updatedUser: UserSession = {
       ...user,
@@ -170,7 +171,7 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
 
     const groups = extractGroupsFromClaims(userInfo, config.groupsClaim, config.clientId);
     const email = userInfo.email || user?.email || 'user@oidc.local';
-    const role = resolveOidcRole(email, groups);
+    const { role } = await resolveOidcRoleAsync(email, groups, user?.username);
 
     if (user) {
       const mergedGroups = Array.from(new Set([...user.groups, ...groups]));

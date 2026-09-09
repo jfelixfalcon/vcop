@@ -246,6 +246,19 @@ export interface ClusterGroupInfo {
   clusters: string[];
 }
 
+export interface RoleAssignment {
+  groups: string[];
+  users: string[];
+}
+
+export interface PlatformAccessPolicy {
+  updatedAt: string;
+  admin: RoleAssignment;
+  developers: RoleAssignment;
+  viewers: RoleAssignment;
+  defaultRole: 'viewer' | 'developers';
+}
+
 export type { UserRole, UserSession } from './auth';
 
 export interface PresetDetails {

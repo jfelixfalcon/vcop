@@ -50,7 +50,7 @@ if (pathname.startsWith('/clusters/')) {
 } else if (isVersionsActive) {
   currentSection = 'Version Registry';
 } else if (isOidcActive) {
-  currentSection = 'OIDC Policy';
+  currentSection = 'Access & Identity';
 } else if (isAiActive) {
   currentSection = 'AI Engine & Models';
 } else if (isBaselinesActive) {
@@ -374,7 +374,7 @@ if (pathname.startsWith('/clusters/')) {
             }`}
           >
             <ShieldCheck class={`w-3.5 h-3.5 transition-colors ${isOidcActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
-            <span>OIDC Identity</span>
+            <span>Access & Identity</span>
           </a>
         )}
 
@@ -435,7 +435,7 @@ if (pathname.startsWith('/clusters/')) {
         </a>
         <a href="/admin/oidc" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
           <ShieldCheck class="w-4 h-4 text-purple-400" />
-          <span>OIDC Policies</span>
+          <span>Access & Identity</span>
         </a>
         <a href="/admin/baselines" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
           <Sliders class="w-4 h-4 text-emerald-400" />
