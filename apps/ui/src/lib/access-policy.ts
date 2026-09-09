@@ -12,14 +12,14 @@ let lastFetchTime = 0;
  */
 export function getDefaultAccessPolicy(): PlatformAccessPolicy {
   const adminGroupsEnv = (
-    process.env.OIDC_ADMIN_GROUPS || 'admins,vcluster-admins,platform-ops,default-roles-master'
+    process.env.OIDC_ADMIN_GROUPS || 'admins,vcluster-admins'
   )
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 
   const adminUsersEnv = (
-    process.env.OIDC_ADMIN_EMAILS || 'admin@vops.local,admin@example.com,dso@local'
+    process.env.OIDC_ADMIN_EMAILS || 'admin@vops.local'
   )
     .split(',')
     .map((s) => s.trim().toLowerCase())
@@ -28,7 +28,7 @@ export function getDefaultAccessPolicy(): PlatformAccessPolicy {
   const devGroupsEnv = (
     process.env.OIDC_DEV_GROUPS ||
     process.env.OIDC_DEVELOPER_GROUPS ||
-    'developers,devs,developer,engineering,platform-devs,devops,vcluster-developers'
+    ''
   )
     .split(',')
     .map((s) => s.trim().toLowerCase())
@@ -45,7 +45,7 @@ export function getDefaultAccessPolicy(): PlatformAccessPolicy {
 
   const viewerGroupsEnv = (
     process.env.OIDC_VIEWER_GROUPS ||
-    'viewers,auditors,viewer'
+    ''
   )
     .split(',')
     .map((s) => s.trim().toLowerCase())
@@ -182,15 +182,14 @@ export async function saveAccessPolicy(
 
 /**
  * Resolves a user's role against the active PlatformAccessPolicy.
- * Evaluates in order:
- * 1. Admin Users / Emails
- * 2. Admin Groups
- * 3. Admin Keyword Heuristics
- * 4. Developer Users / Emails
- * 5. Developer Groups
- * 6. Developer Keyword Heuristics
- * 7. Viewer Users / Groups
- * 8. Configured default fallback (default: 'viewer')
+ * Evaluates strictly according to the explicit access policy:
+ * 1. Administrator Users / Emails
+ * 2. Administrator Groups
+ * 3. Developer Users / Emails
+ * 4. Developer Groups
+ * 5. Viewer Users / Emails
+ * 6. Viewer Groups
+ * 7. Default fallback role (strictly 'viewer' unless explicitly configured)
  */
 export function resolveRoleWithPolicy(
   email: string,
@@ -202,6 +201,8 @@ export function resolveRoleWithPolicy(
 
   const normEmail = (email || '').toLowerCase().trim();
   const normUsername = (username || '').toLowerCase().trim();
+  const emailPrefix = normEmail.includes('@') ? normEmail.split('@')[0] : '';
+
   const normGroups = (groups || []).flatMap((g) => {
     const raw = (g || '').toLowerCase().trim();
     if (!raw) return [];
@@ -215,80 +216,58 @@ export function resolveRoleWithPolicy(
     return [raw];
   });
 
+  const isUserInList = (userList: string[] = []): boolean => {
+    return userList.some((u) => {
+      const normU = (u || '').toLowerCase().trim();
+      return (
+        (normEmail && normU === normEmail) ||
+        (normUsername && normU === normUsername) ||
+        (emailPrefix && normU === emailPrefix)
+      );
+    });
+  };
+
+  const isGroupInList = (groupList: string[] = []): string | undefined => {
+    return groupList.find((g) => {
+      const normG = (g || '').toLowerCase().trim().replace(/^\/+|\/+$/g, '');
+      return normGroups.includes(normG) || normGroups.includes((g || '').toLowerCase().trim());
+    });
+  };
+
   // 1. Check Administrator Users (by email or username)
-  if (
-    p.admin.users.some(
-      (u) => (normEmail && u === normEmail) || (normUsername && u === normUsername)
-    )
-  ) {
+  if (isUserInList(p.admin?.users)) {
     return { role: 'admin', reason: 'Directly assigned to Administrator user list' };
   }
 
   // 2. Check Administrator Groups
-  for (const ag of p.admin.groups) {
-    if (normGroups.includes(ag)) {
-      return { role: 'admin', reason: `Belongs to Administrator group '${ag}'` };
-    }
+  const matchedAdminGroup = isGroupInList(p.admin?.groups);
+  if (matchedAdminGroup) {
+    return { role: 'admin', reason: `Belongs to Administrator group '${matchedAdminGroup}'` };
   }
 
-  // 3. Check Administrator Keyword Heuristics
-  if (
-    normGroups.some(
-      (g) =>
-        g === 'admin' ||
-        g === 'admins' ||
-        g === 'administrator' ||
-        g === 'administrators' ||
-        g.endsWith('-admin') ||
-        g.endsWith('-admins') ||
-        g.startsWith('admin-')
-    )
-  ) {
-    return { role: 'admin', reason: 'Matched administrator group naming convention' };
-  }
-
-  // 4. Check Developer Users (by email or username)
-  if (
-    p.developers.users.some(
-      (u) => (normEmail && u === normEmail) || (normUsername && u === normUsername)
-    )
-  ) {
+  // 3. Check Developer Users (by email or username)
+  if (isUserInList(p.developers?.users)) {
     return { role: 'developers', reason: 'Directly assigned to Developer user list' };
   }
 
-  // 5. Check Developer Groups
-  for (const dg of p.developers.groups) {
-    if (normGroups.includes(dg)) {
-      return { role: 'developers', reason: `Belongs to Developer group '${dg}'` };
-    }
+  // 4. Check Developer Groups
+  const matchedDevGroup = isGroupInList(p.developers?.groups);
+  if (matchedDevGroup) {
+    return { role: 'developers', reason: `Belongs to Developer group '${matchedDevGroup}'` };
   }
 
-  // 6. Check Developer Keyword Heuristics
-  const devKeywords = ['developers', 'devs', 'developer', 'engineering', 'platform-devs', 'devops'];
-  for (const dk of devKeywords) {
-    if (
-      normGroups.includes(dk) ||
-      normGroups.some((g) => g === dk || g.endsWith(`-${dk}`) || g.startsWith(`${dk}-`))
-    ) {
-      return { role: 'developers', reason: `Matched developer group naming convention '${dk}'` };
-    }
-  }
-
-  // 7. Check Viewer Users or Groups
-  if (
-    p.viewers.users.some(
-      (u) => (normEmail && u === normEmail) || (normUsername && u === normUsername)
-    )
-  ) {
+  // 5. Check Viewer Users
+  if (isUserInList(p.viewers?.users)) {
     return { role: 'viewer', reason: 'Directly assigned to Viewer user list' };
   }
-  for (const vg of p.viewers.groups) {
-    if (normGroups.includes(vg)) {
-      return { role: 'viewer', reason: `Belongs to Viewer group '${vg}'` };
-    }
+
+  // 6. Check Viewer Groups
+  const matchedViewerGroup = isGroupInList(p.viewers?.groups);
+  if (matchedViewerGroup) {
+    return { role: 'viewer', reason: `Belongs to Viewer group '${matchedViewerGroup}'` };
   }
 
-  // 8. Fallback to default role
-  const fallback = p.defaultRole || 'viewer';
+  // 7. Strict Fallback for Unassigned Users
+  const fallback = p.defaultRole === 'developers' ? 'developers' : 'viewer';
   return { role: fallback, reason: `Default fallback role '${fallback}' for unassigned users` };
 }

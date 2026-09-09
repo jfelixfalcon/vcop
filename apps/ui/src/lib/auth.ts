@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { VirtualCluster } from './types';
+import { resolveRoleWithPolicy, getAccessPolicy } from './access-policy';
 
 export type UserRole = 'admin' | 'developers' | 'developer' | 'viewer';
 
@@ -56,11 +57,11 @@ export const OIDC_CONFIG = {
   scopes: process.env.OIDC_SCOPES || 'openid email profile',
   providerName: process.env.OIDC_PROVIDER_NAME || 'Single Sign-On (OIDC)',
   groupsClaim: process.env.OIDC_GROUPS_CLAIM || 'groups',
-  adminGroups: (process.env.OIDC_ADMIN_GROUPS || 'admins,vcluster-admins,platform-ops,default-roles-master')
+  adminGroups: (process.env.OIDC_ADMIN_GROUPS || 'admins,vcluster-admins')
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean),
-  adminEmails: (process.env.OIDC_ADMIN_EMAILS || 'admin@vops.local,admin@example.com,dso@local')
+  adminEmails: (process.env.OIDC_ADMIN_EMAILS || 'admin@vops.local')
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean),
@@ -357,18 +358,16 @@ export function extractGroupsFromClaims(
  */
 export function resolveOidcRole(email: string, groups: string[], username?: string): UserRole {
   try {
-    const { resolveRoleWithPolicy } = require('./access-policy');
     const result = resolveRoleWithPolicy(email, groups, username);
     return result.role;
   } catch {
-    // Fallback if access-policy module is not loaded yet
-    const normEmail = email.toLowerCase().trim();
-    const normGroups = groups.map((g) => g.toLowerCase().trim());
+    // Safe fallback: only grant admin if explicitly listed in admin config, otherwise strictly viewer
+    const normEmail = (email || '').toLowerCase().trim();
+    const normGroups = (groups || []).map((g) => (g || '').toLowerCase().trim());
     if (OIDC_CONFIG.adminEmails.includes(normEmail)) return 'admin';
     for (const ag of OIDC_CONFIG.adminGroups) {
       if (normGroups.includes(ag)) return 'admin';
     }
-    if (normGroups.some((g) => g === 'developers' || g === 'devs' || g === 'engineering')) return 'developers';
     return 'viewer';
   }
 }
@@ -382,7 +381,6 @@ export async function resolveOidcRoleAsync(
   username?: string
 ): Promise<{ role: UserRole; reason: string }> {
   try {
-    const { getAccessPolicy, resolveRoleWithPolicy } = await import('./access-policy');
     const policy = await getAccessPolicy();
     return resolveRoleWithPolicy(email, groups, username, policy);
   } catch (err) {
