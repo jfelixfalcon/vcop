@@ -13,6 +13,7 @@ export const DEFAULT_VERSION_REGISTRY: VersionRegistry = {
   coreDNSVersions: [],
   metricsServerVersions: [],
   istioVersions: [],
+  imagePatterns: {},
 };
 
 let memoryRegistryCache: VersionRegistry | null = null;
@@ -66,6 +67,7 @@ export async function getVersionRegistry(): Promise<VersionRegistry> {
       if (!Array.isArray(parsed.coreDNSVersions)) parsed.coreDNSVersions = [];
       if (!Array.isArray(parsed.metricsServerVersions)) parsed.metricsServerVersions = [];
       if (!Array.isArray(parsed.istioVersions)) parsed.istioVersions = [];
+      if (!parsed.imagePatterns || typeof parsed.imagePatterns !== 'object') parsed.imagePatterns = {};
       memoryRegistryCache = parsed;
       lastFetchTime = now;
       return parsed;
@@ -155,6 +157,9 @@ export function getMissingCoreComponents(registry?: VersionRegistry | null): str
 /**
  * Clears the Version Registry completely so that all categories are empty.
  */
+/**
+ * Clears the Version Registry completely so that all categories are empty.
+ */
 export async function clearVersionRegistry(): Promise<VersionRegistry> {
   const empty: VersionRegistry = {
     updatedAt: new Date().toISOString(),
@@ -164,6 +169,7 @@ export async function clearVersionRegistry(): Promise<VersionRegistry> {
     coreDNSVersions: [],
     metricsServerVersions: [],
     istioVersions: [],
+    imagePatterns: {},
   };
   await saveEntireRegistry(empty);
   return empty;
@@ -224,12 +230,44 @@ export async function importVersionRegistry(input: string | any): Promise<Versio
           tag: (item.tag as VersionTag) || (item.isDefault ? 'default' : 'stable'),
           isDefault: Boolean(item.isDefault),
           notes: item.notes ? String(item.notes).trim() : undefined,
+          image: item.image ? String(item.image).trim() : undefined,
         };
       })
       .filter((v) => Boolean(v.version));
   };
 
+  const normalizeImagePatterns = (raw: any): Record<string, string> => {
+    if (!raw || typeof raw !== 'object') return {};
+    const patterns: Record<string, string> = {};
+    if (raw.k8s || raw.kubernetes || raw['kube-apiserver']) {
+      patterns.k8s = String(raw.k8s || raw.kubernetes || raw['kube-apiserver']).trim();
+    }
+    if (raw.vcluster || raw.engine || raw.syncer) {
+      patterns.vcluster = String(raw.vcluster || raw.engine || raw.syncer).trim();
+    }
+    if (raw.etcd || raw.backingStore) {
+      patterns.etcd = String(raw.etcd || raw.backingStore).trim();
+    }
+    if (raw.coreDNS || raw.coredns || raw.dns) {
+      patterns.coredns = String(raw.coreDNS || raw.coredns || raw.dns).trim();
+    }
+    if (raw.metricsServer || raw.metrics) {
+      patterns.metricsServer = String(raw.metricsServer || raw.metrics).trim();
+    }
+    if (raw.istio || raw.mesh) {
+      patterns.istio = String(raw.istio || raw.mesh).trim();
+    }
+    for (const [k, v] of Object.entries(raw)) {
+      if (typeof v === 'string' && !patterns[k]) {
+        patterns[k] = v.trim();
+      }
+    }
+    return patterns;
+  };
+
   const current = await getVersionRegistry();
+  const rawPatterns = data.imagePatterns || data.containerImagePatterns || data.patterns;
+
   const newRegistry: VersionRegistry = {
     updatedAt: new Date().toISOString(),
     kubernetesVersions: data.kubernetesVersions !== undefined ? normalizeList(data.kubernetesVersions) : current.kubernetesVersions,
@@ -238,6 +276,7 @@ export async function importVersionRegistry(input: string | any): Promise<Versio
     coreDNSVersions: data.coreDNSVersions !== undefined ? normalizeList(data.coreDNSVersions) : current.coreDNSVersions,
     metricsServerVersions: data.metricsServerVersions !== undefined ? normalizeList(data.metricsServerVersions) : current.metricsServerVersions,
     istioVersions: data.istioVersions !== undefined ? normalizeList(data.istioVersions) : current.istioVersions,
+    imagePatterns: rawPatterns !== undefined ? normalizeImagePatterns(rawPatterns) : (current.imagePatterns || {}),
   };
 
   // Ensure default version is set for each non-empty category
@@ -252,6 +291,24 @@ export async function importVersionRegistry(input: string | any): Promise<Versio
 
   await saveEntireRegistry(newRegistry);
   return newRegistry;
+}
+
+/**
+ * Saves or updates a category container image pattern.
+ */
+export async function saveImagePattern(
+  type: VersionCategory,
+  pattern: string
+): Promise<VersionRegistry> {
+  const registry = await getVersionRegistry();
+  if (!registry.imagePatterns) registry.imagePatterns = {};
+  if (pattern.trim()) {
+    registry.imagePatterns[type] = pattern.trim();
+  } else {
+    delete registry.imagePatterns[type];
+  }
+  await saveEntireRegistry(registry);
+  return registry;
 }
 
 /**
@@ -283,6 +340,7 @@ export async function saveVersion(
     version: targetVer,
     label: item.label?.trim() || targetVer,
     tag: item.isDefault ? 'default' : (item.tag || 'stable'),
+    image: item.image?.trim() || undefined,
   };
 
   if (existingIdx >= 0) {
@@ -298,7 +356,7 @@ export async function saveVersion(
   }
 
   setListForCategory(registry, type, list);
-  await saveEntireRegistryToK8s(registry);
+  await saveEntireRegistry(registry);
   return registry;
 }
 

@@ -17,6 +17,20 @@
 
 versionRegistry:
   # ----------------------------------------------------------------------------
+  # Container Image Patterns
+  # Configured at platform level; never hardcoded in UI or operator.
+  # Can point to public registries, private Harbor, or air-gapped mirrors.
+  # Use <tag> as the placeholder dynamically substituted with the version identifier.
+  # ----------------------------------------------------------------------------
+  imagePatterns:
+    k8s: "registry.k8s.io/kube-apiserver:<tag>"
+    vcluster: "ghcr.io/loft-sh/vcluster:<tag>"
+    etcd: "registry.k8s.io/etcd:<tag>"
+    coredns: "registry.k8s.io/coredns/coredns:<tag>"
+    metricsServer: "registry.k8s.io/metrics-server/metrics-server:<tag>"
+    istio: "docker.io/istio/pilot:<tag>"
+
+  # ----------------------------------------------------------------------------
   # Core Component 1: Kubernetes Control Plane (API Server)
   # ----------------------------------------------------------------------------
   kubernetesVersions:

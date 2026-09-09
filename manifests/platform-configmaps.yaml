@@ -19,6 +19,14 @@ data:
   versions.json: |
     {
       "updatedAt": "2026-09-08T00:00:00.000Z",
+      "imagePatterns": {
+        "k8s": "registry.k8s.io/kube-apiserver:<tag>",
+        "vcluster": "ghcr.io/loft-sh/vcluster:<tag>",
+        "etcd": "registry.k8s.io/etcd:<tag>",
+        "coredns": "registry.k8s.io/coredns/coredns:<tag>",
+        "metricsServer": "registry.k8s.io/metrics-server/metrics-server:<tag>",
+        "istio": "docker.io/istio/pilot:<tag>"
+      },
       "kubernetesVersions": [
         {
           "version": "v1.31.0",

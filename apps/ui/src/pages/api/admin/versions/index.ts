@@ -4,6 +4,7 @@ import {
   saveVersion,
   deleteVersion,
   setDefaultVersion,
+  saveImagePattern,
 } from '../../../../lib/version-registry';
 import type { VersionItem } from '../../../../lib/types';
 
@@ -39,11 +40,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   try {
     const body = await request.json();
-    const { action, type, item, version } = body as {
-      action?: 'add' | 'update' | 'setDefault';
+    const { action, type, item, version, pattern } = body as {
+      action?: 'add' | 'update' | 'setDefault' | 'setImagePattern';
       type: 'k8s' | 'vcluster' | 'etcd' | 'coredns' | 'metricsServer' | 'istio';
       item?: VersionItem;
       version?: string;
+      pattern?: string;
     };
 
     const validTypes = ['k8s', 'vcluster', 'etcd', 'coredns', 'metricsServer', 'istio'];
@@ -52,6 +54,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
         JSON.stringify({ success: false, error: `Invalid version type; must be one of: ${validTypes.join(', ')}` }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    if (action === 'setImagePattern') {
+      const updated = await saveImagePattern(type, pattern || '');
+      return new Response(JSON.stringify({ success: true, data: updated }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     if (action === 'setDefault') {

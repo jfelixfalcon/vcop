@@ -10,6 +10,7 @@ export const GET: APIRoute = async () => {
 
     const yamlString = YAML.stringify({
       versionRegistry: {
+        imagePatterns: registry.imagePatterns || {},
         kubernetesVersions: registry.kubernetesVersions,
         vclusterVersions: registry.vclusterVersions,
         etcdVersions: registry.etcdVersions,

@@ -34,7 +34,6 @@ interface CategoryConfig {
   title: string;
   badge: string;
   description: string;
-  imageHint: string;
   placeholder: string;
   labelPlaceholder: string;
   icon: React.ElementType;
@@ -63,7 +62,6 @@ const CATEGORIES: CategoryConfig[] = [
     title: "Kubernetes Control Plane",
     badge: "API Server",
     description: "Defines the Kubernetes API server and guest cluster distribution version.",
-    imageHint: "registry.k8s.io/kube-apiserver:<tag>",
     placeholder: "e.g. v1.33.0 or v1.32.2",
     labelPlaceholder: "e.g. v1.33.0 (Next-Gen)",
     icon: Cpu,
@@ -90,7 +88,6 @@ const CATEGORIES: CategoryConfig[] = [
     title: "vCluster Syncer Engine",
     badge: "Syncer Core",
     description: "Syncer container versions and virtual cluster engine releases supported across the fleet.",
-    imageHint: "ghcr.io/loft-sh/vcluster:<tag>",
     placeholder: "e.g. 0.37.0 or 0.36.1",
     labelPlaceholder: "e.g. 0.37.0 (Fast Syncer)",
     icon: Layers,
@@ -117,7 +114,6 @@ const CATEGORIES: CategoryConfig[] = [
     title: "etcd Backing Store",
     badge: "Stateful Storage",
     description: "Dedicated etcd statefulset backing store image tag used for virtual cluster state persistence.",
-    imageHint: "registry.k8s.io/etcd:<tag>",
     placeholder: "e.g. 3.6.8-0",
     labelPlaceholder: "e.g. 3.6.8-0 (High Throughput)",
     icon: Database,
@@ -144,7 +140,6 @@ const CATEGORIES: CategoryConfig[] = [
     title: "CoreDNS Resolver",
     badge: "Cluster DNS",
     description: "Internal guest cluster DNS service container image tag and core resolver.",
-    imageHint: "registry.k8s.io/coredns/coredns:<tag>",
     placeholder: "e.g. v1.11.3 or v1.12.0",
     labelPlaceholder: "e.g. v1.11.3 (Recommended)",
     icon: Network,
@@ -171,7 +166,6 @@ const CATEGORIES: CategoryConfig[] = [
     title: "Metrics-Server",
     badge: "Telemetry & HPA",
     description: "In-cluster resource metrics pipeline for autoscaling (HPA) and dashboard telemetry.",
-    imageHint: "registry.k8s.io/metrics-server/metrics-server:<tag>",
     placeholder: "e.g. v0.7.2 or v0.7.1",
     labelPlaceholder: "e.g. v0.7.2 (Recommended)",
     icon: Activity,
@@ -198,7 +192,6 @@ const CATEGORIES: CategoryConfig[] = [
     title: "Istio Service Mesh & Gateway",
     badge: "Ingress & Mesh",
     description: "Istio control plane (istiod) and default ingress gateway proxy versions.",
-    imageHint: "docker.io/istio/pilot:<tag> & proxyv2:<tag>",
     placeholder: "e.g. 1.24.2 or 1.25.0",
     labelPlaceholder: "e.g. 1.24.2 (Production)",
     icon: Shield,
@@ -222,6 +215,11 @@ const CATEGORIES: CategoryConfig[] = [
   },
 ];
 
+function getCategoryImagePattern(registry: VersionRegistry | null, catId: VersionCategory): string {
+  if (!registry?.imagePatterns) return "";
+  return (registry.imagePatterns as any)[catId] || "";
+}
+
 export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
   const [registry, setRegistry] = useState<VersionRegistry | null>(initialRegistry || null);
   const [loading, setLoading] = useState<boolean>(!initialRegistry);
@@ -243,10 +241,16 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
   const [modalType, setModalType] = useState<VersionCategory>("k8s");
   const [versionInput, setVersionInput] = useState<string>("");
   const [labelInput, setLabelInput] = useState<string>("");
+  const [imageInput, setImageInput] = useState<string>("");
   const [tagInput, setTagInput] = useState<VersionTag>("stable");
   const [notesInput, setNotesInput] = useState<string>("");
   const [isDefaultInput, setIsDefaultInput] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
+
+  // Edit Container Image Pattern State
+  const [patternModalType, setPatternModalType] = useState<VersionCategory | null>(null);
+  const [patternInput, setPatternInput] = useState<string>("");
+  const [savingPattern, setSavingPattern] = useState<boolean>(false);
 
   // Delete Confirmation State
   const [deleteTarget, setDeleteTarget] = useState<{ type: VersionCategory; version: string } | null>(null);
@@ -261,6 +265,43 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
   // Clear Registry State
   const [isClearModalOpen, setIsClearModalOpen] = useState<boolean>(false);
   const [clearing, setClearing] = useState<boolean>(false);
+
+  const openEditPatternModal = (catId: VersionCategory) => {
+    setPatternModalType(catId);
+    setPatternInput(getCategoryImagePattern(registry, catId));
+    setError(null);
+  };
+
+  const handleSavePattern = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!patternModalType) return;
+    setSavingPattern(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/versions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "setImagePattern",
+          type: patternModalType,
+          pattern: patternInput.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to update container image pattern");
+      }
+      setRegistry(data.data);
+      setPatternModalType(null);
+      const catMeta = CATEGORIES.find((c) => c.id === patternModalType);
+      setSuccessMsg(`Container image pattern updated for ${catMeta?.title || patternModalType}.`);
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err: any) {
+      setError(err.message || "Failed to update container image pattern");
+    } finally {
+      setSavingPattern(false);
+    }
+  };
 
   const handleExportYaml = async () => {
     try {
@@ -373,6 +414,7 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
     setModalType(type);
     setVersionInput("");
     setLabelInput("");
+    setImageInput("");
     setTagInput("stable");
     setNotesInput("");
     setIsDefaultInput(false);
@@ -401,6 +443,7 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
           tag: isDefaultInput ? "default" : tagInput,
           isDefault: isDefaultInput,
           notes: notesInput.trim(),
+          image: imageInput.trim() || undefined,
         },
       };
 
@@ -801,9 +844,27 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
                     <p className="text-xs text-slate-400 mt-0.5">
                       {cat.description}
                     </p>
-                    <p className="text-[10px] font-mono text-slate-500 mt-1">
-                      Container Image Pattern: <code className="text-slate-400">{cat.imageHint}</code>
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] font-mono">
+                      <span className="text-slate-500">Container Image Pattern:</span>
+                      {getCategoryImagePattern(registry, cat.id) ? (
+                        <code className="text-cyan-300 bg-cyber-950/80 px-2 py-0.5 rounded border border-cyber-750">
+                          {getCategoryImagePattern(registry, cat.id)}
+                        </code>
+                      ) : (
+                        <span className="text-amber-400/90 italic font-sans text-xs">
+                          Not configured (import from manifest)
+                        </span>
+                      )}
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => openEditPatternModal(cat.id)}
+                          className="text-cyan-400 hover:text-cyan-300 font-sans text-[11px] underline ml-1 cursor-pointer transition-colors"
+                        >
+                          Edit Pattern
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -883,6 +944,13 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
                           <p className="text-[11px] text-slate-400 font-mono line-clamp-2 mt-1">
                             {item.notes}
                           </p>
+                        )}
+
+                        {item.image && (
+                          <div className="mt-2 text-[10px] font-mono text-cyan-400/90 truncate bg-cyber-950/70 px-2 py-0.5 rounded border border-cyber-800">
+                            <span className="text-slate-500 mr-1">Image:</span>
+                            <span title={item.image}>{item.image}</span>
+                          </div>
                         )}
                       </div>
 
@@ -964,7 +1032,12 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
                   ))}
                 </select>
                 <p className="text-[10px] font-mono text-slate-500 mt-1">
-                  Container Image Pattern: {activeCategoryMeta.imageHint}
+                  Container Image Pattern:{" "}
+                  {getCategoryImagePattern(registry, modalType) ? (
+                    <code className="text-cyan-300">{getCategoryImagePattern(registry, modalType)}</code>
+                  ) : (
+                    <span className="text-amber-400 italic font-sans">None configured (manifest import recommended)</span>
+                  )}
                 </p>
               </div>
 
@@ -980,6 +1053,26 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
                   onChange={(e) => setVersionInput(e.target.value)}
                   className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-slate-300 mb-1">
+                  Container Image Override <span className="text-slate-500 font-normal">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder={
+                    getCategoryImagePattern(registry, modalType)
+                      ? getCategoryImagePattern(registry, modalType).replace("<tag>", versionInput.trim() || "tag")
+                      : "e.g. custom-registry.io/component:tag"
+                  }
+                  value={imageInput}
+                  onChange={(e) => setImageInput(e.target.value)}
+                  className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
+                />
+                <p className="text-[10px] font-mono text-slate-500 mt-1">
+                  Leave empty to inherit pattern: <code className="text-slate-400">{getCategoryImagePattern(registry, modalType) || "(not configured)"}</code>
+                </p>
               </div>
 
               <div>
@@ -1156,6 +1249,15 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
                     onClick={() => {
                       setImportManifestText(`# VCOP Platform Version Registry Manifest
 versionRegistry:
+  # Container Image Patterns (Never hardcoded; can point to private registries/air-gap)
+  imagePatterns:
+    k8s: "registry.k8s.io/kube-apiserver:<tag>"
+    vcluster: "ghcr.io/loft-sh/vcluster:<tag>"
+    etcd: "registry.k8s.io/etcd:<tag>"
+    coredns: "registry.k8s.io/coredns/coredns:<tag>"
+    metricsServer: "registry.k8s.io/metrics-server/metrics-server:<tag>"
+    istio: "docker.io/istio/pilot:<tag>"
+
   kubernetesVersions:
     - version: "v1.31.0"
       label: "v1.31.0 (Latest Default)"
@@ -1286,6 +1388,81 @@ versionRegistry:
                 Yes, Clear All Versions
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Configure Container Image Pattern */}
+      {patternModalType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-lg bg-cyber-900 border border-cyber-700 rounded-3xl shadow-2xl p-6 sm:p-7">
+            <div className="flex items-center justify-between pb-4 border-b border-cyber-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-cyan-500/10 rounded-xl border border-cyan-500/30 text-cyan-400">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    Container Image Pattern
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Configure container image pattern for {CATEGORIES.find((c) => c.id === patternModalType)?.title}.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPatternModalType(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-cyber-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePattern} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-xs font-mono text-slate-300 mb-1">
+                  Target Component
+                </label>
+                <div className="text-xs font-mono text-cyan-300 bg-cyber-950 border border-cyber-800 px-3 py-2 rounded-xl">
+                  {CATEGORIES.find((c) => c.id === patternModalType)?.title} ({CATEGORIES.find((c) => c.id === patternModalType)?.badge})
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-slate-300 mb-1">
+                  Container Image Pattern
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. registry.k8s.io/kube-apiserver:<tag> or harbor.corp.internal/vcluster:<tag>"
+                  value={patternInput}
+                  onChange={(e) => setPatternInput(e.target.value)}
+                  className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
+                />
+                <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                  Use <code className="text-cyan-300 bg-cyber-800 px-1 py-0.5 rounded">&lt;tag&gt;</code> as a placeholder for the version identifier. This pattern allows air-gapped or private registry redirects without hardcoded paths.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-cyber-800">
+                <button
+                  type="button"
+                  onClick={() => setPatternModalType(null)}
+                  className="px-4 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-300 text-xs font-mono rounded-xl border border-cyber-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPattern}
+                  className="px-5 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs font-mono rounded-xl shadow-glow-sm transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {savingPattern ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>Save Pattern</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

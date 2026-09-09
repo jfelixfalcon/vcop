@@ -324,6 +324,16 @@ export type VersionTag = 'default' | 'stable' | 'lts' | 'preview' | 'deprecated'
 
 export type VersionCategory = 'k8s' | 'vcluster' | 'etcd' | 'coredns' | 'metricsServer' | 'istio';
 
+export interface ImagePatterns {
+  k8s?: string;
+  vcluster?: string;
+  etcd?: string;
+  coredns?: string;
+  metricsServer?: string;
+  istio?: string;
+  [key: string]: string | undefined;
+}
+
 export interface VersionItem {
   version: string;
   label?: string;
@@ -331,6 +341,7 @@ export interface VersionItem {
   isDefault?: boolean;
   releaseDate?: string;
   notes?: string;
+  image?: string;
 }
 
 export interface VersionRegistry {
@@ -340,6 +351,7 @@ export interface VersionRegistry {
   coreDNSVersions?: VersionItem[];
   metricsServerVersions?: VersionItem[];
   istioVersions?: VersionItem[];
+  imagePatterns?: ImagePatterns;
   updatedAt: string;
 }
 
