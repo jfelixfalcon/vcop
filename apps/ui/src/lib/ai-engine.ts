@@ -154,7 +154,7 @@ export async function checkAiServiceHealth(): Promise<{
 
     return {
       online: hasKey || !settings.remoteEndpoint?.includes('api.openai.com'),
-      model: `Remote: ${model}`,
+      model: model,
       hardware: hasKey ? 'OpenAI-Compatible API' : 'API Key Required',
       url: settings.remoteEndpoint || DEFAULT_REMOTE_ENDPOINT,
       provider: 'custom',
@@ -773,8 +773,8 @@ Ground Truth Rules:
           return {
             role: 'assistant',
             content: generatedContent.trim(),
-            model: `${model} (OpenAI-API)`,
-            hardware: 'Remote API Endpoint',
+            model: model,
+            hardware: 'OpenAI-Compatible API',
             toolData: toolPayload,
           };
         }
@@ -942,11 +942,18 @@ Ground Truth Rules:
     hardwareString: 'Host Hardware',
   }));
 
+  const activeModel = !settings.localModelEnabled
+    ? (settings.remoteModel || DEFAULT_REMOTE_MODEL)
+    : 'Gemma 3 1B IT (Cyber Engine)';
+  const activeHardware = !settings.localModelEnabled
+    ? 'OpenAI-Compatible API (Deterministic Engine)'
+    : hw.hardwareString;
+
   return {
     role: 'assistant',
     content: responseText,
-    model: 'Gemma 3 1B IT (Cyber Engine)',
-    hardware: hw.hardwareString,
+    model: activeModel,
+    hardware: activeHardware,
     toolData: toolPayload,
   };
 }

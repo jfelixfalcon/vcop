@@ -11,6 +11,8 @@ export interface UserSession {
   role: UserRole;
   groups: string[];
   method: 'breakglass' | 'oidc';
+  accessToken?: string;
+  idToken?: string;
   expiresAt: number;
 }
 
@@ -46,13 +48,14 @@ export function authLog(message: string, ...args: any[]) {
 
 export const OIDC_CONFIG = {
   enabled: process.env.OIDC_ENABLED === 'true' || Boolean(process.env.OIDC_ISSUER_URL),
-  issuerUrl: process.env.OIDC_ISSUER_URL || '',
+  issuerUrl: (process.env.OIDC_ISSUER_URL || '').replace(/\/$/, ''),
   clientId: process.env.OIDC_CLIENT_ID || '',
   clientSecret: process.env.OIDC_CLIENT_SECRET || '',
   redirectUri: process.env.OIDC_REDIRECT_URI || '',
   scopes: process.env.OIDC_SCOPES || 'openid email profile groups',
   providerName: process.env.OIDC_PROVIDER_NAME || 'Single Sign-On (OIDC)',
-  adminGroups: (process.env.OIDC_ADMIN_GROUPS || 'admins,vcluster-admins,platform-ops')
+  groupsClaim: process.env.OIDC_GROUPS_CLAIM || 'groups',
+  adminGroups: (process.env.OIDC_ADMIN_GROUPS || 'admins,vcluster-admins,platform-ops,default-roles-master')
     .split(',')
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean),
@@ -85,6 +88,7 @@ export async function getEffectiveOidcConfig() {
       clientId: OIDC_CONFIG.clientId,
       hasSecret: Boolean(OIDC_CONFIG.clientSecret),
       redirectUri: OIDC_CONFIG.redirectUri,
+      groupsClaim: OIDC_CONFIG.groupsClaim,
     });
     return OIDC_CONFIG;
   }
@@ -105,12 +109,14 @@ export async function getEffectiveOidcConfig() {
         providerName: reg.global.name || 'Single Sign-On (OIDC)',
         adminGroups: OIDC_CONFIG.adminGroups,
         adminEmails: OIDC_CONFIG.adminEmails,
+        groupsClaim: reg.global.groupsClaim || OIDC_CONFIG.groupsClaim || 'groups',
       };
       authLog('Effective OIDC config from ConfigMap:', {
         issuerUrl: config.issuerUrl,
         clientId: config.clientId,
         hasSecret: Boolean(config.clientSecret),
         redirectUri: config.redirectUri,
+        groupsClaim: config.groupsClaim,
       });
       return config;
     }
@@ -215,6 +221,102 @@ export function validateBreakglass(username: string, password: string): UserSess
 }
 
 /**
+ * Strips LDAP distinguished name prefixes (e.g. "CN=developers,OU=Groups,DC=example,DC=com" -> "developers").
+ */
+export function cleanGroupName(g: string): string {
+  const trimmed = g.trim();
+  if (trimmed.toLowerCase().startsWith('cn=')) {
+    const match = trimmed.match(/^cn=([^,]+)/i);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+  return trimmed;
+}
+
+/**
+ * Extracts and consolidates all groups and roles across token claims, UserInfo payloads,
+ * and IdP-specific structures (Keycloak realm/client roles, Cognito, Active Directory, Okta, Authentik, etc.).
+ */
+export function extractGroupsFromClaims(
+  claims: any,
+  configuredGroupsClaim?: string,
+  clientId?: string
+): string[] {
+  if (!claims || typeof claims !== 'object') {
+    return [];
+  }
+
+  const extracted = new Set<string>();
+
+  const addCandidate = (val: any) => {
+    if (!val) return;
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        if (typeof item === 'string' && item.trim()) {
+          const raw = item.trim();
+          extracted.add(raw);
+          const clean = cleanGroupName(raw);
+          if (clean) extracted.add(clean);
+        } else if (typeof item === 'object' && item !== null) {
+          if (typeof item.name === 'string' && item.name.trim()) {
+            extracted.add(item.name.trim());
+          } else if (typeof item.role === 'string' && item.role.trim()) {
+            extracted.add(item.role.trim());
+          }
+        }
+      }
+    } else if (typeof val === 'string' && val.trim()) {
+      for (const part of val.split(',')) {
+        const raw = part.trim();
+        if (raw) {
+          extracted.add(raw);
+          const clean = cleanGroupName(raw);
+          if (clean) extracted.add(clean);
+        }
+      }
+    }
+  };
+
+  // 1. Configured custom groupsClaim (if provided in OidcProfile or env)
+  if (configuredGroupsClaim && claims[configuredGroupsClaim] !== undefined) {
+    addCandidate(claims[configuredGroupsClaim]);
+  }
+
+  // 2. Standard and vendor-specific claims
+  addCandidate(claims.groups);
+  addCandidate(claims.roles);
+  addCandidate(claims['cognito:groups']);
+  addCandidate(claims['roles_claim']);
+  addCandidate(claims['memberOf']);
+  addCandidate(claims.group);
+  addCandidate(claims.user_groups);
+  addCandidate(claims.groups_direct);
+  addCandidate(claims.directoryRoles);
+  addCandidate(claims.wids);
+  addCandidate(claims.authorities);
+
+  // 3. Keycloak realm_access.roles
+  if (claims.realm_access?.roles) {
+    addCandidate(claims.realm_access.roles);
+  }
+
+  // 4. Keycloak resource_access.<clientId>.roles and any other client roles
+  if (claims.resource_access && typeof claims.resource_access === 'object') {
+    if (clientId && claims.resource_access[clientId]?.roles) {
+      addCandidate(claims.resource_access[clientId].roles);
+    }
+    for (const clientKey of Object.keys(claims.resource_access)) {
+      if (claims.resource_access[clientKey]?.roles) {
+        addCandidate(claims.resource_access[clientKey].roles);
+      }
+    }
+  }
+
+  return Array.from(extracted);
+}
+
+/**
  * Resolves whether an OIDC user is assigned Admin, Developers, or Viewer role based on email or groups.
  */
 export function resolveOidcRole(email: string, groups: string[]): UserRole {
@@ -231,10 +333,46 @@ export function resolveOidcRole(email: string, groups: string[]): UserRole {
     }
   }
 
-  // Check Developer groups
-  const devGroups = ['developers', 'devs', 'developer', 'engineering', 'dev'];
+  // Also check if any group matches common administrator keywords
+  if (
+    normGroups.some(
+      (g) =>
+        g === 'admin' ||
+        g === 'admins' ||
+        g === 'administrator' ||
+        g === 'administrators' ||
+        g.endsWith('-admin') ||
+        g.endsWith('-admins') ||
+        g.startsWith('admin-')
+    )
+  ) {
+    return 'admin';
+  }
+
+  // Check Developer groups (configurable via env OIDC_DEV_GROUPS)
+  const devEnv = (process.env.OIDC_DEV_GROUPS || process.env.OIDC_DEVELOPER_GROUPS || '')
+    .toLowerCase()
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const devGroups = [
+    'developers',
+    'devs',
+    'developer',
+    'engineering',
+    'dev',
+    'vcluster-developers',
+    'platform-devs',
+    'devops',
+    ...devEnv,
+  ];
+
   for (const dg of devGroups) {
-    if (normGroups.includes(dg)) {
+    if (
+      normGroups.includes(dg) ||
+      normGroups.some((g) => g === dg || g.endsWith(`-${dg}`) || g.startsWith(`${dg}-`))
+    ) {
       return 'developers';
     }
   }
@@ -329,8 +467,85 @@ export async function getOidcAuthorizationUrl(
 }
 
 /**
+ * Queries the OIDC Provider's UserInfo endpoint using the Access Token.
+ * Retrieves authoritative user profile attributes and group memberships.
+ */
+export async function fetchOidcUserInfo(
+  accessToken: string,
+  discovery?: OidcDiscovery,
+  customIssuerUrl?: string
+): Promise<any | null> {
+  if (!accessToken || !accessToken.trim()) {
+    return null;
+  }
+
+  try {
+    let endpoint = discovery?.userinfo_endpoint;
+    let issuer = customIssuerUrl;
+
+    if (!endpoint) {
+      const config = await getEffectiveOidcConfig();
+      issuer = issuer || config.issuerUrl;
+      if (issuer) {
+        const disc = await getOidcDiscovery(issuer);
+        endpoint = disc.userinfo_endpoint;
+      }
+    }
+
+    if (!endpoint && issuer) {
+      const cleanIssuer = issuer.replace(/\/$/, '');
+      endpoint = `${cleanIssuer}/protocol/openid-connect/userinfo`;
+    }
+
+    if (!endpoint) {
+      authLog('OIDC UserInfo endpoint cannot be resolved');
+      return null;
+    }
+
+    authLog(`Querying OIDC UserInfo endpoint: ${endpoint}`);
+
+    // Attempt 1: Standard RFC 6749 / OIDC Core 5.3.1 GET request
+    let res = await fetch(endpoint, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken.trim()}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(7000),
+    });
+
+    // Attempt 2: If IdP requires POST (RFC 6749 allows POST), retry
+    if (!res.ok && (res.status === 405 || res.status === 400 || res.status === 401)) {
+      authLog(`UserInfo GET returned HTTP ${res.status}, retrying with POST to ${endpoint}`);
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken.trim()}`,
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        signal: AbortSignal.timeout(7000),
+      });
+    }
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.warn(`[AUTH-DEBUG] UserInfo request failed (HTTP ${res.status}) from ${endpoint}:`, errText);
+      return null;
+    }
+
+    const userInfo = await res.json();
+    authLog('OIDC UserInfo fetched successfully:', userInfo);
+    return userInfo;
+  } catch (err: any) {
+    console.warn('[AUTH-DEBUG] Failed to fetch OIDC UserInfo:', err.message);
+    return null;
+  }
+}
+
+/**
  * Directly authenticates a user from an OIDC token payload (id_token and/or access_token).
- * Extracts claims, queries userinfo endpoint if needed, and assigns roles.
+ * Extracts claims, queries UserInfo endpoint with access_token, and assigns roles.
  */
 export async function authenticateFromTokens(
   tokenData: { id_token?: string; access_token?: string },
@@ -368,19 +583,18 @@ export async function authenticateFromTokens(
     }
   }
 
-  // If userinfo endpoint exists and claims lack email or groups, fetch userinfo
-  if (discovery?.userinfo_endpoint && tokenData.access_token && (!claims.email || !claims.groups)) {
-    try {
-      const userinfoRes = await fetch(discovery.userinfo_endpoint, {
-        headers: { Authorization: `Bearer ${tokenData.access_token}` },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (userinfoRes.ok) {
-        const userInfo = (await userinfoRes.json()) as any;
-        claims = { ...claims, ...userInfo };
+  // ALWAYS query UserInfo endpoint when access_token is available to fetch authoritative groups & profile
+  if (tokenData.access_token) {
+    authLog('Access token present, querying OIDC provider UserInfo endpoint for user groups & profile...');
+    const userInfo = await fetchOidcUserInfo(tokenData.access_token, discovery, config.issuerUrl);
+    if (userInfo && typeof userInfo === 'object') {
+      claims = { ...claims, ...userInfo };
+      if (userInfo.realm_access) {
+        claims.realm_access = { ...claims.realm_access, ...userInfo.realm_access };
       }
-    } catch (e) {
-      console.warn('Failed fetching OIDC userinfo:', e);
+      if (userInfo.resource_access) {
+        claims.resource_access = { ...claims.resource_access, ...userInfo.resource_access };
+      }
     }
   }
 
@@ -390,25 +604,11 @@ export async function authenticateFromTokens(
     claims.preferred_username || claims.nickname || claims.name || email.split('@')[0] || 'oidc-user';
   const name: string = claims.name || username;
 
-  // Extract groups and roles from common claim names across Keycloak, Okta, Dex, Authentik
-  let groups: string[] = [];
-  const rawGroups =
-    claims.groups ||
-    claims.roles ||
-    claims['cognito:groups'] ||
-    claims['roles_claim'] ||
-    claims['memberOf'] ||
-    claims.realm_access?.roles ||
-    [];
-
-  if (Array.isArray(rawGroups)) {
-    groups = rawGroups.map(String);
-  } else if (typeof rawGroups === 'string') {
-    groups = rawGroups.split(',').map((s) => s.trim());
-  }
+  // Extract groups and roles across all claims, UserInfo payloads, and token data
+  const groups = extractGroupsFromClaims(claims, config.groupsClaim, config.clientId);
 
   const role = resolveOidcRole(email, groups);
-  authLog(`Assigned role '${role}' to user '${username}' (${email}) with groups:`, groups);
+  authLog(`Assigned role '${role}' to user '${username}' (${email}) with extracted groups:`, groups);
 
   return {
     id: claims.sub || `oidc-${username}`,
@@ -418,6 +618,8 @@ export async function authenticateFromTokens(
     role,
     groups,
     method: 'oidc',
+    accessToken: tokenData.access_token,
+    idToken: tokenData.id_token,
     expiresAt: Date.now() + 24 * 60 * 60 * 1000,
   };
 }

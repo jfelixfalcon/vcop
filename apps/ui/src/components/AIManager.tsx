@@ -28,7 +28,7 @@ export function AIManager({ isAdmin = true }: AIManagerProps) {
     localModelEnabled?: boolean;
   }>({
     online: true,
-    model: 'Gemma 3 1B IT (Q4_K_M)',
+    model: 'AI Engine',
     hardware: 'Detecting...',
     url: '',
   });
@@ -43,7 +43,7 @@ export function AIManager({ isAdmin = true }: AIManagerProps) {
         if (data?.ai) {
           setStatus({
             online: data.ai.online,
-            model: data.ai.model || 'Gemma 3 1B (Q4)',
+            model: data.ai.model || (data.ai.localModelEnabled ? 'Gemma 3 1B IT' : 'Remote AI'),
             hardware: data.ai.hardware || 'Host Hardware',
             url: data.ai.url || '',
             provider: data.ai.provider || 'local',

@@ -55,7 +55,7 @@ export default function AIChatOverlay() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ online: boolean; model: string; hardware: string }>({
     online: true,
-    model: 'Gemma 3 1B (Q4)',
+    model: 'AI Copilot',
     hardware: 'Detecting...',
   });
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -71,7 +71,7 @@ export default function AIChatOverlay() {
         if (data?.ai) {
           setStatus({
             online: data.ai.online,
-            model: data.ai.model || 'Gemma 3 1B (Q4)',
+            model: data.ai.model || (data.ai.localModelEnabled ? 'Gemma 3 1B IT' : 'Remote AI'),
             hardware: data.ai.hardware || 'Host Hardware',
           });
         }
@@ -136,6 +136,14 @@ export default function AIChatOverlay() {
       }
 
       const data = await res.json();
+
+      if (data.model) {
+        setStatus((prev) => ({
+          ...prev,
+          model: data.model,
+          hardware: data.hardware || prev.hardware,
+        }));
+      }
 
       const assistantMessage: ChatMessage = {
         id: `ai-${Date.now()}`,
@@ -351,7 +359,7 @@ export default function AIChatOverlay() {
             className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-cyber-900/90 backdrop-blur-md border border-cyan-500/30 rounded-full text-xs font-medium text-slate-300 shadow-xl cursor-pointer hover:border-cyan-400/60 transition-all hover:scale-105 group"
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Gemma 3 Copilot</span>
+            <span>{status.model && status.model !== 'AI Copilot' ? status.model : 'AI Copilot'}</span>
             <kbd className="px-1.5 py-0.5 bg-cyber-800 text-[10px] font-mono text-cyan-300 rounded border border-cyber-700/60">
               Ctrl+/
             </kbd>
@@ -450,8 +458,15 @@ export default function AIChatOverlay() {
             <div className="flex-1 p-4 overflow-y-auto overflow-x-hidden bg-cyber-950/80">
               <AISettingsPanel
                 onClose={() => setIsSettingsOpen(false)}
-                onSaved={() => {
+                onSaved={(savedSettings) => {
                   fetchStatus();
+                  if (savedSettings?.remoteModel && !savedSettings.localModelEnabled) {
+                    setStatus((prev) => ({
+                      ...prev,
+                      model: savedSettings.remoteModel,
+                      hardware: savedSettings.hasApiKey ? 'OpenAI-Compatible API' : 'API Key Required',
+                    }));
+                  }
                 }}
                 compact
               />
@@ -503,7 +518,7 @@ export default function AIChatOverlay() {
                     </div>
                     <span className="text-xs font-semibold text-slate-200">vCOp Copilot</span>
                     <span className="text-[10px] font-mono text-cyan-300 px-1.5 py-0.5 bg-cyan-950/70 border border-cyan-500/30 rounded-md">
-                      Gemma 3 1B
+                      {msg.model || status.model}
                     </span>
                     <span className="text-[10px] text-slate-500 font-mono ml-auto">{msg.timestamp}</span>
                   </div>
@@ -1020,7 +1035,7 @@ export default function AIChatOverlay() {
                     <span className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce"></span>
                   </div>
                   <span className="text-xs text-slate-400 font-mono">
-                    Querying cluster telemetry & synthesizing with Gemma 3...
+                    Querying cluster telemetry & synthesizing with {status.model}...
                   </span>
                 </div>
               </div>
