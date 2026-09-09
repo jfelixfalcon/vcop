@@ -1,6 +1,8 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { ClusterDetail } from '../../components/ClusterDetail';
+import { getVirtualCluster } from '../../lib/k8s-client';
+import { canUserViewCluster } from '../../lib/auth';
 
 const { name } = Astro.params;
 
@@ -8,6 +10,13 @@ if (!name) {
   return Astro.redirect('/');
 }
 const user = Astro.locals.user;
+
+if (user && user.role === 'viewer') {
+  const cluster = await getVirtualCluster(name);
+  if (!cluster || !canUserViewCluster(user, cluster)) {
+    return Astro.redirect('/?denied=unauthorized_cluster');
+  }
+}
 ---
 
 <Layout title={`${name} - Virtual Cluster Operations Center`}>

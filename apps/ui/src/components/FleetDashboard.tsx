@@ -99,6 +99,8 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
       const params = new URLSearchParams(window.location.search);
       if (params.get('denied') === 'admin_required') {
         setDeniedAlert('Access Denied: Administrator privileges required. The viewer persona has read-only access and cannot provision or modify clusters.');
+      } else if (params.get('denied') === 'unauthorized_cluster') {
+        setDeniedAlert('Access Denied: You do not have permission to view that virtual cluster. Viewers may only access clusters they are explicitly assigned to.');
       }
     }
   }, []);

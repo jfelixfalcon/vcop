@@ -697,21 +697,77 @@ export async function exchangeOidcCode(
 
 /**
  * Evaluates whether a user is authorized to VIEW a specific virtual cluster.
- * Admins, Developers, and Viewers can see all virtual clusters, telemetry, and metrics across the fleet.
+ * - Administrators can view all virtual clusters across the entire fleet.
+ * - Developers can view all clusters to deploy workloads and verify baselines.
+ * - Viewers can ONLY view virtual clusters they are explicitly part of (as owner, via allowedEmails, via allowedGroups, or via team clusterGroup).
  */
 export function canUserViewCluster(user: UserSession, cluster?: VirtualCluster): boolean {
-  if (user.role === 'admin' || user.role === 'viewer' || user.role === 'developers' || user.role === 'developer') {
+  if (!cluster) {
+    return false;
+  }
+
+  // 1. Administrators have fleet-wide global visibility
+  if (user.role === 'admin') {
     return true;
   }
+
+  // 2. Developers have fleet-wide workload visibility
+  if (user.role === 'developers' || user.role === 'developer') {
+    return true;
+  }
+
+  // 3. Viewers: strictly limited to clusters they are explicitly part of
+  const normEmail = (user.email || '').toLowerCase().trim();
+  const normUsername = (user.username || '').toLowerCase().trim();
+  const userGroups = (user.groups || []).map((g) => g.toLowerCase().trim());
+
+  const metadata = cluster.metadata || {};
+
+  // Check direct owner match (email or username)
+  const owner = (metadata.owner || '').toLowerCase().trim();
+  if (owner && (owner === normEmail || owner === normUsername)) {
+    return true;
+  }
+
+  // Check explicit allowedEmails
+  const allowedEmails = (metadata.allowedEmails || []).map((e) => e.toLowerCase().trim());
+  if (
+    (normEmail && allowedEmails.includes(normEmail)) ||
+    (normUsername && allowedEmails.includes(normUsername))
+  ) {
+    return true;
+  }
+
+  // Check explicit allowedGroups
+  const allowedGroups = (metadata.allowedGroups || []).map((g) => g.toLowerCase().trim());
+  if (allowedGroups.some((grp) => userGroups.includes(grp))) {
+    return true;
+  }
+
+  // Check team clusterGroup or clusterGroups
+  const clusterGroup = (metadata.clusterGroup || '').toLowerCase().trim();
+  if (clusterGroup && userGroups.includes(clusterGroup)) {
+    return true;
+  }
+
+  const clusterGroups = (metadata.clusterGroups || []).map((g) => g.toLowerCase().trim());
+  if (clusterGroups.some((grp) => userGroups.includes(grp))) {
+    return true;
+  }
+
+  // Viewer is not part of this cluster
   return false;
 }
 
 /**
  * Evaluates whether a user is authorized to retrieve the cluster kubeconfig.
- * Admins, Developers, and Viewers can connect and download kubeconfigs.
+ * Admins and Developers have full access; Viewers can only get kubeconfigs for clusters they are part of.
  */
 export function canUserGetKubeconfig(user: UserSession, cluster?: VirtualCluster): boolean {
-  return user.role === 'admin' || user.role === 'viewer' || user.role === 'developers' || user.role === 'developer';
+  if (user.role === 'admin' || user.role === 'developers' || user.role === 'developer') {
+    return true;
+  }
+  return canUserViewCluster(user, cluster);
 }
 
 /**
