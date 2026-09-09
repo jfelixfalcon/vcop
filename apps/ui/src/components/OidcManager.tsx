@@ -953,7 +953,7 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
 
       {/* GROUP PROFILE EDIT MODAL */}
       {isGroupModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
           <div className="bg-cyber-900 border border-cyber-700 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] my-auto">
             <div className="flex items-center justify-between p-5 border-b border-cyber-800 bg-cyber-950/70">
               <div className="flex items-center gap-3">
@@ -1164,7 +1164,7 @@ export const OidcManager: React.FC<Props> = ({ initialRegistry, isAdmin }) => {
 
       {/* ACTION CONFIRMATION MODAL */}
       {confirmModal && confirmModal.isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
           <div className="bg-cyber-900 border border-cyber-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-5 space-y-4 my-auto">
             <div className="flex items-start gap-3">
               <div className="p-2.5 bg-purple-500/20 text-purple-400 rounded-xl border border-purple-500/30 shrink-0">

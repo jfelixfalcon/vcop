@@ -995,7 +995,7 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
 
       {/* MODAL: Add Version */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
           <div className="relative w-full max-w-lg bg-cyber-900 border border-cyber-700 rounded-2xl shadow-2xl p-6 overflow-hidden my-auto">
             <div className="flex justify-between items-start mb-5">
               <div>
@@ -1155,7 +1155,7 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
 
       {/* MODAL: Confirm Delete */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
           <div className="relative w-full max-w-md bg-cyber-900 border border-cyber-700 rounded-2xl shadow-2xl p-6 my-auto">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2.5 bg-rose-500/10 rounded-xl border border-rose-500/30 text-rose-400">
@@ -1196,7 +1196,7 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
 
       {/* MODAL: Import Manifest */}
       {isImportModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
           <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700 rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] flex flex-col my-auto">
             <div className="flex items-center justify-between pb-4 border-b border-cyber-800">
               <div className="flex items-center gap-3">
@@ -1352,7 +1352,7 @@ versionRegistry:
 
       {/* MODAL: Clear All Versions Confirmation */}
       {isClearModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
           <div className="relative w-full max-w-md bg-cyber-900 border border-rose-500/40 rounded-3xl shadow-2xl p-6 my-auto">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2.5 bg-rose-500/20 rounded-xl border border-rose-500/30 text-rose-400">
@@ -1394,7 +1394,7 @@ versionRegistry:
 
       {/* MODAL: Configure Container Image Pattern */}
       {patternModalType && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
           <div className="relative w-full max-w-lg bg-cyber-900 border border-cyber-700 rounded-3xl shadow-2xl p-6 sm:p-7 my-auto">
             <div className="flex items-center justify-between pb-4 border-b border-cyber-800">
               <div className="flex items-center gap-3">

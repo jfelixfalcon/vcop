@@ -501,7 +501,7 @@ export const DisasterRecoveryTab: React.FC<Props> = ({ cluster, onRefresh, isAdm
 
       {/* MODAL: Configure Backup Schedule */}
       {isConfigModalOpen && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 bg-cyber-950/45 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-cyber-900 border border-cyber-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150 my-auto">
             <div className="p-5 border-b border-cyber-800 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -656,7 +656,7 @@ export const DisasterRecoveryTab: React.FC<Props> = ({ cluster, onRefresh, isAdm
 
       {/* MODAL: Restore Snapshot Confirmation */}
       {isRestoreModalOpen && selectedSnapshot && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 bg-cyber-950/45 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-cyber-900 border border-amber-500/50 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150 my-auto">
             <div className="p-5 bg-amber-500/10 border-b border-amber-500/30 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
