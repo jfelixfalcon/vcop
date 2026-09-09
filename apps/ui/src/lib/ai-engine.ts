@@ -56,12 +56,13 @@ export interface WorkloadStat {
 }
 
 export interface ActionPayload {
-  type: 'restart' | 'scale';
-  kind: 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'Pod';
+  type: 'restart' | 'scale' | 'delete';
+  kind: string;
   name: string;
   namespace: string;
-  status: 'success' | 'failed';
+  status: 'success' | 'failed' | 'blocked';
   message: string;
+  policyReason?: string;
   restartedAt?: string;
   cliCommand?: string;
   rolloutCommand?: string;
@@ -212,10 +213,10 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
 
   // Extract namespace
   let detectedNamespace: string | undefined;
-  const nsMatch = lower.match(/(?:in\s+namespace|namespace|in\s+ns|ns|\bin)\s+([a-zA-Z0-9_-]+)/);
+  const nsMatch = lower.match(/(?:in\s+namespace|\bnamespace\b|in\s+ns|\bns\b|\bin\b)\s+([a-zA-Z0-9_-]+)/);
   if (nsMatch) {
     const raw = nsMatch[1].trim();
-    if (!['the', 'all', 'a', 'this', 'our', 'my', 'cluster', 'total', 'namespace', 'ns'].includes(raw)) {
+    if (!['the', 'all', 'a', 'this', 'our', 'my', 'cluster', 'total', 'namespace', 'ns', 'in'].includes(raw)) {
       detectedNamespace = raw;
     }
   }
@@ -237,6 +238,94 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
     } else if (lower.includes('cert-manager')) {
       detectedNamespace = 'cert-manager';
     }
+  }
+
+  // 0. Safety Guardrail: Prevent deleting any resources on Kubernetes via AI chat
+  const isDirectDeleteCommand = /\b(?:kubectl\s+delete|helm\s+(?:uninstall|delete))\b/i.test(lower);
+
+  const deleteVerbs = '(?:delete|destroy|remove|kill|terminate|prune|purge|wipe(?:\\s+out)?|drop|tear\\s+down|uninstall)';
+  const k8sResources = '(?:pods?|deployments?|deploy|statefulsets?|sts|daemonsets?|ds|replicasets?|rs|services?|svc|ingresses?|namespaces?|ns|virtual\\s*clusters?|vclusters?|clusters?|pvcs?|pvs?|persistentvolumes?(?:claims?)?|secrets?|configmaps?|cm|nodes?|crds?|workloads?|resources?|cronjobs?|jobs?|catalog|catalog\\s*apps?|everything|all)';
+
+  const isImperativeDelete =
+    new RegExp(`\\b${deleteVerbs}\\s+(?:the\\s+)?(?:all\\s+)?${k8sResources}\\b`, 'i').test(lower) ||
+    new RegExp(`\\b${deleteVerbs}\\s+(?:the\\s+)?([a-zA-Z0-9_-]+)\\s+${k8sResources}\\b`, 'i').test(lower) ||
+    new RegExp(`\\b(?:can\\s+you|please|could\\s+you|help\\s+me|i\\s+want\\s+to|how\\s+to|how\\s+do\\s+i|how\\s+can\\s+i)?\\s*${deleteVerbs}\\s+(?:the\\s+)?(?:all\\s+)?(?:it|this|them|everything|all|cluster|resources?)\\b`, 'i').test(lower) ||
+    new RegExp(`^(?:${deleteVerbs})\\b`, 'i').test(lower);
+
+  // Exclude non-destructive diagnostic inquiries about past events or informational questions (e.g. "why was the pod deleted?")
+  const isPastInquiry =
+    /\b(?:why|when|who|which)\s+(?:was|were|did|has|have)\b/i.test(lower) ||
+    /\b(?:history|log|logs|events?)\s+of\s+(?:deleted|terminated)/i.test(lower) ||
+    /\bwhat\s+happens\s+if\b/i.test(lower);
+
+  const isDeleteAction = (isDirectDeleteCommand || isImperativeDelete) && !isPastInquiry;
+
+  if (isDeleteAction) {
+    let targetResourceKind = 'Kubernetes Resource';
+    if (/\b(?:virtual\s*cluster|vcluster)\b/i.test(lower)) targetResourceKind = 'VirtualCluster';
+    else if (/\b(?:deployment|deploy)\b/i.test(lower)) targetResourceKind = 'Deployment';
+    else if (/\b(?:pod|pods)\b/i.test(lower)) targetResourceKind = 'Pod';
+    else if (/\b(?:statefulset|sts)\b/i.test(lower)) targetResourceKind = 'StatefulSet';
+    else if (/\b(?:daemonset|ds)\b/i.test(lower)) targetResourceKind = 'DaemonSet';
+    else if (/\b(?:service|svc)\b/i.test(lower)) targetResourceKind = 'Service';
+    else if (/\b(?:namespace|ns)\b/i.test(lower)) targetResourceKind = 'Namespace';
+    else if (/\b(?:pvc|pv|persistentvolume)\b/i.test(lower)) targetResourceKind = 'PersistentVolumeClaim';
+    else if (/\b(?:secret|secrets)\b/i.test(lower)) targetResourceKind = 'Secret';
+    else if (/\b(?:configmap|cm)\b/i.test(lower)) targetResourceKind = 'ConfigMap';
+    else if (/\b(?:node|nodes)\b/i.test(lower)) targetResourceKind = 'Node';
+
+    let targetResourceName: string | undefined;
+    const deleteNameMatch = lower.match(
+      /(?:delete|destroy|remove|kill|terminate|prune|purge|wipe|drop|uninstall)\s+(?:the\s+)?(?:deployment|deploy|pod|statefulset|sts|daemonset|ds|service|svc|namespace|ns|virtual\s*cluster|vcluster|pvc|secret|configmap)?\s*([a-zA-Z0-9_-]+)/i
+    );
+    if (deleteNameMatch && deleteNameMatch[1]) {
+      const candidate = deleteNameMatch[1].trim();
+      if (!['the', 'a', 'all', 'this', 'our', 'my', 'deployment', 'pod', 'namespace', 'vcluster', 'cluster', 'for', 'please', 'me', 'it', 'to', 'in', 'everything'].includes(candidate)) {
+        targetResourceName = candidate;
+      }
+    }
+
+    const scopeStr = targetResourceName
+      ? `${targetResourceKind} '${targetResourceName}'${detectedNamespace ? ` in namespace '${detectedNamespace}'` : ''}`
+      : `${targetResourceKind}s${detectedNamespace ? ` in namespace '${detectedNamespace}'` : ' across the cluster'}`;
+
+    const blockedPayload: ToolDataPayload = {
+      type: 'action',
+      action: {
+        type: 'delete',
+        kind: targetResourceKind,
+        name: targetResourceName || 'targeted-resource',
+        namespace: detectedNamespace || 'all-namespaces',
+        status: 'blocked',
+        message: `Deletion of ${scopeStr} was blocked. Resource deletion via AI Chat is strictly prohibited by platform security policy.`,
+        policyReason: 'AI Cyber-Copilot enforces read-only safety guardrails for cluster resources. Destructive deletion actions are disabled through the conversational interface to prevent accidental downtime and unauthorized data destruction.',
+      },
+    };
+
+    return {
+      role: 'assistant',
+      content: `[STATUS: BLOCKED 🛑]\n\n` +
+        `**Security Guardrail Enforcement**: Resource deletion via AI Cyber-Copilot is strictly prohibited by platform policy.\n\n` +
+        `### Operation Details\n` +
+        `- **Requested Action**: \`DELETE / TERMINATE\`\n` +
+        `- **Target Resource**: \`${scopeStr}\`\n` +
+        `- **Safety Status**: \`OPERATION BLOCKED 🛑\`\n` +
+        `- **Security Policy**: \`VCOP-SEC-GUARD-001 (Zero Destructive Conversational Actions)\`\n\n` +
+        `### Safety Rationale\n` +
+        `AI Cyber-Copilot is restricted from deleting, terminating, or modifying existing resources destructively. This safeguard eliminates accidental outages, unauthorized tenant removals, and unrecoverable data loss in production environments.\n\n` +
+        `### Authorized Deletion Procedures\n` +
+        `If this resource must be deleted or decommissioned, an authorized **Platform Administrator** must execute the change through formal governance workflows:\n` +
+        `1. **Virtual Cluster Operations Center UI**: Navigate to **Cluster Fleet** or **Baselines**, select the resource, and use the authenticated deletion modal (subject to administrator approval).\n` +
+        `2. **Authorized CLI**: Execute standard \`kubectl\` commands using direct administrator credentials with audit logging enabled:\n` +
+        `\`\`\`bash\n` +
+        `# Must be executed by an authorized Administrator with appropriate RBAC\n` +
+        `kubectl delete ${targetResourceKind.toLowerCase()} ${targetResourceName || '<name>'} ${detectedNamespace ? `-n ${detectedNamespace}` : ''}\n` +
+        `\`\`\`\n` +
+        `3. All deletions are permanently recorded in the Kubernetes API audit log.`,
+      model: 'vCOp Security Guardrail',
+      hardware: 'Safety Policy Interceptor',
+      toolData: blockedPayload,
+    };
   }
 
   // 1. Identify intent & action commands
@@ -633,6 +722,7 @@ Response Formatting Protocol:
 
 Ground Truth Rules:
 - State exact figures from the provided Cluster Facts. Never invent or hallucinate metrics, pod counts, or resource stats.
+- CRITICAL SAFETY MANDATE (ZERO DELETION POLICY): You are strictly forbidden from deleting, terminating, or removing any Kubernetes resources, and you must NEVER execute, suggest, or provide \`kubectl delete\`, \`helm uninstall\`, or any other destructive deletion commands. If a user asks to delete, destroy, remove, kill, or terminate any Kubernetes resource (pods, deployments, namespaces, virtual clusters, persistent volumes, configmaps, secrets, etc.), you must refuse immediately with \`[STATUS: BLOCKED 🛑]\`. State that resource deletion via AI Chat is prohibited by platform safety policy, and direct the user to official administrative governance channels.
 - For cluster actions (e.g. restart, rollout, scale): Always begin with [STATUS: ACTIVE ⚡] (or [STATUS: ATTENTION ⚠️] if the action failed). Confirm that the action was successfully initiated on the target workload, state its namespace, and include the kubectl command.
 - For pod inquiries: State the exact Total Pods, Running, Pending, and Failed figures provided in the Live Kubernetes Pod Inventory.
 - If 0 timeseries samples are found when querying historical CPU/memory metrics for a namespace, explicitly state that 0 samples were recorded, list the active namespaces from Cluster Facts, and recommend querying one of them.
@@ -738,7 +828,17 @@ Ground Truth Rules:
   let responseText = '';
   if (toolPayload?.type === 'action') {
     const act = toolPayload.action!;
-    if (act.status === 'success') {
+    if (act.status === 'blocked') {
+      responseText = `[STATUS: BLOCKED 🛑]\n\n` +
+        `**Security Policy Enforcement**: Deletion of Kubernetes resources via AI Cyber-Copilot is strictly prohibited.\n\n` +
+        `> ${act.message}\n\n` +
+        `### Security Policy Details\n` +
+        `- **Policy Code**: \`VCOP-SEC-GUARD-001 (Zero Destructive Conversational Actions)\`\n` +
+        `- **Target**: \`${act.kind}/${act.name}\` in \`${act.namespace}\`\n` +
+        `- **Enforcement**: Operation blocked by platform safety guardrail.\n\n` +
+        `### Authorized Procedure\n` +
+        `Decommissioning or deleting Kubernetes resources must be executed by an authorized Platform Administrator using the Cluster Management Console or authenticated \`kubectl\` with proper RBAC.`;
+    } else if (act.status === 'success') {
       const isRestart = act.type === 'restart';
       responseText = `[STATUS: ACTIVE ⚡]\n\n` +
         `**Executive Summary**: Successfully initiated ${isRestart ? 'rollout restart' : 'scaling'} for **${act.kind} \`${act.name}\`** in namespace **\`${act.namespace}\`**.\n\n` +

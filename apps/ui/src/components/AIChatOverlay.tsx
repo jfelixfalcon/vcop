@@ -24,6 +24,7 @@ import {
   Terminal,
   Boxes,
   RotateCw,
+  ShieldAlert,
 } from 'lucide-react';
 import { AISettingsPanel } from './AISettingsPanel';
 
@@ -198,13 +199,16 @@ export default function AIChatOverlay() {
       const badgeMatch = line.trim().match(/^\[(STATUS|TELEMETRY|ALERT|DIAGNOSTIC):\s*([^\]]+)\]/i);
       if (badgeMatch) {
         const tag = `${badgeMatch[1]}: ${badgeMatch[2]}`;
-        const isOptimal = /optimal|green|stable|verified|active/i.test(tag);
-        const isWarning = /attention|warn|alert|critical|zero|pressure/i.test(tag);
+        const isBlocked = /blocked|prohibited|forbidden|denied|prevented/i.test(tag);
+        const isOptimal = !isBlocked && /optimal|green|stable|verified|active/i.test(tag);
+        const isWarning = !isBlocked && /attention|warn|alert|critical|zero|pressure/i.test(tag);
         return (
           <div key={idx} className="my-1.5">
             <div
               className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-semibold tracking-wide shadow-sm border ${
-                isOptimal
+                isBlocked
+                  ? 'bg-rose-950/80 border-rose-500/60 text-rose-300 shadow-rose-500/20'
+                  : isOptimal
                   ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300 shadow-emerald-500/10'
                   : isWarning
                   ? 'bg-amber-950/60 border-amber-500/40 text-amber-300 shadow-amber-500/10'
@@ -213,7 +217,7 @@ export default function AIChatOverlay() {
             >
               <span
                 className={`w-1.5 h-1.5 rounded-full animate-pulse ${
-                  isOptimal ? 'bg-emerald-400' : isWarning ? 'bg-amber-400' : 'bg-cyan-400'
+                  isBlocked ? 'bg-rose-400' : isOptimal ? 'bg-emerald-400' : isWarning ? 'bg-amber-400' : 'bg-cyan-400'
                 }`}
               />
               <span>{tag}</span>
@@ -757,83 +761,126 @@ export default function AIChatOverlay() {
                       {/* Rich Action Execution Widget */}
                       {msg.toolData?.type === 'action' && msg.toolData.action && (
                         <div className="mt-3 pt-3 border-t border-cyber-800/80 space-y-2.5 font-mono">
-                          <div className="flex items-center justify-between text-xs text-slate-400">
-                            <span className="flex items-center gap-1.5 text-cyan-300 font-medium">
-                              <RotateCw className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-emerald-400 animate-spin [animation-duration:3s]' : 'text-amber-400'}`} />
-                              Cluster Operation: {msg.toolData.action.type === 'restart' ? 'Rollout Restart' : 'Scale Workload'}
-                            </span>
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                              msg.toolData.action.status === 'success'
-                                ? 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-300'
-                                : 'bg-rose-950/80 border border-rose-500/40 text-rose-300'
-                            }`}>
-                              {msg.toolData.action.status === 'success' ? 'Executed ⚡' : 'Failed ⚠️'}
-                            </span>
-                          </div>
-
-                          {/* Action Details Card */}
-                          <div className="bg-cyber-950/80 border border-cyber-800 p-3 rounded-xl space-y-2">
-                            <div className="flex items-center justify-between text-xs border-b border-cyber-800/70 pb-2">
-                              <div>
-                                <span className="text-[10px] text-slate-500 uppercase tracking-wider block">Target Workload</span>
-                                <span className="text-sm font-bold text-white flex items-center gap-1.5 mt-0.5">
-                                  <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                                  {msg.toolData.action.kind}/{msg.toolData.action.name}
+                          {msg.toolData.action.status === 'blocked' ? (
+                            <>
+                              <div className="flex items-center justify-between text-xs text-slate-400">
+                                <span className="flex items-center gap-1.5 text-rose-400 font-medium">
+                                  <ShieldAlert className="w-4 h-4 text-rose-400" />
+                                  Security Guardrail: Deletion Prohibited
+                                </span>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-rose-950/80 border border-rose-500/50 text-rose-300 shadow-sm shadow-rose-500/20">
+                                  Blocked 🛑
                                 </span>
                               </div>
-                              <div className="text-right">
-                                <span className="text-[10px] text-slate-500 uppercase tracking-wider block">Namespace</span>
-                                <span className="text-xs font-semibold text-cyan-300 px-2 py-0.5 bg-cyan-950/60 border border-cyan-500/30 rounded-lg inline-block mt-0.5">
-                                  {msg.toolData.action.namespace}
-                                </span>
-                              </div>
-                            </div>
 
-                            {/* Replicas & Timestamp status */}
-                            <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
-                              {msg.toolData.action.replicas && (
-                                <div className="bg-cyber-900/60 p-2 rounded-lg border border-cyber-800/60">
-                                  <span className="text-[10px] text-slate-500 block">Replicas State</span>
-                                  {msg.toolData.action.replicas.desired !== undefined ? (
-                                    <span className="text-slate-200 font-bold">
-                                      {msg.toolData.action.replicas.ready ?? 0} / {msg.toolData.action.replicas.desired} Ready
+                              {/* Blocked Action Details Card */}
+                              <div className="bg-rose-950/30 border border-rose-500/40 p-3.5 rounded-xl space-y-2.5">
+                                <div className="flex items-center justify-between text-xs border-b border-rose-500/30 pb-2">
+                                  <div>
+                                    <span className="text-[10px] text-rose-300/70 uppercase tracking-wider block">Target Resource</span>
+                                    <span className="text-sm font-bold text-white flex items-center gap-1.5 mt-0.5">
+                                      <Layers className="w-3.5 h-3.5 text-rose-400" />
+                                      {msg.toolData.action.kind}/{msg.toolData.action.name}
                                     </span>
-                                  ) : (
-                                    <span className="text-slate-200 font-bold">
-                                      {msg.toolData.action.replicas.previous} → {msg.toolData.action.replicas.new} Replicas
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="text-[10px] text-rose-300/70 uppercase tracking-wider block">Target Scope</span>
+                                    <span className="text-xs font-semibold text-rose-300 px-2 py-0.5 bg-rose-950/60 border border-rose-500/40 rounded-lg inline-block mt-0.5">
+                                      {msg.toolData.action.namespace}
                                     </span>
-                                  )}
+                                  </div>
                                 </div>
-                              )}
 
-                              <div className="bg-cyber-900/60 p-2 rounded-lg border border-cyber-800/60">
-                                <span className="text-[10px] text-slate-500 block">Operation Timestamp</span>
-                                <span className="text-slate-300 font-mono text-[10px] truncate block" title={msg.toolData.action.restartedAt}>
-                                  {msg.toolData.action.restartedAt ? new Date(msg.toolData.action.restartedAt).toLocaleTimeString() : 'Just now'}
+                                <p className="text-[11px] text-rose-200/90 font-sans leading-relaxed">
+                                  {msg.toolData.action.policyReason || msg.toolData.action.message}
+                                </p>
+
+                                <div className="pt-2 border-t border-rose-500/20 text-[10px] text-slate-400 font-sans">
+                                  <strong className="text-slate-300">Authorized Path:</strong> Resource deletion is restricted to Platform Administrators via the Cluster Fleet console or authenticated CLI with audit logging.
+                                </div>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex items-center justify-between text-xs text-slate-400">
+                                <span className="flex items-center gap-1.5 text-cyan-300 font-medium">
+                                  <RotateCw className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-emerald-400 animate-spin [animation-duration:3s]' : 'text-amber-400'}`} />
+                                  Cluster Operation: {msg.toolData.action.type === 'restart' ? 'Rollout Restart' : 'Scale Workload'}
+                                </span>
+                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                                  msg.toolData.action.status === 'success'
+                                    ? 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-300'
+                                    : 'bg-rose-950/80 border border-rose-500/40 text-rose-300'
+                                }`}>
+                                  {msg.toolData.action.status === 'success' ? 'Executed ⚡' : 'Failed ⚠️'}
                                 </span>
                               </div>
-                            </div>
 
-                            {/* Interactive Quick Actions on the Card */}
-                            <div className="pt-2 border-t border-cyber-800/60 flex flex-wrap items-center gap-1.5">
-                              {msg.toolData.action.rolloutCommand && (
-                                <button
-                                  onClick={() => handleSendMessage(`How many pods are in namespace ${msg.toolData.action.namespace}?`)}
-                                  className="px-2.5 py-1 bg-cyber-900 hover:bg-cyan-950/60 border border-cyber-700 hover:border-cyan-500/50 rounded-lg text-[10px] text-slate-300 hover:text-cyan-300 transition-all flex items-center gap-1"
-                                >
-                                  <Boxes className="w-3 h-3 text-cyan-400" />
-                                  Check Pods ({msg.toolData.action.namespace})
-                                </button>
-                              )}
-                              <button
-                                onClick={() => handleSendMessage(`Can you restart the ${msg.toolData.action.name} deployment for me?`)}
-                                className="px-2.5 py-1 bg-cyber-900 hover:bg-cyber-800 border border-cyber-700 hover:border-slate-500 rounded-lg text-[10px] text-slate-300 hover:text-white transition-all flex items-center gap-1"
-                              >
-                                <RotateCw className="w-3 h-3 text-slate-400" />
-                                Re-trigger Restart
-                              </button>
-                            </div>
-                          </div>
+                              {/* Action Details Card */}
+                              <div className="bg-cyber-950/80 border border-cyber-800 p-3 rounded-xl space-y-2">
+                                <div className="flex items-center justify-between text-xs border-b border-cyber-800/70 pb-2">
+                                  <div>
+                                    <span className="text-[10px] text-slate-500 uppercase tracking-wider block">Target Workload</span>
+                                    <span className="text-sm font-bold text-white flex items-center gap-1.5 mt-0.5">
+                                      <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                                      {msg.toolData.action.kind}/{msg.toolData.action.name}
+                                    </span>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="text-[10px] text-slate-500 uppercase tracking-wider block">Namespace</span>
+                                    <span className="text-xs font-semibold text-cyan-300 px-2 py-0.5 bg-cyan-950/60 border border-cyan-500/30 rounded-lg inline-block mt-0.5">
+                                      {msg.toolData.action.namespace}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Replicas & Timestamp status */}
+                                <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+                                  {msg.toolData.action.replicas && (
+                                    <div className="bg-cyber-900/60 p-2 rounded-lg border border-cyber-800/60">
+                                      <span className="text-[10px] text-slate-500 block">Replicas State</span>
+                                      {msg.toolData.action.replicas.desired !== undefined ? (
+                                        <span className="text-slate-200 font-bold">
+                                          {msg.toolData.action.replicas.ready ?? 0} / {msg.toolData.action.replicas.desired} Ready
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-200 font-bold">
+                                          {msg.toolData.action.replicas.previous} → {msg.toolData.action.replicas.new} Replicas
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  <div className="bg-cyber-900/60 p-2 rounded-lg border border-cyber-800/60">
+                                    <span className="text-[10px] text-slate-500 block">Operation Timestamp</span>
+                                    <span className="text-slate-300 font-mono text-[10px] truncate block" title={msg.toolData.action.restartedAt}>
+                                      {msg.toolData.action.restartedAt ? new Date(msg.toolData.action.restartedAt).toLocaleTimeString() : 'Just now'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Interactive Quick Actions on the Card */}
+                                <div className="pt-2 border-t border-cyber-800/60 flex flex-wrap items-center gap-1.5">
+                                  {msg.toolData.action.rolloutCommand && (
+                                    <button
+                                      onClick={() => handleSendMessage(`How many pods are in namespace ${msg.toolData.action.namespace}?`)}
+                                      className="px-2.5 py-1 bg-cyber-900 hover:bg-cyan-950/60 border border-cyber-700 hover:border-cyan-500/50 rounded-lg text-[10px] text-slate-300 hover:text-cyan-300 transition-all flex items-center gap-1"
+                                    >
+                                      <Boxes className="w-3 h-3 text-cyan-400" />
+                                      Check Pods ({msg.toolData.action.namespace})
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleSendMessage(`Can you restart the ${msg.toolData.action.name} deployment for me?`)}
+                                    className="px-2.5 py-1 bg-cyber-900 hover:bg-cyber-800 border border-cyber-700 hover:border-slate-500 rounded-lg text-[10px] text-slate-300 hover:text-white transition-all flex items-center gap-1"
+                                  >
+                                    <RotateCw className="w-3 h-3 text-slate-400" />
+                                    Re-trigger Restart
+                                  </button>
+                                </div>
+                              </div>
+                            </>
+                          )}
                         </div>
                       )}
 
