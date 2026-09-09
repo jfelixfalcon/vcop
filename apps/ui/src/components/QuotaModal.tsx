@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { VirtualCluster, PoliciesSpec, ClusterCapacityData } from '../lib/types';
 import { parseCpuMillis, parseMemoryBytes, formatCpuMillis, formatMemoryBytes } from '../lib/metrics-utils';
+import { ModalPortal } from './ModalPortal';
 
 interface Props {
   cluster: VirtualCluster | null;
@@ -297,8 +298,9 @@ export const QuotaModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpdate
   if (!isOpen || !cluster) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] my-auto">
+    <ModalPortal>
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 overflow-y-auto bg-cyber-950/80 backdrop-blur-md animate-in fade-in duration-150">
+        <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] my-auto">
         {/* Top Glow */}
         <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
 
@@ -786,5 +788,6 @@ export const QuotaModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpdate
         </form>
       </div>
     </div>
+  </ModalPortal>
   );
 };

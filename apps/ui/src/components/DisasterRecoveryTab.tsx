@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { VirtualCluster, DisasterRecoverySpec, DisasterRecoveryStatus, BackupItem } from '../lib/types';
+import { ModalPortal } from './ModalPortal';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -501,8 +502,9 @@ export const DisasterRecoveryTab: React.FC<Props> = ({ cluster, onRefresh, isAdm
 
       {/* MODAL: Configure Backup Schedule */}
       {isConfigModalOpen && (
-        <div className="fixed inset-0 bg-cyber-950/45 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-cyber-900 border border-cyber-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150 my-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+            <div className="bg-cyber-900 border border-cyber-700 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150 my-auto">
             <div className="p-5 border-b border-cyber-800 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-cyber-500/10 text-cyber-400">
@@ -652,12 +654,14 @@ export const DisasterRecoveryTab: React.FC<Props> = ({ cluster, onRefresh, isAdm
             </div>
           </div>
         </div>
+      </ModalPortal>
       )}
 
       {/* MODAL: Restore Snapshot Confirmation */}
       {isRestoreModalOpen && selectedSnapshot && (
-        <div className="fixed inset-0 bg-cyber-950/45 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-cyber-900 border border-amber-500/50 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150 my-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+            <div className="bg-cyber-900 border border-amber-500/50 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-150 my-auto">
             <div className="p-5 bg-amber-500/10 border-b border-amber-500/30 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-amber-500/20 text-amber-400">
@@ -752,6 +756,7 @@ export const DisasterRecoveryTab: React.FC<Props> = ({ cluster, onRefresh, isAdm
             </div>
           </div>
         </div>
+      </ModalPortal>
       )}
     </div>
   );

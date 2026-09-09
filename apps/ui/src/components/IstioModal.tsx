@@ -10,6 +10,7 @@ import {
   Layers,
 } from 'lucide-react';
 import type { VirtualCluster } from '../lib/types';
+import { ModalPortal } from './ModalPortal';
 
 interface IstioModalProps {
   cluster: VirtualCluster;
@@ -106,8 +107,9 @@ export const IstioModal: React.FC<IstioModalProps> = ({
       : hostIssuers.issuers.includes(certIssuer.trim()));
 
   return (
-    <div className="fixed inset-0 bg-cyber-950/45 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-cyber-900 border border-cyber-700 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-auto">
+    <ModalPortal>
+      <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+        <div className="bg-cyber-900 border border-cyber-700 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-cyber-800">
           <div className="flex items-center gap-2.5">
@@ -309,5 +311,6 @@ export const IstioModal: React.FC<IstioModalProps> = ({
         </form>
       </div>
     </div>
+  </ModalPortal>
   );
 };

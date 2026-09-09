@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { VersionItem, VersionRegistry, VersionTag, VersionCategory } from "../lib/types";
 import { ImageRegistryManager } from "./ImageRegistryManager";
+import { ModalPortal } from "./ModalPortal";
 
 interface Props {
   initialRegistry?: VersionRegistry;
@@ -995,8 +996,9 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
 
       {/* MODAL: Add Version */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-lg bg-cyber-900 border border-cyber-700 rounded-2xl shadow-2xl p-6 overflow-hidden my-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+            <div className="relative w-full max-w-lg bg-cyber-900 border border-cyber-700 rounded-2xl shadow-2xl p-6 overflow-hidden my-auto">
             <div className="flex justify-between items-start mb-5">
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -1151,12 +1153,14 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
             </form>
           </div>
         </div>
+      </ModalPortal>
       )}
 
       {/* MODAL: Confirm Delete */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-md bg-cyber-900 border border-cyber-700 rounded-2xl shadow-2xl p-6 my-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+            <div className="relative w-full max-w-md bg-cyber-900 border border-cyber-700 rounded-2xl shadow-2xl p-6 my-auto">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2.5 bg-rose-500/10 rounded-xl border border-rose-500/30 text-rose-400">
                 <AlertTriangle className="w-5 h-5" />
@@ -1192,12 +1196,14 @@ export const VersionRegistryManager: React.FC<Props> = ({ initialRegistry, isAdm
             </div>
           </div>
         </div>
+      </ModalPortal>
       )}
 
       {/* MODAL: Import Manifest */}
       {isImportModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700 rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] flex flex-col my-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+            <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700 rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] flex flex-col my-auto">
             <div className="flex items-center justify-between pb-4 border-b border-cyber-800">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-purple-500/10 rounded-xl border border-purple-500/30 text-purple-400">
@@ -1348,12 +1354,14 @@ versionRegistry:
             </form>
           </div>
         </div>
+      </ModalPortal>
       )}
 
       {/* MODAL: Clear All Versions Confirmation */}
       {isClearModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-md bg-cyber-900 border border-rose-500/40 rounded-3xl shadow-2xl p-6 my-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+            <div className="relative w-full max-w-md bg-cyber-900 border border-rose-500/40 rounded-3xl shadow-2xl p-6 my-auto">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2.5 bg-rose-500/20 rounded-xl border border-rose-500/30 text-rose-400">
                 <AlertOctagon className="w-6 h-6" />
@@ -1390,12 +1398,14 @@ versionRegistry:
             </div>
           </div>
         </div>
+      </ModalPortal>
       )}
 
       {/* MODAL: Configure Container Image Pattern */}
       {patternModalType && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-lg bg-cyber-900 border border-cyber-700 rounded-3xl shadow-2xl p-6 sm:p-7 my-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+            <div className="relative w-full max-w-lg bg-cyber-900 border border-cyber-700 rounded-3xl shadow-2xl p-6 sm:p-7 my-auto">
             <div className="flex items-center justify-between pb-4 border-b border-cyber-800">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-cyan-500/10 rounded-xl border border-cyan-500/30 text-cyan-400">
@@ -1465,6 +1475,7 @@ versionRegistry:
             </form>
           </div>
         </div>
+      </ModalPortal>
       )}
     </div>
   );

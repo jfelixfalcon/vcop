@@ -30,6 +30,7 @@ import type {
   InstalledApp,
   AppCategory,
 } from '../lib/types';
+import { ModalPortal } from './ModalPortal';
 
 interface Props {
   cluster: VirtualCluster | null;
@@ -396,8 +397,9 @@ export const InstallAppModal: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] my-auto">
+    <ModalPortal>
+      <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+        <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] my-auto">
         {/* Header */}
         <div className="flex justify-between items-start mb-4">
           <div className="flex items-center gap-3">
@@ -1252,5 +1254,6 @@ export const InstallAppModal: React.FC<Props> = ({
         )}
       </div>
     </div>
+  </ModalPortal>
   );
 };

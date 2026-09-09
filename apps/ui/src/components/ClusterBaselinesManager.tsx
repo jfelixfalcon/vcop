@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import type { ClusterBaseline, SizePreset, StorageClassInfo, PresetDetails } from '../lib/types';
 import { computeClusterFqdn } from '../lib/baseline-utils';
+import { ModalPortal } from './ModalPortal';
 
 interface ClusterBaselinesManagerProps {
   initialBaselines: ClusterBaseline[];
@@ -575,8 +576,9 @@ export function ClusterBaselinesManager({
 
       {/* Create / Edit Baseline Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-[100] bg-cyber-950/45 backdrop-blur-md flex items-start sm:items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-cyber-900 border border-cyber-700/80 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl my-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+            <div className="bg-cyber-900 border border-cyber-700/80 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl my-auto">
             {/* Modal Header */}
             <div className="p-6 bg-gradient-to-b from-cyber-800/80 to-cyber-900/80 border-b border-cyber-800 flex items-center justify-between">
               <div>
@@ -913,6 +915,7 @@ export function ClusterBaselinesManager({
             </form>
           </div>
         </div>
+      </ModalPortal>
       )}
     </div>
   );

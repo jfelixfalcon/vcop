@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Trash2, AlertTriangle, X, Loader2 } from 'lucide-react';
 import type { VirtualCluster } from '../lib/types';
+import { ModalPortal } from './ModalPortal';
 
 interface Props {
   cluster: VirtualCluster | null;
@@ -49,8 +50,9 @@ export const DeleteModal: React.FC<Props> = ({ cluster, isOpen, onClose, onDelet
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="relative w-full max-w-lg bg-cyber-900 border border-rose-500/40 rounded-2xl shadow-2xl p-6 overflow-hidden my-auto">
+    <ModalPortal>
+      <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+        <div className="relative w-full max-w-lg bg-cyber-900 border border-rose-500/40 rounded-2xl shadow-2xl p-6 overflow-hidden my-auto">
         {/* Top Accent */}
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-rose-500 to-transparent"></div>
 
@@ -134,5 +136,6 @@ export const DeleteModal: React.FC<Props> = ({ cluster, isOpen, onClose, onDelet
         </div>
       </div>
     </div>
+  </ModalPortal>
   );
 };

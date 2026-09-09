@@ -43,6 +43,7 @@ import {
 } from 'lucide-react';
 import type { VirtualCluster, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition, K8sEvent } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
+import { ModalPortal } from './ModalPortal';
 import { MetricSparkline } from './MetricSparkline';
 import { KubeconfigModal } from './KubeconfigModal';
 import { UpgradeModal } from './UpgradeModal';
@@ -2043,8 +2044,9 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
 
       {/* View Inspected App Values / Manifests Modal */}
       {inspectedApp && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] my-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+            <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] my-auto">
             <div className="flex justify-between items-start mb-4">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
@@ -2106,6 +2108,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             </div>
           </div>
         </div>
+      </ModalPortal>
       )}
     </div>
   );

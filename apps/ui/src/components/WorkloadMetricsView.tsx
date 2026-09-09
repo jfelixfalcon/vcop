@@ -35,6 +35,7 @@ import type {
   WorkloadKind,
 } from '../lib/types';
 import { formatCpuMillis, formatMemoryBytes } from '../lib/metrics-utils';
+import { ModalPortal } from './ModalPortal';
 
 interface Props {
   cluster: VirtualCluster;
@@ -1231,8 +1232,9 @@ export const WorkloadMetricsView: React.FC<Props> = ({ cluster }) => {
 
       {/* Pod Deep-Dive Inspector Modal */}
       {selectedPod && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyan-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] my-auto">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+            <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyan-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] my-auto">
             <div className="flex justify-between items-start mb-4 border-b border-cyber-800 pb-3">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-cyan-500/10 rounded-xl border border-cyan-500/30 text-cyan-400">
@@ -1343,6 +1345,7 @@ export const WorkloadMetricsView: React.FC<Props> = ({ cluster }) => {
             </div>
           </div>
         </div>
+      </ModalPortal>
       )}
     </div>
   );

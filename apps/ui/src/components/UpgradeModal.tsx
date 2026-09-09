@@ -13,6 +13,7 @@ import {
   Globe,
 } from 'lucide-react';
 import type { VirtualCluster, VersionRegistry } from '../lib/types';
+import { ModalPortal } from './ModalPortal';
 
 interface Props {
   cluster: VirtualCluster | null;
@@ -128,8 +129,9 @@ export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgr
   const hasChanges = totalChanges > 0;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700 rounded-2xl shadow-2xl p-6 overflow-hidden flex flex-col max-h-[92vh] my-auto">
+    <ModalPortal>
+      <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
+        <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700 rounded-2xl shadow-2xl p-6 overflow-hidden flex flex-col max-h-[92vh] my-auto">
         {/* Glow Line */}
         <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-purple-500 to-transparent"></div>
 
@@ -580,5 +582,6 @@ export const UpgradeModal: React.FC<Props> = ({ cluster, isOpen, onClose, onUpgr
         </div>
       </div>
     </div>
+  </ModalPortal>
   );
 };

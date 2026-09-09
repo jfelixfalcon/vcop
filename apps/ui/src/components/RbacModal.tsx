@@ -12,6 +12,7 @@ import {
   KeyRound,
 } from 'lucide-react';
 import type { VirtualCluster } from '../lib/types';
+import { ModalPortal } from './ModalPortal';
 
 interface Props {
   cluster: VirtualCluster | null;
@@ -78,8 +79,9 @@ export const RbacModal: React.FC<Props> = ({ cluster, isOpen, onClose, onSuccess
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-cyber-950/45 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden my-auto">
+    <ModalPortal>
+      <div className="fixed inset-0 z-[9999] bg-cyber-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-200">
+        <div className="relative w-full max-w-xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden my-auto">
         {/* Top Accent Line */}
         <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent"></div>
 
@@ -212,5 +214,6 @@ export const RbacModal: React.FC<Props> = ({ cluster, isOpen, onClose, onSuccess
         </form>
       </div>
     </div>
+  </ModalPortal>
   );
 };
