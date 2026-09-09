@@ -123,6 +123,7 @@ async function handleCallback(context: {
         maxAge: 86400, // 24 hours
       });
 
+      console.log(`[OIDC] Session cookie created (${SESSION_COOKIE_NAME}, length=${sessionToken.length} bytes). Redirecting authenticated browser session to /`);
       authLog('Direct token authentication succeeded. User:', user.username, 'Role:', user.role);
 
       if (isJsonRequest) {
@@ -193,7 +194,7 @@ async function handleCallback(context: {
         });
       }
 
-      authLog('Redirecting authenticated browser session to /');
+      console.log(`[OIDC] Session cookie created (${SESSION_COOKIE_NAME}, length=${sessionToken.length} bytes). Redirecting authenticated browser session to /`);
       return redirect('/');
     } catch (err: any) {
       console.error('[AUTH-DEBUG] OIDC code exchange failed:', err);

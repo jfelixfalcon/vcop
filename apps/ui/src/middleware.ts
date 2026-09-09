@@ -49,7 +49,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const isPublicPath = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 
   if (isAuthDebug) {
-    authLog(`[Middleware] ${request.method} ${pathname} | hasSession: ${Boolean(sessionCookie)} | user: ${user?.username || 'anonymous'} | isPublic: ${isPublicPath}`);
+    authLog(`[Middleware] ${request.method} ${pathname} | hasSession: ${Boolean(user)} (cookie: ${Boolean(sessionCookie)}, len=${sessionCookie?.length || 0}) | user: ${user?.username || 'anonymous'} (role=${user?.role || 'none'}) | isPublic: ${isPublicPath}`);
   }
 
   // 3. Handle unauthenticated access

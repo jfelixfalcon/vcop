@@ -132,9 +132,18 @@ export async function getEffectiveOidcConfig() {
 
 /**
  * Creates a signed, base64url-encoded session token using HMAC-SHA256.
+ * Excludes heavy OAuth token strings (accessToken, idToken) so the session cookie
+ * stays well below the browser 4096-byte RFC 6265 limit.
  */
 export function createSessionToken(user: UserSession): string {
-  const payload = Buffer.from(JSON.stringify(user)).toString('base64url');
+  const { accessToken, idToken, ...cookieData } = user;
+
+  // Protect against directory group explosion (e.g. 100+ groups in Active Directory)
+  if (Array.isArray(cookieData.groups) && cookieData.groups.length > 50) {
+    cookieData.groups = cookieData.groups.slice(0, 50);
+  }
+
+  const payload = Buffer.from(JSON.stringify(cookieData)).toString('base64url');
   const signature = crypto
     .createHmac('sha256', SESSION_SECRET)
     .update(payload)
