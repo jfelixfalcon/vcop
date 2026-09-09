@@ -362,8 +362,10 @@ interface OidcDiscovery {
   authorization_endpoint: string;
   token_endpoint: string;
   userinfo_endpoint?: string;
+  introspection_endpoint?: string;
   scopes_supported?: string[];
   token_endpoint_auth_methods_supported?: string[];
+  introspection_endpoint_auth_methods_supported?: string[];
 }
 
 let cachedDiscovery: { data: OidcDiscovery; timestamp: number } | null = null;
@@ -397,6 +399,7 @@ export async function getOidcDiscovery(customIssuerUrl?: string): Promise<OidcDi
     authorization_endpoint: `${issuer}/protocol/openid-connect/auth`,
     token_endpoint: `${issuer}/protocol/openid-connect/token`,
     userinfo_endpoint: `${issuer}/protocol/openid-connect/userinfo`,
+    introspection_endpoint: `${issuer}/protocol/openid-connect/token/introspect`,
   };
 }
 
@@ -444,8 +447,101 @@ export async function getOidcAuthorizationUrl(
 }
 
 /**
- * Queries the OIDC Provider's UserInfo endpoint using the Access Token.
- * Retrieves authoritative user profile attributes and group memberships.
+ * Queries the OAuth 2.0 Token Introspection endpoint (RFC 7662) using client_id and client_secret.
+ * Reliably returns the full token claims, user groups, and realm/client roles from Keycloak, Okta, etc.
+ */
+export async function introspectOidcToken(
+  accessToken: string,
+  discovery?: OidcDiscovery,
+  customIssuerUrl?: string
+): Promise<any | null> {
+  if (!accessToken || !accessToken.trim()) return null;
+
+  try {
+    const config = await getEffectiveOidcConfig();
+    const issuer = (customIssuerUrl || config.issuerUrl || '').replace(/\/$/, '');
+    const disc = discovery || (issuer ? await getOidcDiscovery(issuer) : null);
+    const endpoint =
+      disc?.introspection_endpoint ||
+      `${issuer}/protocol/openid-connect/token/introspect`;
+
+    const clientId = config.clientId;
+    const clientSecret = config.clientSecret;
+
+    if (!endpoint || !clientId) {
+      return null;
+    }
+
+    authLog(`Introspecting token with client credentials (${clientId}) at: ${endpoint}`);
+
+    // Method 1: Client Secret Basic (Authorization: Basic base64(client_id:client_secret))
+    if (clientSecret) {
+      const basicCreds = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+      const bodyParams = new URLSearchParams({
+        token: accessToken.trim(),
+        token_type_hint: 'access_token',
+      });
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${basicCreds}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Accept: 'application/json',
+          },
+          body: bodyParams.toString(),
+          signal: AbortSignal.timeout(7000),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.active !== false) {
+            authLog('Token introspection succeeded via client_secret_basic:', data);
+            return data;
+          }
+        }
+      } catch (e: any) {
+        authLog('Basic auth introspection error:', e.message);
+      }
+    }
+
+    // Method 2: Client Secret Post (client_id and client_secret in POST body)
+    const postBody = new URLSearchParams({
+      token: accessToken.trim(),
+      client_id: clientId,
+      token_type_hint: 'access_token',
+    });
+    if (clientSecret) {
+      postBody.append('client_secret', clientSecret);
+    }
+
+    const postRes = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: postBody.toString(),
+      signal: AbortSignal.timeout(7000),
+    });
+
+    if (postRes.ok) {
+      const data = await postRes.json();
+      if (data && data.active !== false) {
+        authLog('Token introspection succeeded via client_secret_post:', data);
+        return data;
+      }
+    }
+  } catch (err: any) {
+    authLog('Token introspection error:', err.message);
+  }
+  return null;
+}
+
+/**
+ * Queries the OIDC Provider's UserInfo endpoint using the Access Token and Client Credentials (client_id & client_secret).
+ * Also invokes token introspection (RFC 7662) to reliably retrieve all user groups and permissions.
  */
 export async function fetchOidcUserInfo(
   accessToken: string,
@@ -457,16 +553,13 @@ export async function fetchOidcUserInfo(
   }
 
   try {
+    const config = await getEffectiveOidcConfig();
     let endpoint = discovery?.userinfo_endpoint;
-    let issuer = customIssuerUrl;
+    let issuer = customIssuerUrl || config.issuerUrl;
 
-    if (!endpoint) {
-      const config = await getEffectiveOidcConfig();
-      issuer = issuer || config.issuerUrl;
-      if (issuer) {
-        const disc = await getOidcDiscovery(issuer);
-        endpoint = disc.userinfo_endpoint;
-      }
+    if (!endpoint && issuer) {
+      const disc = await getOidcDiscovery(issuer);
+      endpoint = disc.userinfo_endpoint;
     }
 
     if (!endpoint && issuer) {
@@ -479,41 +572,167 @@ export async function fetchOidcUserInfo(
       return null;
     }
 
-    authLog(`Querying OIDC UserInfo endpoint: ${endpoint}`);
+    const clientId = config.clientId;
+    const clientSecret = config.clientSecret;
 
-    // Attempt 1: Standard RFC 6749 / OIDC Core 5.3.1 GET request
-    let res = await fetch(endpoint, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken.trim()}`,
-        Accept: 'application/json',
-      },
-      signal: AbortSignal.timeout(7000),
-    });
+    authLog(`Querying OIDC UserInfo endpoint: ${endpoint} (client: ${clientId || 'none'}, hasSecret: ${Boolean(clientSecret)})`);
 
-    // Attempt 2: If IdP requires POST (RFC 6749 allows POST), retry
-    if (!res.ok && (res.status === 405 || res.status === 400 || res.status === 401)) {
-      authLog(`UserInfo GET returned HTTP ${res.status}, retrying with POST to ${endpoint}`);
-      res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken.trim()}`,
-          Accept: 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        signal: AbortSignal.timeout(7000),
-      });
+    let userInfo: any = null;
+
+    // Strategy 1: POST to UserInfo with Client Credentials in body + Bearer token
+    if (clientId && clientSecret) {
+      try {
+        const formBody = new URLSearchParams({
+          access_token: accessToken.trim(),
+          client_id: clientId,
+          client_secret: clientSecret,
+        });
+
+        const resPost = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken.trim()}`,
+            Accept: 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Client-Id': clientId,
+            'X-Client-Secret': clientSecret,
+          },
+          body: formBody.toString(),
+          signal: AbortSignal.timeout(7000),
+        });
+
+        if (resPost.ok) {
+          userInfo = await resPost.json();
+          authLog('UserInfo POST with client credentials succeeded:', userInfo);
+        }
+      } catch (e: any) {
+        authLog('UserInfo POST with client credentials error:', e.message);
+      }
     }
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      console.warn(`[AUTH-DEBUG] UserInfo request failed (HTTP ${res.status}) from ${endpoint}:`, errText);
+    // Strategy 2: GET to UserInfo with query parameters client_id & client_secret + Bearer header
+    if (!userInfo && clientId && clientSecret) {
+      try {
+        const urlWithParams = new URL(endpoint);
+        urlWithParams.searchParams.set('client_id', clientId);
+        urlWithParams.searchParams.set('client_secret', clientSecret);
+
+        const resGetParams = await fetch(urlWithParams.toString(), {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken.trim()}`,
+            Accept: 'application/json',
+            'X-Client-Id': clientId,
+            'X-Client-Secret': clientSecret,
+          },
+          signal: AbortSignal.timeout(7000),
+        });
+
+        if (resGetParams.ok) {
+          userInfo = await resGetParams.json();
+          authLog('UserInfo GET with client credentials params succeeded:', userInfo);
+        }
+      } catch (e: any) {
+        authLog('UserInfo GET with client params error:', e.message);
+      }
+    }
+
+    // Strategy 3: Standard RFC 6749 / OIDC Core GET with Bearer token
+    if (!userInfo) {
+      try {
+        const resGet = await fetch(endpoint, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken.trim()}`,
+            Accept: 'application/json',
+          },
+          signal: AbortSignal.timeout(7000),
+        });
+
+        if (resGet.ok) {
+          userInfo = await resGet.json();
+          authLog('UserInfo standard GET succeeded:', userInfo);
+        }
+      } catch (e: any) {
+        authLog('UserInfo standard GET error:', e.message);
+      }
+    }
+
+    // Strategy 4: Standard RFC 6749 POST with Bearer token
+    if (!userInfo) {
+      try {
+        const resPostFallback = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken.trim()}`,
+            Accept: 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          signal: AbortSignal.timeout(7000),
+        });
+
+        if (resPostFallback.ok) {
+          userInfo = await resPostFallback.json();
+          authLog('UserInfo standard POST succeeded:', userInfo);
+        }
+      } catch (e: any) {
+        authLog('UserInfo standard POST error:', e.message);
+      }
+    }
+
+    // Strategy 5: Token Introspection (RFC 7662) with client credentials
+    let introspectionData: any = null;
+    if (clientId && clientSecret) {
+      introspectionData = await introspectOidcToken(accessToken, discovery, customIssuerUrl);
+    }
+
+    if (!userInfo && !introspectionData) {
       return null;
     }
 
-    const userInfo = await res.json();
-    authLog('OIDC UserInfo fetched successfully:', userInfo);
-    return userInfo;
+    const consolidated = {
+      ...(introspectionData || {}),
+      ...(userInfo || {}),
+    };
+
+    if (introspectionData) {
+      const mergedGroups = new Set<any>([
+        ...(Array.isArray(userInfo?.groups) ? userInfo.groups : []),
+        ...(Array.isArray(introspectionData?.groups) ? introspectionData.groups : []),
+      ]);
+      if (mergedGroups.size > 0) {
+        consolidated.groups = Array.from(mergedGroups);
+      }
+
+      const mergedRoles = new Set<any>([
+        ...(Array.isArray(userInfo?.roles) ? userInfo.roles : []),
+        ...(Array.isArray(introspectionData?.roles) ? introspectionData.roles : []),
+      ]);
+      if (mergedRoles.size > 0) {
+        consolidated.roles = Array.from(mergedRoles);
+      }
+
+      if (introspectionData.realm_access || userInfo?.realm_access) {
+        consolidated.realm_access = {
+          ...(userInfo?.realm_access || {}),
+          ...(introspectionData?.realm_access || {}),
+          roles: Array.from(new Set([
+            ...(userInfo?.realm_access?.roles || []),
+            ...(introspectionData?.realm_access?.roles || []),
+          ])),
+        };
+      }
+
+      if (introspectionData.resource_access || userInfo?.resource_access) {
+        consolidated.resource_access = {
+          ...(userInfo?.resource_access || {}),
+          ...(introspectionData?.resource_access || {}),
+        };
+      }
+    }
+
+    authLog('Consolidated UserInfo + Introspection claims:', consolidated);
+    return consolidated;
   } catch (err: any) {
     console.warn('[AUTH-DEBUG] Failed to fetch OIDC UserInfo:', err.message);
     return null;

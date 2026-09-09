@@ -95,13 +95,21 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
 
     authLog(`Refreshed user ${user.username} via UserInfo. Groups:`, mergedGroups, 'New Role:', newRole);
 
+    const msg =
+      userinfoGroups.length > 0
+        ? `Successfully queried OIDC UserInfo & Introspection with client credentials. Extracted ${userinfoGroups.length} group(s): [${userinfoGroups.join(', ')}]. Role updated to '${newRole}'.`
+        : `OIDC Provider returned claims for '${user.username}', but no group claims were present in UserInfo or Token Introspection. Role defaulted to '${newRole}'.`;
+
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Successfully queried OIDC UserInfo. Role updated to '${newRole}'.`,
+        message: msg,
         user: updatedUser,
         groups: mergedGroups,
         role: newRole,
+        extractedGroups: userinfoGroups,
+        clientId: config.clientId,
+        hasClientSecret: Boolean(config.clientSecret),
         rawUserInfo: userInfo,
       }),
       {
