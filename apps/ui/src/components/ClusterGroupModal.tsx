@@ -239,8 +239,8 @@ export const ClusterGroupModal: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-cyber-900 border border-cyber-700/80 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-cyber-900 border border-cyber-700/80 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] my-auto">
         {/* Modal Header */}
         <div className="flex items-center justify-between p-5 border-b border-cyber-800 bg-cyber-950/60">
           <div className="flex items-center gap-3">

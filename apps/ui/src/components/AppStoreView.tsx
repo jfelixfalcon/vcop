@@ -980,8 +980,8 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
 
       {/* MODAL 1: Inspect Config & Values */}
       {activeModal === 'inspect-app' && selectedApp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-3xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-3xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] my-auto">
             <div className="flex justify-between items-start mb-5">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
@@ -1118,8 +1118,8 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
 
       {/* MODAL 2: Add or Edit Application */}
       {isAdmin && (activeModal === 'add-app' || activeModal === 'edit-app') && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] my-auto">
             <div className="flex justify-between items-start mb-5">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
@@ -1388,8 +1388,8 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
 
       {/* MODAL 3: Create App Group / Pack */}
       {isAdmin && activeModal === 'add-group' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-md bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden my-auto">
             <div className="flex justify-between items-start mb-5">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
@@ -1517,8 +1517,8 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
 
       {/* MODAL: Deploy Application or Group to Cluster */}
       {isDeployModalOpen && (deployTargetApp || deployTargetGroup) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-xl bg-cyber-900 border border-cyber-700/80 rounded-3xl p-6 sm:p-7 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] my-auto">
             <div className="flex justify-between items-start mb-5">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
@@ -1695,8 +1695,8 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
 
       {/* MODAL: Import Catalog Manifest */}
       {isImportModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700 rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-2xl bg-cyber-900 border border-cyber-700 rounded-3xl shadow-2xl p-6 sm:p-7 max-h-[90vh] flex flex-col my-auto">
             <div className="flex items-center justify-between pb-4 border-b border-cyber-800">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-purple-500/10 rounded-xl border border-purple-500/30 text-purple-400">
@@ -1881,8 +1881,8 @@ appStore:
 
       {/* MODAL: Clear All Applications Confirmation */}
       {isClearModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-md bg-cyber-900 border border-rose-500/40 rounded-3xl shadow-2xl p-6">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-black/70 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-cyber-900 border border-rose-500/40 rounded-3xl shadow-2xl p-6 my-auto">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2.5 bg-rose-500/20 rounded-xl border border-rose-500/30 text-rose-400">
                 <AlertOctagon className="w-6 h-6" />

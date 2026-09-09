@@ -49,8 +49,8 @@ export const DeleteModal: React.FC<Props> = ({ cluster, isOpen, onClose, onDelet
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="relative w-full max-w-lg bg-cyber-900 border border-rose-500/40 rounded-2xl shadow-2xl p-6 overflow-hidden">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-black/75 backdrop-blur-md animate-in fade-in duration-150">
+      <div className="relative w-full max-w-lg bg-cyber-900 border border-rose-500/40 rounded-2xl shadow-2xl p-6 overflow-hidden my-auto">
         {/* Top Accent */}
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-rose-500 to-transparent"></div>
 

@@ -106,8 +106,8 @@ export const IstioModal: React.FC<IstioModalProps> = ({
       : hostIssuers.issuers.includes(certIssuer.trim()));
 
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-cyber-900 border border-cyber-700 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-cyber-900 border border-cyber-700 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-cyber-800">
           <div className="flex items-center gap-2.5">
