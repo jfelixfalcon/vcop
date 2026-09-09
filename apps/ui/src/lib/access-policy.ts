@@ -201,8 +201,18 @@ export function resolveRoleWithPolicy(
   const p = policy || cachedPolicy || getDefaultAccessPolicy();
 
   const normEmail = (email || '').toLowerCase().trim();
-  const normUsername = (username || '').toLowerCase().trim();
-  const normGroups = (groups || []).map((g) => (g || '').toLowerCase().trim());
+  const normGroups = (groups || []).flatMap((g) => {
+    const raw = (g || '').toLowerCase().trim();
+    if (!raw) return [];
+    const stripped = raw.replace(/^cn=([^,]+).*/i, '$1').replace(/^\/+|\/+$/g, '').trim();
+    if (stripped && stripped !== raw) {
+      if (stripped.includes('/')) {
+        return [raw, stripped, ...stripped.split('/').filter(Boolean)];
+      }
+      return [raw, stripped];
+    }
+    return [raw];
+  });
 
   // 1. Check Administrator Users (by email or username)
   if (

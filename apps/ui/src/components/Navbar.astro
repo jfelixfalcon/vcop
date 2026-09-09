@@ -16,7 +16,6 @@ import {
   Terminal,
   Bot,
   Sliders,
-  RefreshCw,
 } from 'lucide-react';
 
 const pathname = Astro.url.pathname;
@@ -249,24 +248,6 @@ if (pathname.startsWith('/clusters/')) {
                 </a>
               )}
             </div>
-
-            <!-- Refresh Groups via OIDC UserInfo -->
-            {user.method === 'oidc' && (
-              <div class="py-1 border-t border-cyber-800/80">
-                <button
-                  id="refresh-userinfo-btn"
-                  type="button"
-                  class="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs text-cyan-300 hover:text-cyan-200 hover:bg-cyan-950/40 rounded-xl transition-colors font-mono cursor-pointer text-left"
-                  title="Query OIDC Provider UserInfo endpoint to sync group memberships & roles"
-                >
-                  <span class="flex items-center gap-2">
-                    <RefreshCw class="w-3.5 h-3.5 text-cyan-400" id="refresh-userinfo-icon" />
-                    <span>Sync Groups (UserInfo)</span>
-                  </span>
-                  <span class="text-[9px] px-1 py-0.5 rounded bg-cyan-950/80 border border-cyan-800/60 text-cyan-400 font-mono">OIDC</span>
-                </button>
-              </div>
-            )}
 
             <!-- Sign Out -->
             <div class="pt-1 border-t border-cyber-800/80">
@@ -509,34 +490,6 @@ if (pathname.startsWith('/clusters/')) {
   if (mobileToggle && mobilePanel) {
     mobileToggle.addEventListener('click', () => {
       mobilePanel.classList.toggle('hidden');
-    });
-  }
-
-  // Setup OIDC UserInfo group synchronization
-  const refreshUserInfoBtn = document.getElementById('refresh-userinfo-btn');
-  const refreshUserInfoIcon = document.getElementById('refresh-userinfo-icon');
-
-  if (refreshUserInfoBtn) {
-    refreshUserInfoBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (refreshUserInfoIcon) {
-        refreshUserInfoIcon.classList.add('animate-spin');
-      }
-      try {
-        const res = await fetch('/api/auth/userinfo');
-        const data = await res.json();
-        if (data.success) {
-          window.location.reload();
-        } else {
-          alert(`UserInfo Sync: ${data.message || data.error || 'Failed to sync groups from OIDC provider'}`);
-        }
-      } catch (err: any) {
-        alert(`Error contacting UserInfo endpoint: ${err.message}`);
-      } finally {
-        if (refreshUserInfoIcon) {
-          refreshUserInfoIcon.classList.remove('animate-spin');
-        }
-      }
     });
   }
 </script>

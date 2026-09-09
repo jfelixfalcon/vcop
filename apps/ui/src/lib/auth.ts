@@ -221,17 +221,18 @@ export function validateBreakglass(username: string, password: string): UserSess
 }
 
 /**
- * Strips LDAP distinguished name prefixes (e.g. "CN=developers,OU=Groups,DC=example,DC=com" -> "developers").
+ * Strips LDAP distinguished name prefixes (e.g. "CN=developers,OU=Groups,DC=example,DC=com" -> "developers")
+ * and normalizes Keycloak group paths (e.g. "/admins" -> "admins").
  */
 export function cleanGroupName(g: string): string {
-  const trimmed = g.trim();
+  let trimmed = g.trim();
   if (trimmed.toLowerCase().startsWith('cn=')) {
     const match = trimmed.match(/^cn=([^,]+)/i);
     if (match && match[1]) {
-      return match[1].trim();
+      trimmed = match[1].trim();
     }
   }
-  return trimmed;
+  return trimmed.replace(/^\/+|\/+$/g, '').trim();
 }
 
 /**
@@ -249,31 +250,53 @@ export function extractGroupsFromClaims(
 
   const extracted = new Set<string>();
 
+  const addGroupString = (str: string) => {
+    const trimmed = str.trim();
+    if (!trimmed) return;
+    extracted.add(trimmed);
+
+    // If LDAP CN= format, extract the CN value
+    if (trimmed.toLowerCase().startsWith('cn=')) {
+      const match = trimmed.match(/^cn=([^,]+)/i);
+      if (match && match[1]) {
+        addGroupString(match[1]);
+      }
+    }
+
+    // Strip leading/trailing slashes (e.g. "/admins" -> "admins")
+    const stripped = trimmed.replace(/^\/+|\/+$/g, '');
+    if (stripped) {
+      extracted.add(stripped);
+      // If hierarchical path (e.g. "engineering/developers" or "/engineering/developers")
+      if (stripped.includes('/')) {
+        const parts = stripped.split('/').filter(Boolean);
+        for (const p of parts) {
+          const partTrimmed = p.trim();
+          if (partTrimmed) extracted.add(partTrimmed);
+        }
+      }
+    }
+  };
+
   const addCandidate = (val: any) => {
     if (!val) return;
     if (Array.isArray(val)) {
       for (const item of val) {
-        if (typeof item === 'string' && item.trim()) {
-          const raw = item.trim();
-          extracted.add(raw);
-          const clean = cleanGroupName(raw);
-          if (clean) extracted.add(clean);
+        if (typeof item === 'string') {
+          addGroupString(item);
         } else if (typeof item === 'object' && item !== null) {
-          if (typeof item.name === 'string' && item.name.trim()) {
-            extracted.add(item.name.trim());
-          } else if (typeof item.role === 'string' && item.role.trim()) {
-            extracted.add(item.role.trim());
+          if (typeof item.name === 'string') {
+            addGroupString(item.name);
+          } else if (typeof item.role === 'string') {
+            addGroupString(item.role);
+          } else if (typeof item.path === 'string') {
+            addGroupString(item.path);
           }
         }
       }
-    } else if (typeof val === 'string' && val.trim()) {
+    } else if (typeof val === 'string') {
       for (const part of val.split(',')) {
-        const raw = part.trim();
-        if (raw) {
-          extracted.add(raw);
-          const clean = cleanGroupName(raw);
-          if (clean) extracted.add(clean);
-        }
+        addGroupString(part);
       }
     }
   };
@@ -316,7 +339,6 @@ export function extractGroupsFromClaims(
   return Array.from(extracted);
 }
 
-/**
 /**
  * Resolves whether an OIDC user is assigned Admin, Developers, or Viewer role based on email, username, or groups.
  * Consults the active PlatformAccessPolicy stored in Kubernetes ConfigMap.
@@ -416,18 +438,16 @@ export async function getOidcAuthorizationUrl(
   const discovery = await getOidcDiscovery(config.issuerUrl);
   const redirectUri = config.redirectUri || `${origin}/api/auth/callback`;
 
-  const requestedScopes = (config.scopes || 'openid email profile')
+  const requestedScopes = (config.scopes || 'openid email profile groups')
     .split(' ')
     .map((s) => s.trim())
     .filter(Boolean);
 
-  let finalScopes = requestedScopes;
-  if (discovery?.scopes_supported && Array.isArray(discovery.scopes_supported)) {
-    finalScopes = requestedScopes.filter((s) => discovery.scopes_supported!.includes(s));
-    if (!finalScopes.includes('openid')) {
-      finalScopes.unshift('openid');
-    }
+  if (!requestedScopes.includes('openid')) {
+    requestedScopes.unshift('openid');
   }
+
+  const finalScopes = requestedScopes;
 
   const params = new URLSearchParams({
     client_id: config.clientId,
@@ -461,9 +481,13 @@ export async function introspectOidcToken(
     const config = await getEffectiveOidcConfig();
     const issuer = (customIssuerUrl || config.issuerUrl || '').replace(/\/$/, '');
     const disc = discovery || (issuer ? await getOidcDiscovery(issuer) : null);
-    const endpoint =
+    let endpoint =
       disc?.introspection_endpoint ||
       `${issuer}/protocol/openid-connect/token/introspect`;
+
+    if (endpoint && endpoint.startsWith('/') && issuer) {
+      endpoint = `${issuer}${endpoint}`;
+    }
 
     const clientId = config.clientId;
     const clientSecret = config.clientSecret;
@@ -540,8 +564,9 @@ export async function introspectOidcToken(
 }
 
 /**
- * Queries the OIDC Provider's UserInfo endpoint using the Access Token and Client Credentials (client_id & client_secret).
- * Also invokes token introspection (RFC 7662) to reliably retrieve all user groups and permissions.
+ * Queries the OIDC Provider's UserInfo endpoint using the Access Token as a standard Bearer token (RFC 6750).
+ * Also performs token introspection (RFC 7662) if client credentials are provided to reliably retrieve
+ * all user groups, roles, and claims from Keycloak, Okta, Dex, etc.
  */
 export async function fetchOidcUserInfo(
   accessToken: string,
@@ -554,8 +579,8 @@ export async function fetchOidcUserInfo(
 
   try {
     const config = await getEffectiveOidcConfig();
+    let issuer = (customIssuerUrl || config.issuerUrl || '').replace(/\/$/, '');
     let endpoint = discovery?.userinfo_endpoint;
-    let issuer = customIssuerUrl || config.issuerUrl;
 
     if (!endpoint && issuer) {
       const disc = await getOidcDiscovery(issuer);
@@ -563,8 +588,11 @@ export async function fetchOidcUserInfo(
     }
 
     if (!endpoint && issuer) {
-      const cleanIssuer = issuer.replace(/\/$/, '');
-      endpoint = `${cleanIssuer}/protocol/openid-connect/userinfo`;
+      endpoint = `${issuer}/protocol/openid-connect/userinfo`;
+    }
+
+    if (endpoint && endpoint.startsWith('/') && issuer) {
+      endpoint = `${issuer}${endpoint}`;
     }
 
     if (!endpoint) {
@@ -579,86 +607,29 @@ export async function fetchOidcUserInfo(
 
     let userInfo: any = null;
 
-    // Strategy 1: POST to UserInfo with Client Credentials in body + Bearer token
-    if (clientId && clientSecret) {
-      try {
-        const formBody = new URLSearchParams({
-          access_token: accessToken.trim(),
-          client_id: clientId,
-          client_secret: clientSecret,
-        });
+    // Strategy 1: Standard RFC 6750 / OIDC Core 1.0 Section 5.3.1 GET request with Bearer token
+    // Standard UserInfo endpoints (Keycloak, Dex, Okta, Google, Azure AD) require ONLY Bearer authorization.
+    try {
+      const resGet = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken.trim()}`,
+          Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(7000),
+      });
 
-        const resPost = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken.trim()}`,
-            Accept: 'application/json',
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-Client-Id': clientId,
-            'X-Client-Secret': clientSecret,
-          },
-          body: formBody.toString(),
-          signal: AbortSignal.timeout(7000),
-        });
-
-        if (resPost.ok) {
-          userInfo = await resPost.json();
-          authLog('UserInfo POST with client credentials succeeded:', userInfo);
-        }
-      } catch (e: any) {
-        authLog('UserInfo POST with client credentials error:', e.message);
+      if (resGet.ok) {
+        userInfo = await resGet.json();
+        authLog('UserInfo standard GET succeeded:', userInfo);
+      } else {
+        authLog(`UserInfo standard GET returned HTTP ${resGet.status}`);
       }
+    } catch (e: any) {
+      authLog('UserInfo standard GET error:', e.message);
     }
 
-    // Strategy 2: GET to UserInfo with query parameters client_id & client_secret + Bearer header
-    if (!userInfo && clientId && clientSecret) {
-      try {
-        const urlWithParams = new URL(endpoint);
-        urlWithParams.searchParams.set('client_id', clientId);
-        urlWithParams.searchParams.set('client_secret', clientSecret);
-
-        const resGetParams = await fetch(urlWithParams.toString(), {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken.trim()}`,
-            Accept: 'application/json',
-            'X-Client-Id': clientId,
-            'X-Client-Secret': clientSecret,
-          },
-          signal: AbortSignal.timeout(7000),
-        });
-
-        if (resGetParams.ok) {
-          userInfo = await resGetParams.json();
-          authLog('UserInfo GET with client credentials params succeeded:', userInfo);
-        }
-      } catch (e: any) {
-        authLog('UserInfo GET with client params error:', e.message);
-      }
-    }
-
-    // Strategy 3: Standard RFC 6749 / OIDC Core GET with Bearer token
-    if (!userInfo) {
-      try {
-        const resGet = await fetch(endpoint, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${accessToken.trim()}`,
-            Accept: 'application/json',
-          },
-          signal: AbortSignal.timeout(7000),
-        });
-
-        if (resGet.ok) {
-          userInfo = await resGet.json();
-          authLog('UserInfo standard GET succeeded:', userInfo);
-        }
-      } catch (e: any) {
-        authLog('UserInfo standard GET error:', e.message);
-      }
-    }
-
-    // Strategy 4: Standard RFC 6749 POST with Bearer token
+    // Strategy 2: Standard RFC 6750 POST request with Bearer token header
     if (!userInfo) {
       try {
         const resPostFallback = await fetch(endpoint, {
@@ -674,13 +645,15 @@ export async function fetchOidcUserInfo(
         if (resPostFallback.ok) {
           userInfo = await resPostFallback.json();
           authLog('UserInfo standard POST succeeded:', userInfo);
+        } else {
+          authLog(`UserInfo standard POST returned HTTP ${resPostFallback.status}`);
         }
       } catch (e: any) {
         authLog('UserInfo standard POST error:', e.message);
       }
     }
 
-    // Strategy 5: Token Introspection (RFC 7662) with client credentials
+    // Strategy 3: Token Introspection (RFC 7662) with client credentials
     let introspectionData: any = null;
     if (clientId && clientSecret) {
       introspectionData = await introspectOidcToken(accessToken, discovery, customIssuerUrl);
