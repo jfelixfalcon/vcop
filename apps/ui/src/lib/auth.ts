@@ -599,14 +599,14 @@ export async function fetchOidcUserInfo(
     }
 
     if (!endpoint) {
-      authLog('OIDC UserInfo endpoint cannot be resolved');
+      console.warn('[OIDC] UserInfo endpoint could not be resolved from discovery or configuration.');
       return null;
     }
 
     const clientId = config.clientId;
     const clientSecret = config.clientSecret;
 
-    authLog(`Querying OIDC UserInfo endpoint: ${endpoint} (client: ${clientId || 'none'}, hasSecret: ${Boolean(clientSecret)})`);
+    console.log(`[OIDC] Querying UserInfo endpoint at: ${endpoint} (hasClientSecret: ${Boolean(clientSecret)})`);
 
     let userInfo: any = null;
 
@@ -624,12 +624,12 @@ export async function fetchOidcUserInfo(
 
       if (resGet.ok) {
         userInfo = await resGet.json();
-        authLog('UserInfo standard GET succeeded:', userInfo);
+        console.log(`[OIDC] Successfully reached UserInfo endpoint (${endpoint}) -> HTTP 200 OK.`);
       } else {
-        authLog(`UserInfo standard GET returned HTTP ${resGet.status}`);
+        console.warn(`[OIDC] UserInfo GET request to ${endpoint} returned HTTP ${resGet.status}`);
       }
     } catch (e: any) {
-      authLog('UserInfo standard GET error:', e.message);
+      console.warn(`[OIDC] UserInfo GET request to ${endpoint} failed: ${e.message}`);
     }
 
     // Strategy 2: Standard RFC 6750 POST request with Bearer token header
@@ -647,12 +647,12 @@ export async function fetchOidcUserInfo(
 
         if (resPostFallback.ok) {
           userInfo = await resPostFallback.json();
-          authLog('UserInfo standard POST succeeded:', userInfo);
+          console.log(`[OIDC] Successfully reached UserInfo endpoint via POST (${endpoint}) -> HTTP 200 OK.`);
         } else {
-          authLog(`UserInfo standard POST returned HTTP ${resPostFallback.status}`);
+          console.warn(`[OIDC] UserInfo POST fallback to ${endpoint} returned HTTP ${resPostFallback.status}`);
         }
       } catch (e: any) {
-        authLog('UserInfo standard POST error:', e.message);
+        console.warn(`[OIDC] UserInfo POST fallback failed: ${e.message}`);
       }
     }
 
@@ -757,7 +757,7 @@ export async function authenticateFromTokens(
 
   // ALWAYS query UserInfo endpoint when access_token is available to fetch authoritative groups & profile
   if (tokenData.access_token) {
-    authLog('Access token present, querying OIDC provider UserInfo endpoint for user groups & profile...');
+    console.log('[OIDC] Access token present. Querying OIDC provider UserInfo endpoint for user groups & profile...');
     const userInfo = await fetchOidcUserInfo(tokenData.access_token, discovery, config.issuerUrl);
     if (userInfo && typeof userInfo === 'object') {
       claims = { ...claims, ...userInfo };
@@ -780,7 +780,7 @@ export async function authenticateFromTokens(
   const groups = extractGroupsFromClaims(claims, config.groupsClaim, config.clientId);
 
   const { role, reason } = await resolveOidcRoleAsync(email, groups, username);
-  authLog(`Assigned role '${role}' to user '${username}' (${email}) [${reason}] with extracted groups:`, groups);
+  console.log(`[OIDC] User '${username}' (${email}) assigned role '${role}' [${reason}] with groups:`, groups);
 
   return {
     id: claims.sub || `oidc-${username}`,
@@ -839,12 +839,7 @@ export async function exchangeOidcCode(
     body.set('code_verifier', codeVerifier);
   }
 
-  authLog(`Exchanging authorization code with token endpoint: ${discovery.token_endpoint}`, {
-    clientId: config.clientId,
-    redirectUri,
-    hasVerifier: Boolean(codeVerifier),
-    hasSecret: Boolean(config.clientSecret),
-  });
+  console.log(`[OIDC] Exchanging authorization code with token endpoint: ${discovery.token_endpoint} (redirectUri: ${redirectUri})`);
 
   const res = await fetch(discovery.token_endpoint, {
     method: 'POST',
@@ -855,15 +850,12 @@ export async function exchangeOidcCode(
 
   if (!res.ok) {
     const errorText = await res.text();
-    console.error(`[AUTH-DEBUG] OIDC Token exchange failed HTTP ${res.status} at ${discovery.token_endpoint}:`, errorText);
+    console.error(`[OIDC] Token exchange failed HTTP ${res.status} at ${discovery.token_endpoint}:`, errorText);
     throw new Error(`OIDC Token exchange failed (HTTP ${res.status}): ${errorText}`);
   }
 
   const tokenData = (await res.json()) as { access_token?: string; id_token?: string };
-  authLog('OIDC Token exchange succeeded. Received tokens:', {
-    has_access_token: Boolean(tokenData.access_token),
-    has_id_token: Boolean(tokenData.id_token),
-  });
+  console.log(`[OIDC] Token exchange succeeded (has_access_token=${Boolean(tokenData.access_token)}, has_id_token=${Boolean(tokenData.id_token)})`);
   return authenticateFromTokens(tokenData, discovery);
 }
 

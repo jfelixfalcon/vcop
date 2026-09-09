@@ -201,6 +201,7 @@ export function resolveRoleWithPolicy(
   const p = policy || cachedPolicy || getDefaultAccessPolicy();
 
   const normEmail = (email || '').toLowerCase().trim();
+  const normUsername = (username || '').toLowerCase().trim();
   const normGroups = (groups || []).flatMap((g) => {
     const raw = (g || '').toLowerCase().trim();
     if (!raw) return [];

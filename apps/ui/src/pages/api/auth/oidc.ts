@@ -36,9 +36,10 @@ export const GET: APIRoute = async ({ request, url, cookies, redirect }) => {
 
   try {
     const authUrl = await getOidcAuthorizationUrl(origin, state, codeVerifier);
+    console.log(`[OIDC] Initiating login redirect. Redirecting browser to: ${authUrl}`);
     return redirect(authUrl);
   } catch (err: any) {
-    console.error('Failed to generate OIDC authorization URL:', err);
+    console.error('[OIDC] Failed to generate OIDC authorization URL:', err);
     return redirect(`/login?error=${encodeURIComponent(err.message || 'oidc_initiation_failed')}`);
   }
 };

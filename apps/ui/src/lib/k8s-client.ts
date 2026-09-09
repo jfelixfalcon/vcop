@@ -298,7 +298,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       clusterName: spec.clusterName || name,
       vclusterVersion: spec.vclusterVersion || '',
       kubernetesVersion: spec.kubernetesVersion || '',
-      sizePreset: ((metadata.annotations?.['vops.gitops.io/sizing-tier'] || spec.sizePreset) as SizePreset) || 'normal',
+      sizePreset: ((item.metadata?.annotations?.['vops.gitops.io/sizing-tier'] || spec.sizePreset) as SizePreset) || 'normal',
       highAvailability: spec.highAvailability ?? true,
       components: spec.components || {
         coreDNS: { enabled: true },

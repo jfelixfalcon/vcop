@@ -80,7 +80,9 @@ async function handleCallback(context: {
     }
   }
 
-  // 3. Handle explicit error from OIDC Provider
+  console.log(
+    `[OIDC Callback] Incoming ${request.method} request (hasCode=${Boolean(code)}, hasState=${Boolean(state)}, hasAccessToken=${Boolean(accessToken)}, hasIdToken=${Boolean(idToken)})`
+  );
   authLog('OIDC Callback request parsed:', {
     method: request.method,
     url: url.pathname + url.search,
