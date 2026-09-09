@@ -1,7 +1,8 @@
 ---
 import Layout from '../../layouts/Layout.astro';
-import { ClusterBaselinesManager } from '../../components/ClusterBaselinesManager';
+import { BaselinesAndSizingContainer } from '../../components/BaselinesAndSizingContainer';
 import { getClusterBaselines } from '../../lib/cluster-baselines';
+import { getSizingTiers } from '../../lib/sizing-tiers';
 
 const user = Astro.locals.user;
 if (user && user.role !== 'admin') {
@@ -9,11 +10,19 @@ if (user && user.role !== 'admin') {
 }
 
 const isAdmin = user?.role === 'admin';
-const baselines = await getClusterBaselines();
+const [baselines, sizingTiers] = await Promise.all([
+  getClusterBaselines(),
+  getSizingTiers(),
+]);
 ---
 
-<Layout title="Cluster Baselines & Predefined Configs - vCluster Operations Center">
+<Layout title="Cluster Baselines & Sizing Tiers - vCluster Operations Center">
   <div class="space-y-6">
-    <ClusterBaselinesManager client:load initialBaselines={baselines} isAdmin={isAdmin} />
+    <BaselinesAndSizingContainer
+      client:load
+      initialBaselines={baselines}
+      initialSizingTiers={sizingTiers}
+      isAdmin={isAdmin}
+    />
   </div>
 </Layout>

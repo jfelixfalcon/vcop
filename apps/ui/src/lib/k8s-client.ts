@@ -298,7 +298,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
       clusterName: spec.clusterName || name,
       vclusterVersion: spec.vclusterVersion || '',
       kubernetesVersion: spec.kubernetesVersion || '',
-      sizePreset: (spec.sizePreset as SizePreset) || 'normal',
+      sizePreset: ((metadata.annotations?.['vops.gitops.io/sizing-tier'] || spec.sizePreset) as SizePreset) || 'normal',
       highAvailability: spec.highAvailability ?? true,
       components: spec.components || {
         coreDNS: { enabled: true },
@@ -364,7 +364,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
         .map((s: string) => s.trim())
         .filter(Boolean),
       environment: (item.metadata?.labels?.['vops.gitops.io/environment'] as any) || 'development',
-      tags: [spec.sizePreset || 'normal', spec.highAvailability ? 'ha-etcd' : 'single-node'],
+      tags: [item.metadata?.annotations?.['vops.gitops.io/sizing-tier'] || spec.sizePreset || 'normal', spec.highAvailability ? 'ha-etcd' : 'single-node'],
       installedApps,
       customEndpoint,
       oidc,
@@ -638,6 +638,21 @@ export async function createVirtualCluster(data: {
     labels['vops.gitops.io/cluster-group'] = groupsList[0].replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 63);
   }
 
+  const KNOWN_CRD_PRESETS = ['normal', 'ha', 'small', 'medium', 'large', 'custom'];
+  const isKnownPreset = KNOWN_CRD_PRESETS.includes(data.preset);
+  const effectiveSizePreset = isKnownPreset ? data.preset : 'custom';
+  annotations['vops.gitops.io/sizing-tier'] = data.preset;
+
+  const effectiveCustomResources = data.customResources || (
+    !isKnownPreset
+      ? {
+          cpu: data.policies?.resourceQuota?.limitsCPU || '4',
+          memory: data.policies?.resourceQuota?.limitsMemory || '8Gi',
+          storage: data.policies?.resourceQuota?.requestsStorage || '20Gi',
+        }
+      : undefined
+  );
+
   const body: any = {
     apiVersion: 'vops.gitops.io/v1alpha1',
     kind: 'VirtualCluster',
@@ -654,8 +669,9 @@ export async function createVirtualCluster(data: {
       etcdVersion: etcdVer,
       ...(data.storageClass ? { storageClass: data.storageClass } : {}),
       ...(data.etcdStorageClass ? { etcdStorageClass: data.etcdStorageClass } : {}),
-      sizePreset: data.preset,
+      sizePreset: effectiveSizePreset,
       highAvailability: isHA,
+      ...(effectiveCustomResources ? { customResources: effectiveCustomResources } : {}),
       components: {
         coreDNS: {
           enabled: data.enableMonitoringAndDNS ?? true,

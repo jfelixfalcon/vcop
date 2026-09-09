@@ -32,7 +32,7 @@ import {
   HardDriveDownload,
   ExternalLink,
 } from 'lucide-react';
-import type { SizePreset, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry, ClusterCapacityData, BackupItem, ClusterBaseline, StorageClassInfo } from '../lib/types';
+import type { SizePreset, PresetDetails, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry, ClusterCapacityData, BackupItem, ClusterBaseline, StorageClassInfo } from '../lib/types';
 import { PRESETS } from '../lib/presets';
 import { computeClusterFqdn } from '../lib/baseline-utils';
 import { parseCpuMillis, parseMemoryBytes, formatCpuMillis, formatMemoryBytes } from '../lib/metrics-utils';
@@ -50,7 +50,8 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
   const isDeveloper = user?.role === 'developers' || user?.role === 'developer';
   const [step, setStep] = useState<number>(1);
 
-  // Cluster Baseline State
+  // Cluster Baseline & Sizing State
+  const [presets, setPresets] = useState<PresetDetails[]>(PRESETS);
   const [baselines, setBaselines] = useState<ClusterBaseline[]>([]);
   const [selectedBaselineId, setSelectedBaselineId] = useState<string>('dev-sandbox');
   const [selectedBaseline, setSelectedBaseline] = useState<ClusterBaseline | null>(null);
@@ -222,7 +223,14 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
           applyBaseline(def);
         }
       })
-      .catch((e) => console.warn('Failed loading baselines in wizard:', e));
+    fetch('/api/presets')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.presets) && data.presets.length > 0) {
+          setPresets(data.presets);
+        }
+      })
+      .catch((e) => console.warn('Failed loading sizing presets in wizard:', e));
 
     fetch('/api/cluster/storage-classes')
       .then((res) => res.json())
@@ -343,6 +351,18 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
 
   const handleSelectPreset = (preset: SizePreset) => {
     setSizePreset(preset);
+    const target = presets.find((p) => p.id === preset);
+    if (target) {
+      if (target.requestsCPU) setRequestsCPU(target.requestsCPU);
+      if (target.limitsCPU) setLimitsCPU(target.limitsCPU);
+      if (target.requestsMemory) setRequestsMemory(target.requestsMemory);
+      if (target.limitsMemory) setLimitsMemory(target.limitsMemory);
+      if (target.requestsStorage) setRequestsStorage(target.requestsStorage);
+      if (target.pods) setPods(target.pods);
+      if (target.services) setServices(target.services);
+      if (target.persistentVolumeClaims) setPersistentVolumeClaims(target.persistentVolumeClaims);
+      return;
+    }
     switch (preset) {
       case 'normal':
       case 'small':
@@ -379,7 +399,7 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
     }
   };
 
-  const selectedPresetDetails = PRESETS.find((p) => p.id === sizePreset) || PRESETS[0];
+  const selectedPresetDetails = presets.find((p) => p.id === sizePreset) || presets[0] || PRESETS[0];
 
   const handleNext = () => {
     if (step === 1) {
@@ -1079,7 +1099,7 @@ policies:
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {PRESETS.filter((p) => p.id !== 'custom').map((preset) => {
+              {presets.filter((p) => p.id !== 'custom').map((preset) => {
                 const isSelected = sizePreset === preset.id;
                 return (
                   <div

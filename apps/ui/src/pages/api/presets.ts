@@ -1,17 +1,18 @@
 import type { APIRoute } from 'astro';
-import { PRESETS } from '../../lib/presets';
+import { getSizingTiers } from '../../lib/sizing-tiers';
 import { getClusterBaselines } from '../../lib/cluster-baselines';
 import { listStorageClasses } from '../../lib/k8s-client';
 
 export const GET: APIRoute = async () => {
   try {
-    const [baselines, storageClasses] = await Promise.all([
+    const [presets, baselines, storageClasses] = await Promise.all([
+      getSizingTiers().catch(() => []),
       getClusterBaselines().catch(() => []),
       listStorageClasses().catch(() => []),
     ]);
     return new Response(JSON.stringify({
       success: true,
-      presets: PRESETS,
+      presets,
       baselines,
       storageClasses,
     }), {
@@ -19,9 +20,10 @@ export const GET: APIRoute = async () => {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch {
+    const presets = await getSizingTiers().catch(() => []);
     return new Response(JSON.stringify({
       success: true,
-      presets: PRESETS,
+      presets,
       storageClasses: [],
     }), {
       status: 200,

@@ -1,4 +1,4 @@
-export type SizePreset = 'normal' | 'ha' | 'small' | 'medium' | 'large' | 'custom';
+export type SizePreset = 'normal' | 'ha' | 'small' | 'medium' | 'large' | 'custom' | string;
 
 export type ClusterPhase =
   | 'Pending'
@@ -270,6 +270,18 @@ export interface PresetDetails {
   ha: boolean;
   description: string;
   badge: string;
+  isDefault?: boolean;
+  requestsCPU?: string;
+  limitsCPU?: string;
+  requestsMemory?: string;
+  limitsMemory?: string;
+  requestsStorage?: string;
+  pods?: string;
+  services?: string;
+  persistentVolumeClaims?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 export type AppCategory =

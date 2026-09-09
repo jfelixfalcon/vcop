@@ -20,25 +20,38 @@ import {
   ExternalLink,
   Info,
 } from 'lucide-react';
-import type { ClusterBaseline, SizePreset, StorageClassInfo } from '../lib/types';
+import type { ClusterBaseline, SizePreset, StorageClassInfo, PresetDetails } from '../lib/types';
 import { computeClusterFqdn } from '../lib/baseline-utils';
 
 interface ClusterBaselinesManagerProps {
   initialBaselines: ClusterBaseline[];
+  initialSizingTiers?: PresetDetails[];
   isAdmin: boolean;
 }
 
 export function ClusterBaselinesManager({
   initialBaselines,
+  initialSizingTiers = [],
   isAdmin,
 }: ClusterBaselinesManagerProps) {
   const [baselines, setBaselines] = useState<ClusterBaseline[]>(initialBaselines);
+  const [sizingTiers, setSizingTiers] = useState<PresetDetails[]>(initialSizingTiers);
   const [storageClasses, setStorageClasses] = useState<StorageClassInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // Load cluster storage classes for database & drive selection
+  // Load cluster storage classes and sizing tiers if needed
   React.useEffect(() => {
+    if (sizingTiers.length === 0) {
+      fetch('/api/admin/sizing-tiers')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && Array.isArray(data.data)) {
+            setSizingTiers(data.data);
+          }
+        })
+        .catch((e) => console.warn('Failed to fetch sizing tiers:', e));
+    }
     fetch('/api/cluster/storage-classes')
       .then((res) => res.json())
       .then((data) => {
@@ -681,14 +694,40 @@ export function ClusterBaselinesManager({
                   </label>
                   <select
                     value={formData.preset}
-                    onChange={(e) => setFormData({ ...formData, preset: e.target.value as SizePreset })}
+                    onChange={(e) => {
+                      const selectedPreset = e.target.value as SizePreset;
+                      const tier = sizingTiers.find((t) => t.id === selectedPreset);
+                      setFormData({
+                        ...formData,
+                        preset: selectedPreset,
+                        ...(tier
+                          ? {
+                              requestsCPU: tier.requestsCPU || formData.requestsCPU,
+                              limitsCPU: tier.limitsCPU || formData.limitsCPU,
+                              requestsMemory: tier.requestsMemory || formData.requestsMemory,
+                              limitsMemory: tier.limitsMemory || formData.limitsMemory,
+                              requestsStorage: tier.requestsStorage || formData.requestsStorage,
+                            }
+                          : {}),
+                      });
+                    }}
                     className="w-full px-3 py-2 rounded-xl bg-cyber-950 border border-cyber-700 text-xs font-mono text-white focus:outline-none"
                   >
-                    <option value="normal">Normal (2 vCPU / 4GB)</option>
-                    <option value="ha">Production HA (6 vCPU / 12GB)</option>
-                    <option value="small">Small (1 vCPU / 2GB)</option>
-                    <option value="medium">Medium (4 vCPU / 8GB)</option>
-                    <option value="large">Large (8 vCPU / 16GB)</option>
+                    {sizingTiers.length > 0 ? (
+                      sizingTiers.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.cpu} / {t.memory} / {t.storage}{t.ha ? ' - 3x HA' : ''})
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="normal">Normal (2 vCPU / 4GB)</option>
+                        <option value="ha">Production HA (6 vCPU / 12GB)</option>
+                        <option value="small">Small (1 vCPU / 2GB)</option>
+                        <option value="medium">Medium (4 vCPU / 8GB)</option>
+                        <option value="large">Large (8 vCPU / 16GB)</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
