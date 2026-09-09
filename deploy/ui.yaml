@@ -57,6 +57,10 @@ spec:
               value: "dso"
             - name: OIDC_CLIENT_SECRET
               value: "8b71c15a8f5c4cf1934b951624ff85f3"
+            - name: OIDC_SCOPES
+              value: "openid email profile"
+            - name: OIDC_GROUPS_CLAIM
+              value: "groups"
             - name: OIDC_ADMIN_EMAILS
               value: "admin@vops.local,admin@example.com,dso@local"
             - name: OIDC_ADMIN_GROUPS

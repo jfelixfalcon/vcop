@@ -55,7 +55,9 @@ spec:
             - name: OIDC_REDIRECT_URI
               value: {{ default "" .Values.ui.auth.oidc.redirectUri | quote }}
             - name: OIDC_SCOPES
-              value: {{ default "openid email profile groups" .Values.ui.auth.oidc.scopes | quote }}
+              value: {{ default "openid email profile" .Values.ui.auth.oidc.scopes | quote }}
+            - name: OIDC_GROUPS_CLAIM
+              value: {{ default "groups" .Values.ui.auth.oidc.groupsClaim | quote }}
             - name: OIDC_PROVIDER_NAME
               value: {{ default "Single Sign-On (OIDC)" .Values.ui.auth.oidc.providerName | quote }}
             - name: OIDC_ADMIN_GROUPS

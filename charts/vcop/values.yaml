@@ -105,7 +105,8 @@ ui:
       clientId: "dso"
       clientSecret: "8b71c15a8f5c4cf1934b951624ff85f3"
       redirectUri: ""
-      scopes: "openid email profile groups"
+      scopes: "openid email profile" # Standard OIDC scopes; groups are fetched from /userinfo
+      groupsClaim: "groups" # Name of claim in UserInfo/Token containing groups (e.g. groups, roles, memberOf)
       providerName: "Keycloak SSO"
       adminGroups: "admins,vcluster-admins,platform-ops,default-roles-master"
       adminEmails: "admin@vops.local,admin@example.com,dso@local"

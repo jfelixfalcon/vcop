@@ -53,7 +53,7 @@ export const OIDC_CONFIG = {
   clientId: process.env.OIDC_CLIENT_ID || '',
   clientSecret: process.env.OIDC_CLIENT_SECRET || '',
   redirectUri: process.env.OIDC_REDIRECT_URI || '',
-  scopes: process.env.OIDC_SCOPES || 'openid email profile groups',
+  scopes: process.env.OIDC_SCOPES || 'openid email profile',
   providerName: process.env.OIDC_PROVIDER_NAME || 'Single Sign-On (OIDC)',
   groupsClaim: process.env.OIDC_GROUPS_CLAIM || 'groups',
   adminGroups: (process.env.OIDC_ADMIN_GROUPS || 'admins,vcluster-admins,platform-ops,default-roles-master')
@@ -441,7 +441,7 @@ export async function getOidcAuthorizationUrl(
   const discovery = await getOidcDiscovery(config.issuerUrl);
   const redirectUri = config.redirectUri || `${origin}/api/auth/callback`;
 
-  const requestedScopes = (config.scopes || 'openid email profile groups')
+  const requestedScopes = (config.scopes || 'openid email profile')
     .split(' ')
     .map((s) => s.trim())
     .filter(Boolean);
@@ -704,6 +704,37 @@ export async function fetchOidcUserInfo(
           ...(userInfo?.resource_access || {}),
           ...(introspectionData?.resource_access || {}),
         };
+      }
+    }
+
+    // Check for distributed claims (RFC 5646 / Azure AD group overage, Dex, etc.)
+    if (consolidated._claim_names?.groups && consolidated._claim_sources) {
+      const srcKey = consolidated._claim_names.groups;
+      const endpointObj = consolidated._claim_sources[srcKey];
+      if (endpointObj?.endpoint) {
+        try {
+          console.log(`[OIDC] Querying distributed group claim endpoint (group overage): ${endpointObj.endpoint}`);
+          const overageRes = await fetch(endpointObj.endpoint, {
+            headers: {
+              Authorization: endpointObj.access_token ? `Bearer ${endpointObj.access_token}` : `Bearer ${accessToken.trim()}`,
+              Accept: 'application/json',
+            },
+            signal: AbortSignal.timeout(7000),
+          });
+          if (overageRes.ok) {
+            const overageData = await overageRes.json();
+            const rawList = Array.isArray(overageData) ? overageData : (overageData.value || overageData.groups);
+            if (Array.isArray(rawList)) {
+              consolidated.groups = [
+                ...(Array.isArray(consolidated.groups) ? consolidated.groups : []),
+                ...rawList.map((g: any) => (typeof g === 'object' ? (g.displayName || g.id || g.name) : g)),
+              ];
+              console.log(`[OIDC] Successfully fetched ${rawList.length} distributed groups from overage endpoint.`);
+            }
+          }
+        } catch (e: any) {
+          console.warn('[OIDC] Failed to query distributed group claims:', e.message);
+        }
       }
     }
 
