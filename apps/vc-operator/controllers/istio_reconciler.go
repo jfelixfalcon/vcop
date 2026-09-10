@@ -317,11 +317,17 @@ func (r *IstioReconciler) syncTlsSecretToGuest(ctx context.Context, vc *v1alpha1
 	existingGuestSecret := &corev1.Secret{}
 	err = vClient.Get(ctx, types.NamespacedName{Name: tlsSecretName, Namespace: "istio-system"}, existingGuestSecret)
 	if apierrors.IsNotFound(err) {
-		return vClient.Create(ctx, guestSecret)
+		if err := vClient.Create(ctx, guestSecret); err != nil && !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		return nil
 	} else if err == nil {
 		existingGuestSecret.Data = hostSecret.Data
 		existingGuestSecret.Type = hostSecret.Type
-		return vClient.Update(ctx, existingGuestSecret)
+		if err := vClient.Update(ctx, existingGuestSecret); err != nil && !apierrors.IsConflict(err) {
+			return err
+		}
+		return nil
 	}
 	return err
 }
@@ -463,7 +469,7 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 	}
 	existingDep := &appsv1.Deployment{}
 	if err := vClient.Get(ctx, types.NamespacedName{Name: "istiod", Namespace: "istio-system"}, existingDep); apierrors.IsNotFound(err) {
-		if err := vClient.Create(ctx, dep); err != nil {
+		if err := vClient.Create(ctx, dep); err != nil && !apierrors.IsAlreadyExists(err) {
 			return err
 		}
 	} else if err == nil {
@@ -478,7 +484,7 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 			updated = true
 		}
 		if updated {
-			if err := vClient.Update(ctx, existingDep); err != nil {
+			if err := vClient.Update(ctx, existingDep); err != nil && !apierrors.IsConflict(err) {
 				return err
 			}
 		}
@@ -507,8 +513,17 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 	}
 	existingSvc := &corev1.Service{}
 	if err := vClient.Get(ctx, types.NamespacedName{Name: "istiod", Namespace: "istio-system"}, existingSvc); apierrors.IsNotFound(err) {
-		if err := vClient.Create(ctx, svc); err != nil {
+		if err := vClient.Create(ctx, svc); err != nil && !apierrors.IsAlreadyExists(err) {
 			return err
+		}
+	} else if err == nil {
+		if !portsEqual(existingSvc.Spec.Ports, svc.Spec.Ports) {
+			existingSvc.Labels = svc.Labels
+			existingSvc.Spec.Selector = svc.Spec.Selector
+			existingSvc.Spec.Ports = svc.Spec.Ports
+			if err := vClient.Update(ctx, existingSvc); err != nil && !apierrors.IsConflict(err) {
+				return err
+			}
 		}
 	}
 
@@ -662,7 +677,7 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 	}
 	existingDep := &appsv1.Deployment{}
 	if err := vClient.Get(ctx, types.NamespacedName{Name: "istio-ingressgateway", Namespace: "istio-system"}, existingDep); apierrors.IsNotFound(err) {
-		if err := vClient.Create(ctx, dep); err != nil {
+		if err := vClient.Create(ctx, dep); err != nil && !apierrors.IsAlreadyExists(err) {
 			return err
 		}
 	} else if err == nil {
@@ -677,7 +692,7 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 			updated = true
 		}
 		if updated {
-			if err := vClient.Update(ctx, existingDep); err != nil {
+			if err := vClient.Update(ctx, existingDep); err != nil && !apierrors.IsConflict(err) {
 				return err
 			}
 		}
@@ -707,7 +722,7 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 	}
 	existingSvc := &corev1.Service{}
 	if err := vClient.Get(ctx, types.NamespacedName{Name: "istio-ingressgateway", Namespace: "istio-system"}, existingSvc); apierrors.IsNotFound(err) {
-		if err := vClient.Create(ctx, svc); err != nil {
+		if err := vClient.Create(ctx, svc); err != nil && !apierrors.IsAlreadyExists(err) {
 			return err
 		}
 	} else if err == nil {
@@ -716,7 +731,7 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 			existingSvc.Spec.Type = svcType
 			existingSvc.Spec.Selector = svc.Spec.Selector
 			existingSvc.Spec.Ports = svc.Spec.Ports
-			if err := vClient.Update(ctx, existingSvc); err != nil {
+			if err := vClient.Update(ctx, existingSvc); err != nil && !apierrors.IsConflict(err) {
 				return err
 			}
 		}
