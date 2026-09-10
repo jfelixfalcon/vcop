@@ -32,3 +32,37 @@ export function computeClusterFqdn(clusterName: string, baseDomain: string): {
     hosts: [wildcard, primary],
   };
 }
+
+/**
+ * Parses user input selector string (e.g. "istio: ingressgateway", "app: custom-gw", or "ingressgateway")
+ * into a Record<string, string>.
+ */
+export function parseSelector(str: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!str) return { istio: 'ingressgateway' };
+  const pairs = str.split(/[,\n]/);
+  for (const pair of pairs) {
+    const trimmed = pair.trim();
+    if (!trimmed) continue;
+    if (trimmed.includes(':')) {
+      const [k, ...v] = trimmed.split(':');
+      result[k.trim()] = v.join(':').trim();
+    } else if (trimmed.includes('=')) {
+      const [k, ...v] = trimmed.split('=');
+      result[k.trim()] = v.join('=').trim();
+    } else {
+      result['istio'] = trimmed;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : { istio: 'ingressgateway' };
+}
+
+/**
+ * Formats a selector Record<string, string> into a readable string like "istio: ingressgateway".
+ */
+export function formatSelector(sel?: Record<string, string>): string {
+  if (!sel || Object.keys(sel).length === 0) return 'istio: ingressgateway';
+  return Object.entries(sel)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(', ');
+}

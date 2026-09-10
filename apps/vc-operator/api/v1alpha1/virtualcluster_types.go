@@ -35,16 +35,16 @@ const (
 
 // Condition types for VirtualCluster
 const (
-	ConditionEtcdReady           = "EtcdReady"
-	ConditionControlPlaneReady   = "ControlPlaneReady"
-	ConditionAddonsReady         = "AddonsReady"
-	ConditionKubeconfigGenerated = "KubeconfigGenerated"
-	ConditionQuotaReady          = "QuotaReady"
-	ConditionSleeping            = "Sleeping"
-	ConditionRBACReady           = "RBACReady"
-	ConditionIstioReady          = "IstioReady"
-	ConditionCertificateReady    = "CertificateReady"
-	ConditionCapacityAvailable   = "CapacityAvailable"
+	ConditionEtcdReady             = "EtcdReady"
+	ConditionControlPlaneReady     = "ControlPlaneReady"
+	ConditionAddonsReady           = "AddonsReady"
+	ConditionKubeconfigGenerated   = "KubeconfigGenerated"
+	ConditionQuotaReady            = "QuotaReady"
+	ConditionSleeping              = "Sleeping"
+	ConditionRBACReady             = "RBACReady"
+	ConditionIstioReady            = "IstioReady"
+	ConditionCertificateReady      = "CertificateReady"
+	ConditionCapacityAvailable     = "CapacityAvailable"
 	ConditionDisasterRecoveryReady = "DisasterRecoveryReady"
 )
 
@@ -81,6 +81,29 @@ type IstioGatewayConfig struct {
 	// Replicas defines the replica count for the ingress gateway (defaults to 3 if highAvailability is true, otherwise 1)
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
+	// Selector defines the pod label selector for the ingress gateway (defaults to istio: ingressgateway)
+	// +optional
+	Selector map[string]string `json:"selector,omitempty"`
+}
+
+// HostRoutingConfig configures host-level Istio ingress routing and API passthrough
+type HostRoutingConfig struct {
+	// Enabled deploys host DestinationRule, host VirtualService, and vCluster API Passthrough Gateway
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled"`
+
+	// DefaultGateway is the host-side gateway reference (e.g. "istio-system/default-gateway")
+	// +kubebuilder:default="istio-system/default-gateway"
+	// +optional
+	DefaultGateway string `json:"defaultGateway,omitempty"`
+
+	// IngressGatewaySelector is the label selector for the host ingress gateway (default: istio: ingressgateway)
+	// +optional
+	IngressGatewaySelector map[string]string `json:"ingressGatewaySelector,omitempty"`
+
+	// ApiHost is the external hostname for the vCluster Kubernetes API (defaults to "api.<clusterName>.<baseDomain>")
+	// +optional
+	ApiHost string `json:"apiHost,omitempty"`
 }
 
 // IstioComponent configures the opinionated Istio entrypoint and mesh stack
@@ -123,6 +146,10 @@ type IstioComponent struct {
 	// CertSecretName overrides the TLS secret name (defaults to <clusterName>-ingress-tls)
 	// +optional
 	CertSecretName string `json:"certSecretName,omitempty"`
+
+	// HostRouting configures host-level Istio routing and vCluster API passthrough
+	// +optional
+	HostRouting *HostRoutingConfig `json:"hostRouting,omitempty"`
 }
 
 // ComponentsSpec defines embedded add-ons for the virtual cluster

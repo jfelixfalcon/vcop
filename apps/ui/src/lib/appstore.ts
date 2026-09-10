@@ -1,3 +1,4 @@
+import YAML from 'yaml';
 import type { AppDefinition, AppGroup, AppStoreCatalog } from './types';
 import { k8sRequest } from './k8s-client';
 
@@ -40,7 +41,7 @@ export async function getAppStoreCatalog(): Promise<AppStoreCatalog> {
 
   // If not found, persist default catalog to Kubernetes ConfigMap
   try {
-    await saveEntireCatalogToK8s(DEFAULT_CATALOG);
+    await saveEntireCatalog(DEFAULT_CATALOG);
     memoryCatalogCache = DEFAULT_CATALOG;
     lastFetchTime = now;
     return DEFAULT_CATALOG;
@@ -50,8 +51,6 @@ export async function getAppStoreCatalog(): Promise<AppStoreCatalog> {
     return DEFAULT_CATALOG;
   }
 }
-
-import YAML from 'yaml';
 
 /**
  * Saves the entire catalog structure to Kubernetes ConfigMap.
@@ -100,6 +99,11 @@ export async function saveEntireCatalog(catalog: AppStoreCatalog): Promise<void>
   memoryCatalogCache = catalogPayload;
   lastFetchTime = Date.now();
 }
+
+/**
+ * Backward compatibility alias for saveEntireCatalog.
+ */
+export const saveEntireCatalogToK8s = saveEntireCatalog;
 
 /**
  * Clears all applications and groups from the App Store catalog.
@@ -232,7 +236,7 @@ export async function saveAppDefinition(app: AppDefinition): Promise<AppStoreCat
     catalog.apps.push(updatedApp);
   }
 
-  await saveEntireCatalogToK8s(catalog);
+  await saveEntireCatalog(catalog);
   return catalog;
 }
 
@@ -248,7 +252,7 @@ export async function deleteAppDefinition(appId: string): Promise<AppStoreCatalo
     group.appIds = group.appIds.filter((id) => id !== appId);
   }
 
-  await saveEntireCatalogToK8s(catalog);
+  await saveEntireCatalog(catalog);
   return catalog;
 }
 
@@ -265,7 +269,7 @@ export async function saveAppGroup(group: AppGroup): Promise<AppStoreCatalog> {
     catalog.groups.push(group);
   }
 
-  await saveEntireCatalogToK8s(catalog);
+  await saveEntireCatalog(catalog);
   return catalog;
 }
 
@@ -276,6 +280,6 @@ export async function deleteAppGroup(groupId: string): Promise<AppStoreCatalog> 
   const catalog = await getAppStoreCatalog();
   catalog.groups = catalog.groups.filter((g) => g.id !== groupId);
 
-  await saveEntireCatalogToK8s(catalog);
+  await saveEntireCatalog(catalog);
   return catalog;
 }

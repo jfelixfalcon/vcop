@@ -146,7 +146,15 @@ export interface DisasterRecoveryStatus {
   recentBackups: BackupItem[];
 }
 
+export interface HostRoutingConfig {
+  enabled: boolean;
+  defaultGateway?: string;
+  ingressGatewaySelector?: Record<string, string>;
+  apiHost?: string;
+}
+
 export interface VirtualCluster {
+  id: string;
   name: string;
   namespace: string;
   spec: {
@@ -170,11 +178,13 @@ export interface VirtualCluster {
           enabled: boolean;
           serviceType?: string;
           replicas?: number;
+          selector?: Record<string, string>;
         };
         certificateIssuer?: string;
         certificateIssuerKind?: string;
         hosts?: string[];
         certSecretName?: string;
+        hostRouting?: HostRoutingConfig;
       };
     };
     sync: {
@@ -627,6 +637,8 @@ export interface ClusterBaseline {
     certificateIssuer?: string;
     certificateIssuerKind?: 'ClusterIssuer' | 'Issuer';
     serviceType?: string;
+    ingressGatewaySelector?: Record<string, string>;
+    hostRouting?: HostRoutingConfig;
   };
   disasterRecovery: {
     enabled: boolean;

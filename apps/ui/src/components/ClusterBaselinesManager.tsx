@@ -20,9 +20,10 @@ import {
   ExternalLink,
   Info,
   Gauge,
+  Network,
 } from 'lucide-react';
 import type { ClusterBaseline, SizePreset, StorageClassInfo, PresetDetails } from '../lib/types';
-import { computeClusterFqdn } from '../lib/baseline-utils';
+import { computeClusterFqdn, parseSelector, formatSelector } from '../lib/baseline-utils';
 import { ModalPortal } from './ModalPortal';
 
 interface ClusterBaselinesManagerProps {
@@ -88,6 +89,10 @@ export function ClusterBaselinesManager({
     enableIstio: boolean;
     certIssuer: string;
     certIssuerKind: 'ClusterIssuer' | 'Issuer';
+    enableHostRouting: boolean;
+    hostDefaultGateway: string;
+    hostGatewaySelector: string;
+    hostApiHost: string;
     enableBackups: boolean;
     backupSchedule: string;
     backupRetention: number;
@@ -133,6 +138,10 @@ export function ClusterBaselinesManager({
     enableIstio: true,
     certIssuer: 'letsencrypt-staging',
     certIssuerKind: 'ClusterIssuer',
+    enableHostRouting: false,
+    hostDefaultGateway: 'istio-system/default-gateway',
+    hostGatewaySelector: 'istio: ingressgateway',
+    hostApiHost: '',
     enableBackups: true,
     backupSchedule: 'daily',
     backupRetention: 7,
@@ -272,6 +281,10 @@ export function ClusterBaselinesManager({
       enableIstio: true,
       certIssuer: 'letsencrypt-staging',
       certIssuerKind: 'ClusterIssuer',
+      enableHostRouting: false,
+      hostDefaultGateway: 'istio-system/default-gateway',
+      hostGatewaySelector: 'istio: ingressgateway',
+      hostApiHost: '',
       enableBackups: true,
       backupSchedule: 'daily',
       backupRetention: 7,
@@ -324,6 +337,10 @@ export function ClusterBaselinesManager({
       enableIstio: b.istio?.enabled ?? true,
       certIssuer: b.istio?.certificateIssuer || 'letsencrypt-staging',
       certIssuerKind: b.istio?.certificateIssuerKind || 'ClusterIssuer',
+      enableHostRouting: b.istio?.hostRouting?.enabled ?? false,
+      hostDefaultGateway: b.istio?.hostRouting?.defaultGateway || 'istio-system/default-gateway',
+      hostGatewaySelector: formatSelector(b.istio?.hostRouting?.ingressGatewaySelector),
+      hostApiHost: b.istio?.hostRouting?.apiHost || '',
       enableBackups: b.disasterRecovery?.enabled ?? true,
       backupSchedule: b.disasterRecovery?.schedule || 'daily',
       backupRetention: b.disasterRecovery?.retentionCount || 7,
@@ -431,6 +448,14 @@ export function ClusterBaselinesManager({
         certificateIssuer: formData.certIssuer.trim() || undefined,
         certificateIssuerKind: formData.certIssuerKind,
         serviceType: formData.preset === 'ha' ? 'LoadBalancer' : 'ClusterIP',
+        hostRouting: formData.enableHostRouting
+          ? {
+              enabled: true,
+              defaultGateway: formData.hostDefaultGateway.trim() || 'istio-system/default-gateway',
+              ingressGatewaySelector: parseSelector(formData.hostGatewaySelector),
+              apiHost: formData.hostApiHost.trim() || undefined,
+            }
+          : undefined,
       },
       disasterRecovery: {
         enabled: formData.enableBackups,
@@ -1411,6 +1436,64 @@ export function ClusterBaselinesManager({
                         <option value="ClusterIssuer">ClusterIssuer</option>
                         <option value="Issuer">Issuer</option>
                       </select>
+                    </div>
+
+                    {/* Host Ingress Routing */}
+                    <div className="sm:col-span-2 pt-2 border-t border-cyber-800/80 space-y-3">
+                      <label className="flex items-center gap-3 p-3 rounded-xl bg-cyber-950 border border-cyber-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.enableHostRouting}
+                          onChange={(e) => setFormData({ ...formData, enableHostRouting: e.target.checked })}
+                          className="rounded bg-cyber-900 border-cyber-700 text-cyan-500 focus:ring-cyan-500"
+                        />
+                        <div className="text-xs font-mono">
+                          <div className="text-white font-medium flex items-center gap-1.5">
+                            <Network className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>Host Istio Ingress & API Passthrough</span>
+                          </div>
+                          <div className="text-slate-500 text-[10px]">
+                            Deploys host DestinationRule (MUTUAL TLS), app VirtualService, and TLS Passthrough Gateway for API
+                          </div>
+                        </div>
+                      </label>
+
+                      {formData.enableHostRouting && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-xl bg-cyber-950/60 border border-cyber-800">
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-slate-400 font-mono">Default Host Gateway</label>
+                            <input
+                              type="text"
+                              value={formData.hostDefaultGateway}
+                              onChange={(e) => setFormData({ ...formData, hostDefaultGateway: e.target.value })}
+                              placeholder="istio-system/default-gateway"
+                              className="w-full px-3 py-1.5 rounded-lg bg-cyber-950 border border-cyber-800 text-xs font-mono text-white focus:outline-none"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-slate-400 font-mono">Gateway Selector</label>
+                            <input
+                              type="text"
+                              value={formData.hostGatewaySelector}
+                              onChange={(e) => setFormData({ ...formData, hostGatewaySelector: e.target.value })}
+                              placeholder="istio: ingressgateway"
+                              className="w-full px-3 py-1.5 rounded-lg bg-cyber-950 border border-cyber-800 text-xs font-mono text-white focus:outline-none"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[10px] text-slate-400 font-mono">API Host (Optional)</label>
+                            <input
+                              type="text"
+                              value={formData.hostApiHost}
+                              onChange={(e) => setFormData({ ...formData, hostApiHost: e.target.value })}
+                              placeholder="api.example.com"
+                              className="w-full px-3 py-1.5 rounded-lg bg-cyber-950 border border-cyber-800 text-xs font-mono text-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

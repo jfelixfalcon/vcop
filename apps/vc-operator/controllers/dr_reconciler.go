@@ -286,3 +286,39 @@ func (r *DisasterRecoveryReconciler) ReconcileDisasterRecovery(ctx context.Conte
 
 	return nil
 }
+
+// CleanupDisasterRecovery removes disaster recovery CronJobs, Jobs, and backup PVC on cluster deletion
+func (r *DisasterRecoveryReconciler) CleanupDisasterRecovery(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
+	cronJob := &batchv1.CronJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-etcd-backup", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, cronJob)
+
+	jobList := &batchv1.JobList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(vc.Namespace),
+	}
+	if err := r.List(ctx, jobList, listOpts...); err == nil {
+		for _, job := range jobList.Items {
+			if strings.HasPrefix(job.Name, fmt.Sprintf("%s-etcd-backup", vc.Name)) ||
+				job.Labels["vops.gitops.io/cluster"] == vc.Spec.ClusterName ||
+				job.Labels["app.kubernetes.io/instance"] == vc.Name {
+				bg := metav1.DeletePropagationBackground
+				_ = r.Delete(ctx, &job, &client.DeleteOptions{PropagationPolicy: &bg})
+			}
+		}
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-etcd-backups", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, pvc)
+
+	return nil
+}

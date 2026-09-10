@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -544,3 +545,124 @@ func TestVirtualClusterReconciler_EtcdStorageClass(t *testing.T) {
 	}
 }
 
+func TestVirtualClusterReconciler_FullDeletionCleanup(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	nsName := "tenant-cleanup-test"
+	clusterName := "cleanup-cluster"
+
+	now := metav1.Now()
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              clusterName,
+			Namespace:         nsName,
+			Finalizers:        []string{VirtualClusterFinalizer},
+			DeletionTimestamp: &now,
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName:       clusterName,
+			KubernetesVersion: "v1.31.0",
+			VClusterVersion:   "0.36.0",
+			SizePreset:        v1alpha1.PresetSmall,
+			HighAvailability:  false,
+		},
+	}
+
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nsName,
+		},
+	}
+
+	syncedPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("nginx-pod-x-default-x-%s", clusterName),
+			Namespace: nsName,
+			Labels: map[string]string{
+				"vcluster.loft.sh/managed-by": clusterName,
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "nginx", Image: "nginx:alpine"}},
+		},
+	}
+
+	syncedSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("nginx-svc-x-default-x-%s", clusterName),
+			Namespace: nsName,
+			Labels: map[string]string{
+				"vcluster.loft.sh/managed-by": clusterName,
+			},
+		},
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("data-%s-0", clusterName),
+			Namespace: nsName,
+			Labels: map[string]string{
+				"vops.gitops.io/cluster": clusterName,
+			},
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc, ns, syncedPod, syncedSvc, pvc).
+		WithStatusSubresource(vc).
+		Build()
+
+	logger := zap.New(zap.UseDevMode(true))
+
+	reconciler := &VirtualClusterReconciler{
+		Client:               client,
+		Log:                  logger,
+		Scheme:               scheme,
+		EtcdReconciler:       NewEtcdReconciler(client),
+		SyncerReconciler:     NewSyncerReconciler(client),
+		KubeconfigReconciler: NewKubeconfigReconciler(client),
+		AddonsReconciler:     NewAddonsReconciler(client),
+		UpgradeManager:       NewUpgradeManager(client),
+	}
+
+	ctx := context.Background()
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      clusterName,
+			Namespace: nsName,
+		},
+	}
+
+	// Reconcile deletion
+	_, err := reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile deletion failed: %v", err)
+	}
+
+	// 1. Verify synced pod was deleted
+	checkPod := &corev1.Pod{}
+	if err := client.Get(ctx, types.NamespacedName{Name: syncedPod.Name, Namespace: nsName}, checkPod); err == nil {
+		t.Errorf("Expected synced pod %s to be deleted, but it still exists", syncedPod.Name)
+	}
+
+	// 2. Verify synced service was deleted
+	checkSvc := &corev1.Service{}
+	if err := client.Get(ctx, types.NamespacedName{Name: syncedSvc.Name, Namespace: nsName}, checkSvc); err == nil {
+		t.Errorf("Expected synced service %s to be deleted, but it still exists", syncedSvc.Name)
+	}
+
+	// 3. Verify PVC was deleted
+	checkPvc := &corev1.PersistentVolumeClaim{}
+	if err := client.Get(ctx, types.NamespacedName{Name: pvc.Name, Namespace: nsName}, checkPvc); err == nil {
+		t.Errorf("Expected PVC %s to be deleted, but it still exists", pvc.Name)
+	}
+
+	// 4. Verify dedicated namespace was deleted
+	checkNs := &corev1.Namespace{}
+	if err := client.Get(ctx, types.NamespacedName{Name: nsName}, checkNs); err == nil {
+		t.Errorf("Expected dedicated namespace %s to be deleted, but it still exists", nsName)
+	}
+}

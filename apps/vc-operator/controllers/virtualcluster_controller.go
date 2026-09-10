@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -40,14 +42,14 @@ type VirtualClusterReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
 
-	EtcdReconciler       *EtcdReconciler
-	SyncerReconciler     *SyncerReconciler
-	KubeconfigReconciler *KubeconfigReconciler
-	AddonsReconciler     *AddonsReconciler
-	UpgradeManager       *UpgradeManager
-	QuotaReconciler      *QuotaReconciler
-	RBACReconciler       *RBACReconciler
-	IstioReconciler      *IstioReconciler
+	EtcdReconciler             *EtcdReconciler
+	SyncerReconciler           *SyncerReconciler
+	KubeconfigReconciler       *KubeconfigReconciler
+	AddonsReconciler           *AddonsReconciler
+	UpgradeManager             *UpgradeManager
+	QuotaReconciler            *QuotaReconciler
+	RBACReconciler             *RBACReconciler
+	IstioReconciler            *IstioReconciler
 	DisasterRecoveryReconciler *DisasterRecoveryReconciler
 }
 
@@ -406,28 +408,229 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 }
 
 func (r *VirtualClusterReconciler) handleDeletion(ctx context.Context, log logr.Logger, vc *v1alpha1.VirtualCluster) (ctrl.Result, error) {
-	log.Info("Executing graceful finalizer cleanup", "cluster", vc.Name)
+	log.Info("Executing graceful finalizer cleanup", "cluster", vc.Name, "namespace", vc.Namespace)
 	vc.Status.Phase = v1alpha1.PhaseTerminating
 	_ = r.Status().Update(ctx, vc)
 
-	// Clean up HA etcd PVCs and StatefulSet
-	if err := r.EtcdReconciler.CleanupEtcd(ctx, vc); err != nil {
-		log.Error(err, "error cleaning up etcd during deletion")
+	// 1. Clean up Disaster Recovery resources (CronJob, Jobs, PVC)
+	if r.DisasterRecoveryReconciler != nil {
+		if err := r.DisasterRecoveryReconciler.CleanupDisasterRecovery(ctx, vc); err != nil {
+			log.Error(err, "error cleaning up disaster recovery during deletion")
+		}
 	}
 
-	// Clean up syncer cluster resources (ClusterRoleBinding)
-	if err := r.SyncerReconciler.CleanupSyncer(ctx, vc); err != nil {
-		log.Error(err, "error cleaning up syncer during deletion")
+	// 2. Clean up Istio host routing resources, cert-manager certificates, and TLS secrets
+	if r.IstioReconciler != nil {
+		if err := r.IstioReconciler.CleanupAllIstio(ctx, vc); err != nil {
+			log.Error(err, "error cleaning up istio resources during deletion")
+		}
 	}
 
-	// Remove finalizer
+	// 3. Clean up HA etcd StatefulSet, client/headless services, and data PVCs
+	if r.EtcdReconciler != nil {
+		if err := r.EtcdReconciler.CleanupEtcd(ctx, vc); err != nil {
+			log.Error(err, "error cleaning up etcd during deletion")
+		}
+	}
+
+	// 4. Clean up syncer StatefulSet, services, configmaps, secrets, RBAC, and synced guest pods
+	if r.SyncerReconciler != nil {
+		if err := r.SyncerReconciler.CleanupSyncer(ctx, vc); err != nil {
+			log.Error(err, "error cleaning up syncer during deletion")
+		}
+	}
+
+	// 5. Sweep remaining resources in the namespace associated with this cluster
+	r.cleanupRemainingClusterResources(ctx, log, vc)
+
+	// 6. Check if this is a dedicated namespace for this virtual cluster
+	isDedicated := r.isDedicatedNamespace(ctx, vc.Namespace, vc.Name)
+
+	// 7. Remove finalizer
 	controllerutil.RemoveFinalizer(vc, VirtualClusterFinalizer)
 	if err := r.Update(ctx, vc); err != nil {
+		log.Error(err, "failed to remove finalizer from VirtualCluster", "cluster", vc.Name)
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Successfully finalized and cleaned up VirtualCluster", "cluster", vc.Name)
+	// 8. If dedicated namespace, delete the namespace itself
+	if isDedicated {
+		log.Info("Deleting dedicated namespace for virtual cluster", "namespace", vc.Namespace)
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: vc.Namespace,
+			},
+		}
+		if err := r.Delete(ctx, ns); err != nil && !errors.IsNotFound(err) {
+			log.Error(err, "error deleting dedicated namespace", "namespace", vc.Namespace)
+		}
+	}
+
+	log.Info("Successfully finalized and cleaned up VirtualCluster and its resources", "cluster", vc.Name)
 	return ctrl.Result{}, nil
+}
+
+func (r *VirtualClusterReconciler) isDedicatedNamespace(ctx context.Context, namespace, clusterName string) bool {
+	if namespace == "" || namespace == "default" {
+		return false
+	}
+	systemNamespaces := map[string]bool{
+		"default":            true,
+		"kube-system":        true,
+		"kube-public":        true,
+		"kube-node-lease":    true,
+		"local-path-storage": true,
+		"cert-manager":       true,
+		"keycloak-operator":  true,
+		"vcop-system":        true,
+	}
+	if systemNamespaces[namespace] || strings.HasPrefix(namespace, "kube-") || strings.HasPrefix(namespace, "vcop-") {
+		return false
+	}
+
+	// Check if there are other active VirtualClusters in this namespace
+	vcList := &v1alpha1.VirtualClusterList{}
+	if err := r.List(ctx, vcList, client.InNamespace(namespace)); err != nil {
+		return false
+	}
+
+	for _, item := range vcList.Items {
+		if item.Name != clusterName && item.DeletionTimestamp.IsZero() {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (r *VirtualClusterReconciler) cleanupRemainingClusterResources(ctx context.Context, log logr.Logger, vc *v1alpha1.VirtualCluster) {
+	isDedicated := r.isDedicatedNamespace(ctx, vc.Namespace, vc.Name)
+	grace := int64(0)
+	delOpts := &client.DeleteOptions{GracePeriodSeconds: &grace}
+
+	// 1. Pods
+	podList := &corev1.PodList{}
+	if err := r.List(ctx, podList, client.InNamespace(vc.Namespace)); err == nil {
+		for i := range podList.Items {
+			pod := &podList.Items[i]
+			if isDedicated || r.resourceBelongsToCluster(&pod.ObjectMeta, vc.Name, vc.Spec.ClusterName) {
+				if len(pod.Finalizers) > 0 {
+					pod.Finalizers = nil
+					_ = r.Update(ctx, pod)
+				}
+				_ = r.Delete(ctx, pod, delOpts)
+			}
+		}
+	}
+
+	// 2. PersistentVolumeClaims
+	pvcList := &corev1.PersistentVolumeClaimList{}
+	if err := r.List(ctx, pvcList, client.InNamespace(vc.Namespace)); err == nil {
+		for i := range pvcList.Items {
+			pvc := &pvcList.Items[i]
+			if isDedicated || r.resourceBelongsToCluster(&pvc.ObjectMeta, vc.Name, vc.Spec.ClusterName) {
+				if len(pvc.Finalizers) > 0 {
+					pvc.Finalizers = nil
+					_ = r.Update(ctx, pvc)
+				}
+				_ = r.Delete(ctx, pvc)
+			}
+		}
+	}
+
+	// 3. Services
+	svcList := &corev1.ServiceList{}
+	if err := r.List(ctx, svcList, client.InNamespace(vc.Namespace)); err == nil {
+		for i := range svcList.Items {
+			svc := &svcList.Items[i]
+			if isDedicated || r.resourceBelongsToCluster(&svc.ObjectMeta, vc.Name, vc.Spec.ClusterName) {
+				_ = r.Delete(ctx, svc)
+			}
+		}
+	}
+
+	// 4. ConfigMaps (preserve kube-root-ca.crt)
+	cmList := &corev1.ConfigMapList{}
+	if err := r.List(ctx, cmList, client.InNamespace(vc.Namespace)); err == nil {
+		for i := range cmList.Items {
+			cm := &cmList.Items[i]
+			if cm.Name == "kube-root-ca.crt" {
+				continue
+			}
+			if isDedicated || r.resourceBelongsToCluster(&cm.ObjectMeta, vc.Name, vc.Spec.ClusterName) {
+				_ = r.Delete(ctx, cm)
+			}
+		}
+	}
+
+	// 5. Secrets (preserve default SA token secrets)
+	secList := &corev1.SecretList{}
+	if err := r.List(ctx, secList, client.InNamespace(vc.Namespace)); err == nil {
+		for i := range secList.Items {
+			sec := &secList.Items[i]
+			if sec.Type == corev1.SecretTypeServiceAccountToken && strings.HasPrefix(sec.Name, "default-token-") {
+				continue
+			}
+			if isDedicated || r.resourceBelongsToCluster(&sec.ObjectMeta, vc.Name, vc.Spec.ClusterName) {
+				_ = r.Delete(ctx, sec)
+			}
+		}
+	}
+
+	// 6. ServiceAccounts (preserve default)
+	saList := &corev1.ServiceAccountList{}
+	if err := r.List(ctx, saList, client.InNamespace(vc.Namespace)); err == nil {
+		for i := range saList.Items {
+			sa := &saList.Items[i]
+			if sa.Name == "default" {
+				continue
+			}
+			if isDedicated || r.resourceBelongsToCluster(&sa.ObjectMeta, vc.Name, vc.Spec.ClusterName) {
+				_ = r.Delete(ctx, sa)
+			}
+		}
+	}
+
+	// 7. Roles & RoleBindings
+	roleList := &rbacv1.RoleList{}
+	if err := r.List(ctx, roleList, client.InNamespace(vc.Namespace)); err == nil {
+		for i := range roleList.Items {
+			role := &roleList.Items[i]
+			if isDedicated || r.resourceBelongsToCluster(&role.ObjectMeta, vc.Name, vc.Spec.ClusterName) {
+				_ = r.Delete(ctx, role)
+			}
+		}
+	}
+	rbList := &rbacv1.RoleBindingList{}
+	if err := r.List(ctx, rbList, client.InNamespace(vc.Namespace)); err == nil {
+		for i := range rbList.Items {
+			rb := &rbList.Items[i]
+			if isDedicated || r.resourceBelongsToCluster(&rb.ObjectMeta, vc.Name, vc.Spec.ClusterName) {
+				_ = r.Delete(ctx, rb)
+			}
+		}
+	}
+}
+
+func (r *VirtualClusterReconciler) resourceBelongsToCluster(meta *metav1.ObjectMeta, clusterName, specName string) bool {
+	if meta.Labels != nil {
+		if meta.Labels["vcluster.loft.sh/managed-by"] == clusterName ||
+			meta.Labels["vcluster.loft.sh/belongs-to"] == clusterName ||
+			meta.Labels["vops.gitops.io/cluster"] == clusterName ||
+			meta.Labels["vops.gitops.io/cluster"] == specName ||
+			meta.Labels["release"] == clusterName ||
+			meta.Labels["app.kubernetes.io/instance"] == clusterName ||
+			meta.Labels["vcluster-name"] == clusterName {
+			return true
+		}
+	}
+	name := meta.Name
+	if strings.HasSuffix(name, fmt.Sprintf("-x-%s", clusterName)) ||
+		strings.HasPrefix(name, fmt.Sprintf("%s-", clusterName)) ||
+		name == clusterName {
+		return true
+	}
+	return false
 }
 
 func (r *VirtualClusterReconciler) sleepVirtualWorkloads(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
@@ -818,4 +1021,3 @@ func (r *VirtualClusterReconciler) syncHardwareConfigMap(ctx context.Context) er
 
 	return err
 }
-

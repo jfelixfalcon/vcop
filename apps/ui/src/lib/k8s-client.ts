@@ -616,8 +616,16 @@ export async function createVirtualCluster(data: {
     hosts?: string[];
     certSecretName?: string;
     ingressGateway?: {
-      enabled: boolean;
+      enabled?: boolean;
       serviceType?: string;
+      replicas?: number;
+      selector?: Record<string, string>;
+    };
+    hostRouting?: {
+      enabled: boolean;
+      defaultGateway?: string;
+      ingressGatewaySelector?: Record<string, string>;
+      apiHost?: string;
     };
   };
 }): Promise<VirtualCluster> {
@@ -1342,7 +1350,21 @@ export async function deleteVirtualCluster(name: string, namespace?: string): Pr
       `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
       'DELETE'
     );
-    return res.statusCode >= 200 && res.statusCode < 300;
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return true;
+    }
+    // Fallback: If VirtualCluster CR is not found (404), check if a dedicated namespace exists and clean it up
+    if (
+      res.statusCode === 404 &&
+      targetNs &&
+      targetNs !== 'default' &&
+      targetNs !== 'kube-system' &&
+      targetNs !== 'vcop-system'
+    ) {
+      const nsRes = await k8sRequest<any>(`/api/v1/namespaces/${targetNs}`, 'DELETE');
+      return nsRes.statusCode >= 200 && nsRes.statusCode < 300;
+    }
+    return false;
   } catch (err: any) {
     console.error('Failed to delete virtual cluster from Kubernetes API:', err.message || err);
     return false;
@@ -1753,6 +1775,19 @@ export async function updateVirtualClusterIstio(
     certificateIssuer?: string;
     certificateIssuerKind?: string;
     hosts?: string[];
+    version?: string;
+    ingressGateway?: {
+      enabled?: boolean;
+      serviceType?: string;
+      replicas?: number;
+      selector?: Record<string, string>;
+    };
+    hostRouting?: {
+      enabled: boolean;
+      defaultGateway?: string;
+      ingressGatewaySelector?: Record<string, string>;
+      apiHost?: string;
+    };
   },
   namespace?: string
 ): Promise<VirtualCluster> {

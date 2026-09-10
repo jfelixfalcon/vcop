@@ -448,7 +448,7 @@ func (r *EtcdReconciler) ReconcileEtcd(ctx context.Context, vc *v1alpha1.Virtual
 	return isReady, nil
 }
 
-// CleanupEtcd deletes etcd resources and PVCs on finalizer deletion
+// CleanupEtcd deletes etcd resources, services, and PVCs on finalizer deletion
 func (r *EtcdReconciler) CleanupEtcd(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -456,18 +456,42 @@ func (r *EtcdReconciler) CleanupEtcd(ctx context.Context, vc *v1alpha1.VirtualCl
 			Namespace: vc.Namespace,
 		},
 	}
-	if err := r.Delete(ctx, sts); err != nil && !errors.IsNotFound(err) {
-		return err
+	_ = r.Delete(ctx, sts)
+
+	// Clean up client service
+	clientSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-etcd", vc.Name),
+			Namespace: vc.Namespace,
+		},
 	}
+	_ = r.Delete(ctx, clientSvc)
+
+	// Clean up headless service
+	headlessSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-etcd-headless", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, headlessSvc)
 
 	pvcList := &corev1.PersistentVolumeClaimList{}
 	listOpts := []client.ListOption{
 		client.InNamespace(vc.Namespace),
-		client.MatchingLabels{"vops.gitops.io/cluster": vc.Spec.ClusterName},
 	}
 	if err := r.List(ctx, pvcList, listOpts...); err == nil {
 		for _, pvc := range pvcList.Items {
-			_ = r.Delete(ctx, &pvc)
+			if pvc.Labels["vops.gitops.io/cluster"] == vc.Spec.ClusterName ||
+				pvc.Labels["app.kubernetes.io/instance"] == vc.Name ||
+				strings.HasPrefix(pvc.Name, fmt.Sprintf("data-%s-", vc.Name)) ||
+				strings.HasPrefix(pvc.Name, fmt.Sprintf("data-%s-etcd-", vc.Name)) {
+				if len(pvc.Finalizers) > 0 {
+					pvc.Finalizers = nil
+					_ = r.Update(ctx, &pvc)
+				}
+				_ = r.Delete(ctx, &pvc)
+			}
 		}
 	}
 

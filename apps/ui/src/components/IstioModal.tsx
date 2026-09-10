@@ -8,9 +8,11 @@ import {
   Loader2,
   ExternalLink,
   Layers,
+  Network,
 } from 'lucide-react';
 import type { VirtualCluster } from '../lib/types';
 import { ModalPortal } from './ModalPortal';
+import { parseSelector, formatSelector } from '../lib/baseline-utils';
 
 interface IstioModalProps {
   cluster: VirtualCluster;
@@ -37,6 +39,20 @@ export const IstioModal: React.FC<IstioModalProps> = ({
   const [certIssuer, setCertIssuer] = useState<string>(currentIstio?.certificateIssuer ?? '');
   const [hosts, setHosts] = useState<string>(
     currentIstio?.hosts?.join(', ') || cluster.spec.customEndpoint || `${cluster.name}.example.com`
+  );
+
+  // Host Ingress Routing
+  const [enableHostRouting, setEnableHostRouting] = useState<boolean>(
+    currentIstio?.hostRouting?.enabled ?? false
+  );
+  const [hostDefaultGateway, setHostDefaultGateway] = useState<string>(
+    currentIstio?.hostRouting?.defaultGateway || 'istio-system/default-gateway'
+  );
+  const [hostGatewaySelector, setHostGatewaySelector] = useState<string>(
+    formatSelector(currentIstio?.hostRouting?.ingressGatewaySelector)
+  );
+  const [hostApiHost, setHostApiHost] = useState<string>(
+    currentIstio?.hostRouting?.apiHost || ''
   );
 
   const [hostIssuers, setHostIssuers] = useState<{
@@ -83,6 +99,14 @@ export const IstioModal: React.FC<IstioModalProps> = ({
           certificateIssuer: certIssuer.trim(),
           certificateIssuerKind: certIssuerKind,
           hosts: parsedHosts,
+          hostRouting: enableHostRouting
+            ? {
+                enabled: true,
+                defaultGateway: hostDefaultGateway.trim() || 'istio-system/default-gateway',
+                ingressGatewaySelector: parseSelector(hostGatewaySelector),
+                apiHost: hostApiHost.trim() || undefined,
+              }
+            : { enabled: false },
         }),
       });
 
@@ -286,6 +310,79 @@ export const IstioModal: React.FC<IstioModalProps> = ({
                 <p className="text-[11px] text-slate-500 mt-1">
                   Bound to Istio Gateway and main-entrypoint VirtualService.
                 </p>
+              </div>
+
+              {/* Host-Level Ingress Routing & API Passthrough */}
+              <div className="p-3.5 rounded-xl bg-cyber-950/60 border border-cyber-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Network className="w-3.5 h-3.5 text-cyan-400" />
+                      <span className="text-xs font-bold text-slate-200">Host Istio Ingress & API Passthrough</span>
+                      <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-800">
+                        Host Integration
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Deploys host DestinationRule (<code className="text-cyan-300">MUTUAL TLS</code>, <code className="text-cyan-300">DO_NOT_UPGRADE</code>), application VirtualService, and TLS Passthrough Gateway on Port 443 for API.
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={enableHostRouting}
+                      onChange={(e) => setEnableHostRouting(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-cyber-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-cyber-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500"></div>
+                  </label>
+                </div>
+
+                {enableHostRouting && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-cyber-800/80 animate-in fade-in duration-150">
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                        Default Host Gateway
+                      </label>
+                      <input
+                        type="text"
+                        value={hostDefaultGateway}
+                        onChange={(e) => setHostDefaultGateway(e.target.value)}
+                        placeholder="istio-system/default-gateway"
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none font-mono"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">Host gateway for app traffic.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                        Ingress Gateway Selector
+                      </label>
+                      <input
+                        type="text"
+                        value={hostGatewaySelector}
+                        onChange={(e) => setHostGatewaySelector(e.target.value)}
+                        placeholder="istio: ingressgateway"
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none font-mono"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">Pod label for host ingress gateway.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                        vCluster API Hostname
+                      </label>
+                      <input
+                        type="text"
+                        value={hostApiHost}
+                        onChange={(e) => setHostApiHost(e.target.value)}
+                        placeholder={`api.${cluster.name}.example.com`}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none font-mono"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1">SNI host for TLS passthrough to API.</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}

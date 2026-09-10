@@ -778,16 +778,193 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 	return isReady, endpoint, nil
 }
 
-// CleanupSyncer removes cluster-scoped resources like ClusterRoleBinding on deletion
+// CleanupSyncer removes cluster-scoped resources, syncer workloads, tenant resources, services, secrets, and configmaps on deletion
 func (r *SyncerReconciler) CleanupSyncer(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
+	// 1. ClusterRoleBinding
 	crbName := fmt.Sprintf("vops-%s-%s-syncer", vc.Namespace, vc.Name)
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: crbName,
 		},
 	}
-	if err := r.Delete(ctx, crb); err != nil && !errors.IsNotFound(err) {
-		return err
+	_ = r.Delete(ctx, crb)
+
+	// 2. Syncer StatefulSet & Deployment
+	syncerSts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      vc.Name,
+			Namespace: vc.Namespace,
+		},
 	}
+	_ = r.Delete(ctx, syncerSts)
+
+	legacyDep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-vcluster", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, legacyDep)
+
+	// 3. Primary and Headless Services
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      vc.Name,
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, svc)
+
+	headlessSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-headless", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, headlessSvc)
+
+	// 4. Node proxy services & synced services
+	svcList := &corev1.ServiceList{}
+	if err := r.List(ctx, svcList, client.InNamespace(vc.Namespace)); err == nil {
+		for _, s := range svcList.Items {
+			if s.Labels["vcluster.loft.sh/belongs-to"] == vc.Name ||
+				s.Labels["vcluster.loft.sh/managed-by"] == vc.Name ||
+				s.Labels["vops.gitops.io/cluster"] == vc.Spec.ClusterName ||
+				s.Labels["release"] == vc.Name ||
+				strings.HasPrefix(s.Name, fmt.Sprintf("%s-node-", vc.Name)) ||
+				strings.HasSuffix(s.Name, fmt.Sprintf("-x-%s", vc.Name)) {
+				_ = r.Delete(ctx, &s)
+			}
+		}
+	}
+
+	// 5. ConfigMaps
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-config", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, cm)
+
+	cmList := &corev1.ConfigMapList{}
+	if err := r.List(ctx, cmList, client.InNamespace(vc.Namespace)); err == nil {
+		for _, c := range cmList.Items {
+			if c.Name == "kube-root-ca.crt" {
+				continue
+			}
+			if c.Labels["vcluster.loft.sh/managed-by"] == vc.Name ||
+				c.Labels["vops.gitops.io/cluster"] == vc.Spec.ClusterName ||
+				c.Labels["release"] == vc.Name ||
+				strings.HasSuffix(c.Name, fmt.Sprintf("-x-%s", vc.Name)) {
+				_ = r.Delete(ctx, &c)
+			}
+		}
+	}
+
+	// 6. Secrets
+	secNames := []string{
+		fmt.Sprintf("vc-config-%s", vc.Name),
+		fmt.Sprintf("vc-custom-ca-%s", vc.Name),
+		fmt.Sprintf("%s-certs", vc.Name),
+		fmt.Sprintf("%s-kubeconfig", vc.Name),
+		fmt.Sprintf("vc-%s", vc.Name),
+		fmt.Sprintf("vc-vc-%s", vc.Name),
+	}
+	for _, sn := range secNames {
+		s := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      sn,
+				Namespace: vc.Namespace,
+			},
+		}
+		_ = r.Delete(ctx, s)
+	}
+
+	secList := &corev1.SecretList{}
+	if err := r.List(ctx, secList, client.InNamespace(vc.Namespace)); err == nil {
+		for _, s := range secList.Items {
+			if s.Type == corev1.SecretTypeServiceAccountToken && strings.HasPrefix(s.Name, "default-token-") {
+				continue
+			}
+			if s.Labels["vcluster.loft.sh/managed-by"] == vc.Name ||
+				s.Labels["vcluster-name"] == vc.Name ||
+				s.Labels["vops.gitops.io/cluster"] == vc.Spec.ClusterName ||
+				s.Labels["release"] == vc.Name ||
+				strings.HasSuffix(s.Name, fmt.Sprintf("-x-%s", vc.Name)) {
+				_ = r.Delete(ctx, &s)
+			}
+		}
+	}
+
+	// 7. ServiceAccounts, Roles, RoleBindings
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("vc-%s", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, sa)
+
+	workloadSa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("vc-workload-%s", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, workloadSa)
+
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("vc-%s", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, role)
+
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("vc-%s", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, rb)
+
+	// 8. Delete all guest pods synced to host
+	podList := &corev1.PodList{}
+	if err := r.List(ctx, podList, client.InNamespace(vc.Namespace)); err == nil {
+		grace := int64(0)
+		delOpts := &client.DeleteOptions{GracePeriodSeconds: &grace}
+		for _, p := range podList.Items {
+			if p.Labels["vcluster.loft.sh/managed-by"] == vc.Name ||
+				p.Labels["vops.gitops.io/cluster"] == vc.Spec.ClusterName ||
+				p.Labels["release"] == vc.Name ||
+				p.Labels["app.kubernetes.io/instance"] == vc.Name ||
+				strings.HasPrefix(p.Name, fmt.Sprintf("%s-", vc.Name)) ||
+				strings.HasSuffix(p.Name, fmt.Sprintf("-x-%s", vc.Name)) {
+				if len(p.Finalizers) > 0 {
+					p.Finalizers = nil
+					_ = r.Update(ctx, &p)
+				}
+				_ = r.Delete(ctx, &p, delOpts)
+			}
+		}
+	}
+
+	// 9. Synced PVCs
+	pvcList := &corev1.PersistentVolumeClaimList{}
+	if err := r.List(ctx, pvcList, client.InNamespace(vc.Namespace)); err == nil {
+		for _, p := range pvcList.Items {
+			if p.Labels["vcluster.loft.sh/managed-by"] == vc.Name ||
+				strings.HasSuffix(p.Name, fmt.Sprintf("-x-%s", vc.Name)) {
+				if len(p.Finalizers) > 0 {
+					p.Finalizers = nil
+					_ = r.Update(ctx, &p)
+				}
+				_ = r.Delete(ctx, &p)
+			}
+		}
+	}
+
 	return nil
 }
