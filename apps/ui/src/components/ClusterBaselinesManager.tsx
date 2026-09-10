@@ -19,6 +19,7 @@ import {
   ArrowRight,
   ExternalLink,
   Info,
+  Gauge,
 } from 'lucide-react';
 import type { ClusterBaseline, SizePreset, StorageClassInfo, PresetDetails } from '../lib/types';
 import { computeClusterFqdn } from '../lib/baseline-utils';
@@ -67,6 +68,9 @@ export function ClusterBaselinesManager({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBaseline, setEditingBaseline] = useState<ClusterBaseline | null>(null);
 
+  // Sub-tabs for Quota & Policies inside Modal
+  const [policyTab, setPolicyTab] = useState<'compute' | 'counts' | 'limits'>('compute');
+
   // Form fields
   const [formData, setFormData] = useState<{
     id: string;
@@ -87,11 +91,30 @@ export function ClusterBaselinesManager({
     enableBackups: boolean;
     backupSchedule: string;
     backupRetention: number;
+    // ResourceQuota
+    rqEnabled: boolean;
     requestsCPU: string;
     limitsCPU: string;
     requestsMemory: string;
     limitsMemory: string;
     requestsStorage: string;
+    pods: string;
+    services: string;
+    persistentVolumeClaims: string;
+    servicesLoadBalancers: string;
+    servicesNodePorts: string;
+    configMaps: string;
+    secrets: string;
+    // LimitRange
+    lrEnabled: boolean;
+    defaultRequestCPU: string;
+    defaultRequestMemory: string;
+    defaultCPU: string;
+    defaultMemory: string;
+    maxCPU: string;
+    maxMemory: string;
+    minCPU: string;
+    minMemory: string;
     storageClass: string;
     etcdStorageClass: string;
   }>({
@@ -113,14 +136,113 @@ export function ClusterBaselinesManager({
     enableBackups: true,
     backupSchedule: 'daily',
     backupRetention: 7,
+    // ResourceQuota defaults
+    rqEnabled: true,
     requestsCPU: '2',
     limitsCPU: '4',
     requestsMemory: '4Gi',
     limitsMemory: '8Gi',
     requestsStorage: '10Gi',
+    pods: '20',
+    services: '10',
+    persistentVolumeClaims: '5',
+    servicesLoadBalancers: '1',
+    servicesNodePorts: '0',
+    configMaps: '25',
+    secrets: '25',
+    // LimitRange defaults
+    lrEnabled: true,
+    defaultRequestCPU: '50m',
+    defaultRequestMemory: '64Mi',
+    defaultCPU: '250m',
+    defaultMemory: '256Mi',
+    maxCPU: '2',
+    maxMemory: '4Gi',
+    minCPU: '10m',
+    minMemory: '16Mi',
     storageClass: '',
     etcdStorageClass: '',
   });
+
+  const loadQuotaPreset = (preset: 'small' | 'medium' | 'large') => {
+    switch (preset) {
+      case 'small':
+        setFormData((prev) => ({
+          ...prev,
+          requestsCPU: '1',
+          limitsCPU: '2',
+          requestsMemory: '2Gi',
+          limitsMemory: '4Gi',
+          requestsStorage: '10Gi',
+          pods: '10',
+          services: '10',
+          persistentVolumeClaims: '5',
+          servicesLoadBalancers: '1',
+          servicesNodePorts: '0',
+          configMaps: '25',
+          secrets: '25',
+          defaultRequestCPU: '50m',
+          defaultRequestMemory: '64Mi',
+          defaultCPU: '250m',
+          defaultMemory: '256Mi',
+          maxCPU: '1',
+          maxMemory: '2Gi',
+          minCPU: '10m',
+          minMemory: '16Mi',
+        }));
+        break;
+      case 'medium':
+        setFormData((prev) => ({
+          ...prev,
+          requestsCPU: '4',
+          limitsCPU: '8',
+          requestsMemory: '8Gi',
+          limitsMemory: '16Gi',
+          requestsStorage: '25Gi',
+          pods: '25',
+          services: '25',
+          persistentVolumeClaims: '10',
+          servicesLoadBalancers: '2',
+          servicesNodePorts: '0',
+          configMaps: '50',
+          secrets: '50',
+          defaultRequestCPU: '100m',
+          defaultRequestMemory: '128Mi',
+          defaultCPU: '500m',
+          defaultMemory: '512Mi',
+          maxCPU: '4',
+          maxMemory: '8Gi',
+          minCPU: '10m',
+          minMemory: '32Mi',
+        }));
+        break;
+      case 'large':
+        setFormData((prev) => ({
+          ...prev,
+          requestsCPU: '8',
+          limitsCPU: '16',
+          requestsMemory: '16Gi',
+          limitsMemory: '32Gi',
+          requestsStorage: '50Gi',
+          pods: '50',
+          services: '50',
+          persistentVolumeClaims: '25',
+          servicesLoadBalancers: '5',
+          servicesNodePorts: '2',
+          configMaps: '100',
+          secrets: '100',
+          defaultRequestCPU: '200m',
+          defaultRequestMemory: '256Mi',
+          defaultCPU: '1',
+          defaultMemory: '1Gi',
+          maxCPU: '8',
+          maxMemory: '16Gi',
+          minCPU: '20m',
+          minMemory: '64Mi',
+        }));
+        break;
+    }
+  };
 
   // Sample cluster name for interactive FQDN preview
   const [previewClusterName, setPreviewClusterName] = useState('demo-cluster');
@@ -133,6 +255,7 @@ export function ClusterBaselinesManager({
 
   const handleOpenCreateModal = () => {
     setEditingBaseline(null);
+    setPolicyTab('compute');
     setFormData({
       id: '',
       name: '',
@@ -152,11 +275,28 @@ export function ClusterBaselinesManager({
       enableBackups: true,
       backupSchedule: 'daily',
       backupRetention: 7,
+      rqEnabled: true,
       requestsCPU: '2',
       limitsCPU: '4',
       requestsMemory: '4Gi',
       limitsMemory: '8Gi',
       requestsStorage: '10Gi',
+      pods: '20',
+      services: '10',
+      persistentVolumeClaims: '5',
+      servicesLoadBalancers: '1',
+      servicesNodePorts: '0',
+      configMaps: '25',
+      secrets: '25',
+      lrEnabled: true,
+      defaultRequestCPU: '50m',
+      defaultRequestMemory: '64Mi',
+      defaultCPU: '250m',
+      defaultMemory: '256Mi',
+      maxCPU: '2',
+      maxMemory: '4Gi',
+      minCPU: '10m',
+      minMemory: '16Mi',
       storageClass: '',
       etcdStorageClass: '',
     });
@@ -165,6 +305,9 @@ export function ClusterBaselinesManager({
 
   const handleOpenEditModal = (b: ClusterBaseline) => {
     setEditingBaseline(b);
+    setPolicyTab('compute');
+    const rq = b.policies?.resourceQuota;
+    const lr = b.policies?.limitRange;
     setFormData({
       id: b.id,
       name: b.name,
@@ -184,11 +327,30 @@ export function ClusterBaselinesManager({
       enableBackups: b.disasterRecovery?.enabled ?? true,
       backupSchedule: b.disasterRecovery?.schedule || 'daily',
       backupRetention: b.disasterRecovery?.retentionCount || 7,
-      requestsCPU: b.policies?.resourceQuota?.requestsCPU || '2',
-      limitsCPU: b.policies?.resourceQuota?.limitsCPU || '4',
-      requestsMemory: b.policies?.resourceQuota?.requestsMemory || '4Gi',
-      limitsMemory: b.policies?.resourceQuota?.limitsMemory || '8Gi',
-      requestsStorage: b.policies?.resourceQuota?.requestsStorage || '10Gi',
+      // ResourceQuota
+      rqEnabled: rq?.enabled ?? true,
+      requestsCPU: rq?.requestsCPU || '2',
+      limitsCPU: rq?.limitsCPU || '4',
+      requestsMemory: rq?.requestsMemory || '4Gi',
+      limitsMemory: rq?.limitsMemory || '8Gi',
+      requestsStorage: rq?.requestsStorage || '10Gi',
+      pods: rq?.pods || '20',
+      services: rq?.services || '10',
+      persistentVolumeClaims: rq?.persistentVolumeClaims || '5',
+      servicesLoadBalancers: rq?.servicesLoadBalancers || '1',
+      servicesNodePorts: rq?.servicesNodePorts || '0',
+      configMaps: rq?.configMaps || '25',
+      secrets: rq?.secrets || '25',
+      // LimitRange
+      lrEnabled: lr?.enabled ?? true,
+      defaultRequestCPU: lr?.defaultRequestCPU || '50m',
+      defaultRequestMemory: lr?.defaultRequestMemory || '64Mi',
+      defaultCPU: lr?.defaultCPU || '250m',
+      defaultMemory: lr?.defaultMemory || '256Mi',
+      maxCPU: lr?.maxCPU || '2',
+      maxMemory: lr?.maxMemory || '4Gi',
+      minCPU: lr?.minCPU || '10m',
+      minMemory: lr?.minMemory || '16Mi',
       storageClass: b.storageClass || '',
       etcdStorageClass: b.etcdStorageClass || '',
     });
@@ -277,14 +439,30 @@ export function ClusterBaselinesManager({
       },
       policies: {
         resourceQuota: {
-          requestsCPU: formData.requestsCPU,
-          limitsCPU: formData.limitsCPU,
-          requestsMemory: formData.requestsMemory,
-          limitsMemory: formData.limitsMemory,
-          requestsStorage: formData.requestsStorage,
-          pods: '25',
-          services: '15',
-          persistentVolumeClaims: '10',
+          enabled: formData.rqEnabled,
+          requestsCPU: formData.requestsCPU.trim(),
+          limitsCPU: formData.limitsCPU.trim(),
+          requestsMemory: formData.requestsMemory.trim(),
+          limitsMemory: formData.limitsMemory.trim(),
+          requestsStorage: formData.requestsStorage.trim(),
+          pods: formData.pods.trim(),
+          services: formData.services.trim(),
+          persistentVolumeClaims: formData.persistentVolumeClaims.trim(),
+          servicesLoadBalancers: formData.servicesLoadBalancers.trim(),
+          servicesNodePorts: formData.servicesNodePorts.trim(),
+          configMaps: formData.configMaps.trim(),
+          secrets: formData.secrets.trim(),
+        },
+        limitRange: {
+          enabled: formData.lrEnabled,
+          defaultRequestCPU: formData.defaultRequestCPU.trim(),
+          defaultRequestMemory: formData.defaultRequestMemory.trim(),
+          defaultCPU: formData.defaultCPU.trim(),
+          defaultMemory: formData.defaultMemory.trim(),
+          maxCPU: formData.maxCPU.trim(),
+          maxMemory: formData.maxMemory.trim(),
+          minCPU: formData.minCPU.trim(),
+          minMemory: formData.minMemory.trim(),
         },
       },
     };
@@ -490,13 +668,19 @@ export function ClusterBaselinesManager({
                   <div className="p-2 rounded-xl bg-cyber-950/50 border border-cyber-800/60 flex items-center gap-2">
                     <Cpu className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                     <span className="truncate">
-                      {b.policies?.resourceQuota?.requestsCPU || '2'} vCPU /{' '}
-                      {b.policies?.resourceQuota?.requestsMemory || '4Gi'}
+                      {b.policies?.resourceQuota?.requestsCPU || '2'}C / {b.policies?.resourceQuota?.requestsMemory || '4Gi'}
                     </span>
                   </div>
 
                   <div className="p-2 rounded-xl bg-cyber-950/50 border border-cyber-800/60 flex items-center gap-2">
-                    <ShieldCheck className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                    <Gauge className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                    <span className="truncate">
+                      {b.policies?.limitRange?.enabled !== false ? 'LimitRange On' : 'LimitRange Off'}
+                    </span>
+                  </div>
+
+                  <div className="p-2 rounded-xl bg-cyber-950/50 border border-cyber-800/60 flex items-center gap-2">
+                    <ShieldCheck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                     <span className="truncate">
                       {b.istio?.enabled ? 'Istio Ingress' : 'Basic Syncer'}
                     </span>
@@ -513,6 +697,13 @@ export function ClusterBaselinesManager({
                     <Database className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                     <span className="truncate">
                       {b.disasterRecovery?.enabled ? `${b.disasterRecovery.schedule} backup` : 'No backup'}
+                    </span>
+                  </div>
+
+                  <div className="p-2 rounded-xl bg-cyber-950/50 border border-cyber-800/60 flex items-center gap-2">
+                    <Layers className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    <span className="truncate">
+                      {b.policies?.resourceQuota?.pods || '20'} Pods • {b.policies?.resourceQuota?.persistentVolumeClaims || '5'} PVCs
                     </span>
                   </div>
 
@@ -709,6 +900,9 @@ export function ClusterBaselinesManager({
                               requestsMemory: tier.requestsMemory || formData.requestsMemory,
                               limitsMemory: tier.limitsMemory || formData.limitsMemory,
                               requestsStorage: tier.requestsStorage || formData.requestsStorage,
+                              ...(tier.pods ? { pods: tier.pods } : {}),
+                              ...(tier.services ? { services: tier.services } : {}),
+                              ...(tier.persistentVolumeClaims ? { persistentVolumeClaims: tier.persistentVolumeClaims } : {}),
                             }
                           : {}),
                       });
@@ -812,7 +1006,356 @@ export function ClusterBaselinesManager({
                 </div>
               </div>
 
-              {/* Add-ons and Istio */}
+              {/* RESOURCE QUOTAS & CONTAINER LIMITS */}
+              <div className="p-4 rounded-2xl bg-cyber-950/70 border border-cyber-800 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold text-white font-mono">
+                    <Sliders className="w-4 h-4 text-cyan-400" />
+                    <span>Resource Quotas & Policies</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/30">
+                    Host & In-Cluster Bounds
+                  </span>
+                </div>
+
+                {/* Quick Presets Bar */}
+                <div className="p-2.5 bg-cyber-900/80 border border-cyber-750/70 rounded-xl flex items-center justify-between text-xs flex-wrap gap-2">
+                  <span className="text-slate-400 font-mono text-[11px] flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                    Load Quota Preset:
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => loadQuotaPreset('small')}
+                      className="px-2.5 py-1 bg-cyber-850 hover:bg-cyber-800 text-slate-300 hover:text-white rounded-lg border border-cyber-700 font-mono text-[11px] transition-colors"
+                    >
+                      Small (1C/2G)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => loadQuotaPreset('medium')}
+                      className="px-2.5 py-1 bg-cyber-850 hover:bg-cyber-800 text-cyan-300 hover:text-white rounded-lg border border-cyan-500/30 font-mono text-[11px] transition-colors"
+                    >
+                      Medium (4C/8G)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => loadQuotaPreset('large')}
+                      className="px-2.5 py-1 bg-cyber-850 hover:bg-cyber-800 text-purple-300 hover:text-white rounded-lg border border-purple-500/30 font-mono text-[11px] transition-colors"
+                    >
+                      Large (8C/16G)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sub-tabs */}
+                <div className="flex border-b border-cyber-800 gap-4 pt-1">
+                  {[
+                    { id: 'compute', label: 'Compute & Storage', icon: Cpu },
+                    { id: 'counts', label: 'Object Counts', icon: Layers },
+                    { id: 'limits', label: 'Container LimitRange', icon: Gauge },
+                  ].map((tab) => {
+                    const Icon = tab.icon;
+                    const isActive = policyTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setPolicyTab(tab.id as any)}
+                        className={`pb-2 text-xs font-semibold flex items-center gap-1.5 border-b-2 transition-all ${
+                          isActive
+                            ? 'border-cyan-400 text-cyan-300'
+                            : 'border-transparent text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Tab 1: Compute & Storage */}
+                {policyTab === 'compute' && (
+                  <div className="space-y-3 pt-1 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between pb-2 border-b border-cyber-850">
+                      <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-white">
+                        <input
+                          type="checkbox"
+                          checked={formData.rqEnabled}
+                          onChange={(e) => setFormData({ ...formData, rqEnabled: e.target.checked })}
+                          className="w-4 h-4 rounded text-cyan-500 bg-cyber-950 border-cyber-700"
+                        />
+                        Enforce ResourceQuota on Virtual Cluster
+                      </label>
+                      <span className="text-[10px] font-mono text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded">
+                        Compute Bounds
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">CPU Requests Limit:</label>
+                        <input
+                          type="text"
+                          value={formData.requestsCPU}
+                          onChange={(e) => setFormData({ ...formData, requestsCPU: e.target.value })}
+                          placeholder="e.g. 2, 2000m"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">Guaranteed tenant CPU cores</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">CPU Max Limits:</label>
+                        <input
+                          type="text"
+                          value={formData.limitsCPU}
+                          onChange={(e) => setFormData({ ...formData, limitsCPU: e.target.value })}
+                          placeholder="e.g. 4, 4000m"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">Maximum burst CPU limit</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Memory Requests Limit:</label>
+                        <input
+                          type="text"
+                          value={formData.requestsMemory}
+                          onChange={(e) => setFormData({ ...formData, requestsMemory: e.target.value })}
+                          placeholder="e.g. 4Gi, 8Gi"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">Guaranteed RAM allocatable to workloads</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Memory Max Limits:</label>
+                        <input
+                          type="text"
+                          value={formData.limitsMemory}
+                          onChange={(e) => setFormData({ ...formData, limitsMemory: e.target.value })}
+                          placeholder="e.g. 8Gi, 16Gi"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">Burst memory cap before OOM killer</p>
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-[11px] text-slate-300 mb-1">Storage Requests Limit:</label>
+                        <input
+                          type="text"
+                          value={formData.requestsStorage}
+                          onChange={(e) => setFormData({ ...formData, requestsStorage: e.target.value })}
+                          placeholder="e.g. 10Gi, 50Gi"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">Cumulative persistent volume storage capacity</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 2: Object Counts */}
+                {policyTab === 'counts' && (
+                  <div className="space-y-3 pt-1 animate-in fade-in duration-150">
+                    <p className="text-xs text-slate-400">
+                      Cap the maximum number of Kubernetes objects tenant workloads can create inside this cluster.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Max Pods:</label>
+                        <input
+                          type="text"
+                          value={formData.pods}
+                          onChange={(e) => setFormData({ ...formData, pods: e.target.value })}
+                          placeholder="20"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Max Services:</label>
+                        <input
+                          type="text"
+                          value={formData.services}
+                          onChange={(e) => setFormData({ ...formData, services: e.target.value })}
+                          placeholder="10"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Persistent Volume Claims (PVCs):</label>
+                        <input
+                          type="text"
+                          value={formData.persistentVolumeClaims}
+                          onChange={(e) => setFormData({ ...formData, persistentVolumeClaims: e.target.value })}
+                          placeholder="5"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">LoadBalancer Services:</label>
+                        <input
+                          type="text"
+                          value={formData.servicesLoadBalancers}
+                          onChange={(e) => setFormData({ ...formData, servicesLoadBalancers: e.target.value })}
+                          placeholder="1"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">NodePort Services:</label>
+                        <input
+                          type="text"
+                          value={formData.servicesNodePorts}
+                          onChange={(e) => setFormData({ ...formData, servicesNodePorts: e.target.value })}
+                          placeholder="0"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Max ConfigMaps:</label>
+                        <input
+                          type="text"
+                          value={formData.configMaps}
+                          onChange={(e) => setFormData({ ...formData, configMaps: e.target.value })}
+                          placeholder="25"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-[11px] text-slate-300 mb-1">Max Secrets:</label>
+                        <input
+                          type="text"
+                          value={formData.secrets}
+                          onChange={(e) => setFormData({ ...formData, secrets: e.target.value })}
+                          placeholder="25"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 3: Container LimitRange */}
+                {policyTab === 'limits' && (
+                  <div className="space-y-3 pt-1 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between pb-2 border-b border-cyber-850">
+                      <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-white">
+                        <input
+                          type="checkbox"
+                          checked={formData.lrEnabled}
+                          onChange={(e) => setFormData({ ...formData, lrEnabled: e.target.checked })}
+                          className="w-4 h-4 rounded text-cyan-500 bg-cyber-950 border-cyber-700"
+                        />
+                        Enforce LimitRange Defaults on Containers
+                      </label>
+                      <span className="text-[10px] font-mono text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded">
+                        Auto-injected into tenant pods
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono text-xs">
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Container Default Request CPU:</label>
+                        <input
+                          type="text"
+                          value={formData.defaultRequestCPU}
+                          onChange={(e) => setFormData({ ...formData, defaultRequestCPU: e.target.value })}
+                          placeholder="50m"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Container Default Request Memory:</label>
+                        <input
+                          type="text"
+                          value={formData.defaultRequestMemory}
+                          onChange={(e) => setFormData({ ...formData, defaultRequestMemory: e.target.value })}
+                          placeholder="64Mi"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Container Default Limit CPU:</label>
+                        <input
+                          type="text"
+                          value={formData.defaultCPU}
+                          onChange={(e) => setFormData({ ...formData, defaultCPU: e.target.value })}
+                          placeholder="250m"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Container Default Limit Memory:</label>
+                        <input
+                          type="text"
+                          value={formData.defaultMemory}
+                          onChange={(e) => setFormData({ ...formData, defaultMemory: e.target.value })}
+                          placeholder="256Mi"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Container Max CPU:</label>
+                        <input
+                          type="text"
+                          value={formData.maxCPU}
+                          onChange={(e) => setFormData({ ...formData, maxCPU: e.target.value })}
+                          placeholder="2"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Container Max Memory:</label>
+                        <input
+                          type="text"
+                          value={formData.maxMemory}
+                          onChange={(e) => setFormData({ ...formData, maxMemory: e.target.value })}
+                          placeholder="4Gi"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Container Min CPU:</label>
+                        <input
+                          type="text"
+                          value={formData.minCPU}
+                          onChange={(e) => setFormData({ ...formData, minCPU: e.target.value })}
+                          placeholder="10m"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] text-slate-300 mb-1">Container Min Memory:</label>
+                        <input
+                          type="text"
+                          value={formData.minMemory}
+                          onChange={(e) => setFormData({ ...formData, minMemory: e.target.value })}
+                          placeholder="16Mi"
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="space-y-3 pt-2 border-t border-cyber-800">
                 <h4 className="text-xs font-bold text-slate-300 font-mono uppercase tracking-wider">
                   Add-on Components & Routing

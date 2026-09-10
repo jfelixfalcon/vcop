@@ -633,18 +633,7 @@ export interface ClusterBaseline {
     schedule: string;
     retentionCount: number;
   };
-  policies?: {
-    resourceQuota?: {
-      requestsCPU?: string;
-      limitsCPU?: string;
-      requestsMemory?: string;
-      limitsMemory?: string;
-      requestsStorage?: string;
-      pods?: string;
-      services?: string;
-      persistentVolumeClaims?: string;
-    };
-  };
+  policies?: PoliciesSpec;
   clusterGroup?: string;
   installedAppIds?: string[];
   storageClass?: string;

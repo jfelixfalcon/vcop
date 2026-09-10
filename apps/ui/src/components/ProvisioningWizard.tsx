@@ -82,10 +82,18 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
   const [pods, setPods] = useState<string>('25');
   const [services, setServices] = useState<string>('25');
   const [persistentVolumeClaims, setPersistentVolumeClaims] = useState<string>('10');
+  const [servicesLoadBalancers, setServicesLoadBalancers] = useState<string>('2');
+  const [servicesNodePorts, setServicesNodePorts] = useState<string>('0');
+  const [configMaps, setConfigMaps] = useState<string>('50');
+  const [secrets, setSecrets] = useState<string>('50');
   const [defaultRequestCPU, setDefaultRequestCPU] = useState<string>('100m');
   const [defaultRequestMemory, setDefaultRequestMemory] = useState<string>('128Mi');
   const [defaultCPU, setDefaultCPU] = useState<string>('500m');
   const [defaultMemory, setDefaultMemory] = useState<string>('512Mi');
+  const [maxCPU, setMaxCPU] = useState<string>('4');
+  const [maxMemory, setMaxMemory] = useState<string>('8Gi');
+  const [minCPU, setMinCPU] = useState<string>('10m');
+  const [minMemory, setMinMemory] = useState<string>('32Mi');
 
   // Advanced Mode
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
@@ -274,6 +282,21 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
       if (q.pods) setPods(q.pods);
       if (q.services) setServices(q.services);
       if (q.persistentVolumeClaims) setPersistentVolumeClaims(q.persistentVolumeClaims);
+      if (q.servicesLoadBalancers) setServicesLoadBalancers(q.servicesLoadBalancers);
+      if (q.servicesNodePorts) setServicesNodePorts(q.servicesNodePorts);
+      if (q.configMaps) setConfigMaps(q.configMaps);
+      if (q.secrets) setSecrets(q.secrets);
+    }
+    if (b.policies?.limitRange) {
+      const lr = b.policies.limitRange;
+      if (lr.defaultRequestCPU) setDefaultRequestCPU(lr.defaultRequestCPU);
+      if (lr.defaultRequestMemory) setDefaultRequestMemory(lr.defaultRequestMemory);
+      if (lr.defaultCPU) setDefaultCPU(lr.defaultCPU);
+      if (lr.defaultMemory) setDefaultMemory(lr.defaultMemory);
+      if (lr.maxCPU) setMaxCPU(lr.maxCPU);
+      if (lr.maxMemory) setMaxMemory(lr.maxMemory);
+      if (lr.minCPU) setMinCPU(lr.minCPU);
+      if (lr.minMemory) setMinMemory(lr.minMemory);
     }
     const fqdn = computeClusterFqdn(clusterName, b.baseDomain);
     setGatewayHost(fqdn.wildcard);
@@ -513,6 +536,10 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
             pods: pods.trim(),
             services: services.trim(),
             persistentVolumeClaims: persistentVolumeClaims.trim(),
+            servicesLoadBalancers: servicesLoadBalancers.trim(),
+            servicesNodePorts: servicesNodePorts.trim(),
+            configMaps: configMaps.trim(),
+            secrets: secrets.trim(),
           },
           limitRange: {
             enabled: true,
@@ -520,6 +547,10 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
             defaultRequestMemory: defaultRequestMemory.trim(),
             defaultCPU: defaultCPU.trim(),
             defaultMemory: defaultMemory.trim(),
+            maxCPU: maxCPU.trim(),
+            maxMemory: maxMemory.trim(),
+            minCPU: minCPU.trim(),
+            minMemory: minMemory.trim(),
           },
         },
         ignoreCapacityCheck,
@@ -1420,6 +1451,42 @@ policies:
                         className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
                       />
                     </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">LoadBalancer Svc:</label>
+                      <input
+                        type="text"
+                        value={servicesLoadBalancers}
+                        onChange={(e) => setServicesLoadBalancers(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">NodePort Svc:</label>
+                      <input
+                        type="text"
+                        value={servicesNodePorts}
+                        onChange={(e) => setServicesNodePorts(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">Max ConfigMaps:</label>
+                      <input
+                        type="text"
+                        value={configMaps}
+                        onChange={(e) => setConfigMaps(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1 text-[11px]">Max Secrets:</label>
+                      <input
+                        type="text"
+                        value={secrets}
+                        onChange={(e) => setSecrets(e.target.value)}
+                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-400"
+                      />
+                    </div>
                   </div>
 
                   <div className="pt-3 border-t border-cyber-800">
@@ -1461,6 +1528,42 @@ policies:
                           type="text"
                           value={defaultMemory}
                           onChange={(e) => setDefaultMemory(e.target.value)}
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1 text-[11px]">Max CPU:</label>
+                        <input
+                          type="text"
+                          value={maxCPU}
+                          onChange={(e) => setMaxCPU(e.target.value)}
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1 text-[11px]">Max Memory:</label>
+                        <input
+                          type="text"
+                          value={maxMemory}
+                          onChange={(e) => setMaxMemory(e.target.value)}
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1 text-[11px]">Min CPU:</label>
+                        <input
+                          type="text"
+                          value={minCPU}
+                          onChange={(e) => setMinCPU(e.target.value)}
+                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-purple-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1 text-[11px]">Min Memory:</label>
+                        <input
+                          type="text"
+                          value={minMemory}
+                          onChange={(e) => setMinMemory(e.target.value)}
                           className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-purple-400"
                         />
                       </div>
