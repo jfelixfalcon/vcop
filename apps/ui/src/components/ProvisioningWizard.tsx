@@ -540,7 +540,7 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
                     ingressGatewaySelector: parseSelector(hostGatewaySelector),
                     apiHost: hostApiHost.trim() || undefined,
                   }
-                : undefined,
+                : { enabled: false },
             }
           : { enabled: false },
         installedApps: selectedAppIds.map((id) => ({

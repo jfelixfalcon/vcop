@@ -22,7 +22,7 @@ export const DEFAULT_BASELINES: ClusterBaseline[] = [
     istio: {
       enabled: true,
       meshEnabled: false,
-      certificateIssuer: 'letsencrypt-staging',
+      certificateIssuer: 'vcluster-ca-issuer',
       certificateIssuerKind: 'ClusterIssuer',
       serviceType: 'ClusterIP',
     },
@@ -80,7 +80,7 @@ export const DEFAULT_BASELINES: ClusterBaseline[] = [
     istio: {
       enabled: true,
       meshEnabled: true,
-      certificateIssuer: 'letsencrypt-prod',
+      certificateIssuer: 'vcluster-ca-issuer',
       certificateIssuerKind: 'ClusterIssuer',
       serviceType: 'LoadBalancer',
     },
@@ -138,7 +138,7 @@ export const DEFAULT_BASELINES: ClusterBaseline[] = [
     istio: {
       enabled: true,
       meshEnabled: false,
-      certificateIssuer: 'letsencrypt-staging',
+      certificateIssuer: 'vcluster-ca-issuer',
       certificateIssuerKind: 'ClusterIssuer',
       serviceType: 'ClusterIP',
     },
@@ -293,7 +293,7 @@ export async function saveClusterBaseline(
       istio: baseline.istio || {
         enabled: true,
         meshEnabled: false,
-        certificateIssuer: 'letsencrypt-staging',
+        certificateIssuer: 'vcluster-ca-issuer',
         certificateIssuerKind: 'ClusterIssuer',
         serviceType: 'ClusterIP',
       },

@@ -27,9 +27,7 @@ export const IstioModal: React.FC<IstioModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  if (!isOpen) return null;
-
-  const currentIstio = cluster.spec.components?.istio;
+  const currentIstio = cluster?.spec?.components?.istio;
 
   const [enabled, setEnabled] = useState<boolean>(currentIstio?.enabled ?? false);
   const [meshEnabled, setMeshEnabled] = useState<boolean>(currentIstio?.meshEnabled ?? false);
@@ -38,7 +36,7 @@ export const IstioModal: React.FC<IstioModalProps> = ({
   );
   const [certIssuer, setCertIssuer] = useState<string>(currentIstio?.certificateIssuer ?? '');
   const [hosts, setHosts] = useState<string>(
-    currentIstio?.hosts?.join(', ') || cluster.spec.customEndpoint || `${cluster.name}.example.com`
+    currentIstio?.hosts?.join(', ') || cluster?.spec?.customEndpoint || (cluster?.name ? `${cluster.name}.example.com` : '')
   );
 
   // Host Ingress Routing
@@ -65,22 +63,53 @@ export const IstioModal: React.FC<IstioModalProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Synchronize state from props whenever modal opens or cluster updates
   useEffect(() => {
+    if (!isOpen || !cluster) return;
+    const current = cluster.spec?.components?.istio;
+    setEnabled(current?.enabled ?? false);
+    setMeshEnabled(current?.meshEnabled ?? false);
+    setCertIssuerKind(
+      (current?.certificateIssuerKind as any) === 'Issuer' ? 'Issuer' : 'ClusterIssuer'
+    );
+    setCertIssuer(current?.certificateIssuer ?? '');
+    setHosts(
+      current?.hosts?.join(', ') || cluster.spec?.customEndpoint || `${cluster.name}.example.com`
+    );
+    setEnableHostRouting(current?.hostRouting?.enabled ?? false);
+    setHostDefaultGateway(
+      current?.hostRouting?.defaultGateway || 'istio-system/default-gateway'
+    );
+    setHostGatewaySelector(
+      formatSelector(current?.hostRouting?.ingressGatewaySelector)
+    );
+    setHostApiHost(current?.hostRouting?.apiHost || '');
+    setError(null);
+  }, [isOpen, cluster]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     fetch('/api/cert-manager/issuers')
       .then((res) => res.json())
       .then((data) => {
         if (data) {
           setHostIssuers(data);
-          if (!certIssuer && data.clusterIssuers?.length > 0) {
-            setCertIssuer(data.clusterIssuers[0]);
+          if (data.clusterIssuers && data.clusterIssuers.length > 0) {
+            setCertIssuer((prev) => {
+              if (!prev || !data.clusterIssuers.includes(prev)) {
+                return data.clusterIssuers[0];
+              }
+              return prev;
+            });
           }
         }
       })
       .catch((e) => console.warn('Failed loading cert-manager issuers:', e));
-  }, []);
+  }, [isOpen]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!cluster) return;
     setLoading(true);
     setError(null);
 
@@ -99,6 +128,8 @@ export const IstioModal: React.FC<IstioModalProps> = ({
           certificateIssuer: certIssuer.trim(),
           certificateIssuerKind: certIssuerKind,
           hosts: parsedHosts,
+          version: cluster.spec?.components?.istio?.version,
+          ingressGateway: cluster.spec?.components?.istio?.ingressGateway,
           hostRouting: enableHostRouting
             ? {
                 enabled: true,
@@ -129,6 +160,8 @@ export const IstioModal: React.FC<IstioModalProps> = ({
     (certIssuerKind === 'ClusterIssuer'
       ? hostIssuers.clusterIssuers.includes(certIssuer.trim())
       : hostIssuers.issuers.includes(certIssuer.trim()));
+
+  if (!isOpen || !cluster) return null;
 
   return (
     <ModalPortal>

@@ -40,6 +40,7 @@ import {
   AlertTriangle,
   Globe,
   Settings,
+  Network,
 } from 'lucide-react';
 import type { VirtualCluster, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition, K8sEvent } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
@@ -627,7 +628,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
               {/* CoreDNS */}
               <div className="p-3.5 bg-cyber-950/70 border border-cyber-800 rounded-xl space-y-1">
                 <span className="text-[10px] font-mono text-slate-500 uppercase block">DNS Resolver</span>
@@ -697,26 +698,66 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                     : 'Unencrypted HTTP'}
                 </span>
               </div>
+
+              {/* Host Istio Ingress & API Passthrough */}
+              <div className="p-3.5 bg-cyber-950/70 border border-cyber-800 rounded-xl space-y-1">
+                <span className="text-[10px] font-mono text-slate-500 uppercase block">Host Routing</span>
+                <div className="flex items-center gap-2">
+                  {cluster.spec.components?.istio?.hostRouting?.enabled ? (
+                    <>
+                      <Network className="w-4 h-4 text-cyan-400" />
+                      <span className="text-xs font-bold text-cyan-300">
+                        Active
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Network className="w-4 h-4 text-slate-500" />
+                      <span className="text-xs font-semibold text-slate-500">Disabled</span>
+                    </>
+                  )}
+                </div>
+                <span className="text-[11px] text-slate-400 font-mono block truncate" title={cluster.spec.components?.istio?.hostRouting?.apiHost || cluster.spec.components?.istio?.hostRouting?.defaultGateway || 'Host Entrypoint'}>
+                  {cluster.spec.components?.istio?.hostRouting?.enabled
+                    ? (cluster.spec.components.istio.hostRouting.apiHost || cluster.spec.components.istio.hostRouting.defaultGateway || 'Host Integration')
+                    : 'Gateway Only'}
+                </span>
+              </div>
             </div>
 
             {/* Gateway & VirtualService Live Link */}
             {cluster.spec.components?.istio?.enabled && (
               <div className="mt-3 pt-3 border-t border-cyber-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2 text-slate-300">
-                  <span className="font-semibold">Main Entrypoint VirtualService:</span>
-                  <a
-                    href={`https://${cluster.spec.components?.istio?.hosts?.[0] || cluster.spec.customEndpoint || `${cluster.name}.example.com`}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-mono text-cyan-400 hover:text-cyan-300 underline flex items-center gap-1"
-                  >
-                    https://{cluster.spec.components?.istio?.hosts?.[0] || cluster.spec.customEndpoint || `${cluster.name}.example.com`}
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold">Main Entrypoint VirtualService:</span>
+                    <a
+                      href={`https://${cluster.spec.components?.istio?.hosts?.[0] || cluster.spec.customEndpoint || `${cluster.name}.example.com`}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono text-cyan-400 hover:text-cyan-300 underline flex items-center gap-1"
+                    >
+                      https://{cluster.spec.components?.istio?.hosts?.[0] || cluster.spec.customEndpoint || `${cluster.name}.example.com`}
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                  {cluster.spec.components?.istio?.hostRouting?.enabled && cluster.spec.components.istio.hostRouting.apiHost && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-slate-400">API Passthrough (SNI):</span>
+                      <span className="font-mono text-cyan-300">
+                        https://{cluster.spec.components.istio.hostRouting.apiHost}:443
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <span className="text-[11px] font-mono text-slate-500">
-                  Service Mesh: {cluster.spec.components?.istio?.meshEnabled ? 'Active (mTLS auto-injection)' : 'Disabled (Gateway only)'}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] font-mono text-slate-500">
+                    Host Routing: {cluster.spec.components?.istio?.hostRouting?.enabled ? 'Active (mTLS/SNI)' : 'Disabled'}
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-500">
+                    Service Mesh: {cluster.spec.components?.istio?.meshEnabled ? 'Active (mTLS auto-injection)' : 'Disabled (Gateway only)'}
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -2030,15 +2071,17 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             }}
           />
 
-          <IstioModal
-            cluster={cluster}
-            isOpen={activeModal === 'istio'}
-            onClose={() => setActiveModal(null)}
-            onSuccess={(updated) => {
-              setCluster(updated);
-              fetchCluster();
-            }}
-          />
+          {activeModal === 'istio' && (
+            <IstioModal
+              cluster={cluster}
+              isOpen={activeModal === 'istio'}
+              onClose={() => setActiveModal(null)}
+              onSuccess={(updated) => {
+                setCluster(updated);
+                fetchCluster();
+              }}
+            />
+          )}
         </>
       )}
 

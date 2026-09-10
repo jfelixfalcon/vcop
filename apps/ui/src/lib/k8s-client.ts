@@ -1452,13 +1452,6 @@ export function generateOidcKubeconfig(
 
   const scopeLines = extraScopes.map((s) => `      - --oidc-extra-scope=${s}`).join('\n');
 
-  const customCa = oidc.caCertificate || cluster.metadata?.customCaCert;
-  let idpCaLine = '';
-  if (customCa && customCa.trim()) {
-    const b64 = Buffer.from(customCa.trim()).toString('base64');
-    idpCaLine = `      - --idp-certificate-authority-data=${b64}\n`;
-  }
-
   return `apiVersion: v1
 kind: Config
 preferences: {}
@@ -1484,7 +1477,7 @@ users:
       - --oidc-issuer-url=${issuerUrl}
       - --oidc-client-id=${clientId}
 ${scopeLines}
-${idpCaLine}      - --oidc-pkce-method=auto
+      - --oidc-pkce-method=auto
 `;
 }
 

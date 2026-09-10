@@ -165,9 +165,10 @@ func (r *IstioReconciler) ReconcileIstio(ctx context.Context, vc *v1alpha1.Virtu
 		return true, nil
 	}
 
-	// 1. Validate Cert-Manager Issuer on Host (ABORT if missing)
+	// 1. Validate Cert-Manager Issuer on Host (Non-fatal warning if missing, allows ingress/host routing to proceed)
+	issuerValid := true
 	if err := r.ValidateCertManagerIssuer(ctx, vc); err != nil {
-		return false, fmt.Errorf("cert-manager issuer validation failed: %w", err)
+		issuerValid = false
 	}
 
 	// 2. Connect to the Virtual Cluster
@@ -201,7 +202,7 @@ func (r *IstioReconciler) ReconcileIstio(ctx context.Context, vc *v1alpha1.Virtu
 	}
 	hostFQDN := r.ExtractClusterHost(vc)
 
-	if vc.Spec.Components.Istio.CertificateIssuer != "" {
+	if issuerValid && vc.Spec.Components.Istio.CertificateIssuer != "" {
 		if err := r.reconcileHostCertificate(ctx, vc, tlsSecretName, hostFQDN); err != nil {
 			// Log or continue, non-fatal if certificate generation takes time
 		}
