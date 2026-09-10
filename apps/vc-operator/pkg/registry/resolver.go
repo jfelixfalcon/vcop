@@ -322,8 +322,8 @@ func CanonicalImages() []CanonicalImage {
 		{Component: "istio-pilot", Category: "meshAndIngress", Role: "Istio discovery control plane (istiod)", Image: "docker.io/istio/pilot:1.24.2", Registry: "docker.io", Repository: "istio/pilot", Tag: "1.24.2"},
 		{Component: "istio-proxy", Category: "meshAndIngress", Role: "Istio Envoy ingress gateway proxy", Image: "docker.io/istio/proxyv2:1.24.2", Registry: "docker.io", Repository: "istio/proxyv2", Tag: "1.24.2"},
 		{Component: "dr-runner", Category: "disasterRecovery", Role: "Automated snapshot backup and point-in-time restore runner", Image: "vops/etcd-dr-runner:v1.3.0", Registry: "docker.io", Repository: "vops/etcd-dr-runner", Tag: "v1.3.0"},
-		{Component: "operator", Category: "platform", Role: "Virtual cluster Kubernetes custom controller", Image: "vops/vc-operator:v1.4.1", Registry: "docker.io", Repository: "vops/vc-operator", Tag: "v1.4.1"},
-		{Component: "operations-center-ui", Category: "platform", Role: "Operations Center multi-tenant dashboard and UI", Image: "vops/vc-operations-center:v1.4.1", Registry: "docker.io", Repository: "vops/vc-operations-center", Tag: "v1.4.1"},
+		{Component: "operator", Category: "platform", Role: "Virtual cluster Kubernetes custom controller", Image: "vops/vc-operator:v1.4.5", Registry: "docker.io", Repository: "vops/vc-operator", Tag: "v1.4.5"},
+		{Component: "operations-center-ui", Category: "platform", Role: "Operations Center multi-tenant dashboard and UI", Image: "vops/vc-operations-center:v1.4.6", Registry: "docker.io", Repository: "vops/vc-operations-center", Tag: "v1.4.6"},
 		{Component: "ai-inference-engine", Category: "platform", Role: "vCOp AI copilot, cost analyzer, and triage engine", Image: "vops/vc-ai:v1.4.1", Registry: "docker.io", Repository: "vops/vc-ai", Tag: "v1.4.1"},
 		{Component: "metrics-db", Category: "platform", Role: "Timescale/PostgreSQL time-series telemetry store", Image: "docker.io/library/postgres:16-alpine", Registry: "docker.io", Repository: "library/postgres", Tag: "16-alpine"},
 	}

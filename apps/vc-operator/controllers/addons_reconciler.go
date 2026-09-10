@@ -67,8 +67,9 @@ func (r *AddonsReconciler) GetVirtualClusterClients(ctx context.Context, vc *v1a
 	}
 
 	// Route directly via Kubernetes internal cluster service DNS
+	clusterDomain := getClusterDomain()
 	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
-		restConfig.Host = fmt.Sprintf("https://%s.%s.svc.cluster.local:443", vc.Name, vc.Namespace)
+		restConfig.Host = fmt.Sprintf("https://%s.%s.svc.%s:443", vc.Name, vc.Namespace, clusterDomain)
 	} else if len(cfgBytes) > 0 {
 		if rawCfg, err := clientcmd.Load(cfgBytes); err == nil {
 			for _, c := range rawCfg.Clusters {
@@ -79,7 +80,7 @@ func (r *AddonsReconciler) GetVirtualClusterClients(ctx context.Context, vc *v1a
 			}
 		}
 	} else {
-		restConfig.Host = fmt.Sprintf("https://%s.%s.svc.cluster.local:443", vc.Name, vc.Namespace)
+		restConfig.Host = fmt.Sprintf("https://%s.%s.svc.%s:443", vc.Name, vc.Namespace, clusterDomain)
 	}
 	restConfig.Insecure = true
 	restConfig.CAData = nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -415,3 +416,122 @@ func TestIstioReconciler_ReconcileHostRouting_Defaults(t *testing.T) {
 		t.Fatalf("expected DestinationRule to be deleted, but still found")
 	}
 }
+
+func TestIstioReconciler_AutoDetection_And_Fallback(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	// Pre-create an external host gateway in istio-ingress
+	externalGw := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.istio.io/v1beta1",
+			"kind":       "Gateway",
+			"metadata": map[string]interface{}{
+				"name":      "external-gateway",
+				"namespace": "istio-ingress",
+			},
+		},
+	}
+	// Pre-create host ingress gateway pod with app=istio-ingressgateway in istio-ingress
+	hostIngressPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "istio-ingressgateway-7489-abc",
+			Namespace: "istio-ingress",
+			Labels: map[string]string{
+				"app": "istio-ingressgateway",
+			},
+		},
+	}
+	// Pre-create the synced guest ingressgateway service on the host
+	guestSvc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "istio-ingressgateway-x-istio-system-x-vc-auto",
+			Namespace: "tenant-ns",
+			Labels: map[string]string{
+				"vcluster.loft.sh/managed-by": "vc-auto",
+				"vcluster.loft.sh/namespace":  "istio-system",
+				"app":                         "istio-ingressgateway",
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{Port: 443, Name: "https"},
+			},
+		},
+	}
+
+	fakeHostClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(hostIngressPod, guestSvc, externalGw).
+		Build()
+
+	r := NewIstioReconciler(fakeHostClient, nil)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vc-auto",
+			Namespace: "tenant-ns",
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			Components: v1alpha1.ComponentsSpec{
+				Istio: &v1alpha1.IstioComponent{
+					Enabled: true,
+					HostRouting: &v1alpha1.HostRoutingConfig{
+						Enabled: true,
+						// DefaultGateway left empty to trigger auto-detection
+						// IngressGatewaySelector left empty to trigger auto-detection
+					},
+				},
+			},
+		},
+	}
+
+	// Reconcile with tlsSecretName empty to verify SIMPLE mode
+	err := r.reconcileHostRouting(ctx, vc, "", "auto.example.com")
+	if err != nil {
+		t.Fatalf("reconcileHostRouting failed: %v", err)
+	}
+
+	// 1. Verify DestinationRule uses SIMPLE mode with sni
+	dr := &unstructured.Unstructured{}
+	dr.SetGroupVersionKind(destinationRuleGVK)
+	if err := fakeHostClient.Get(ctx, types.NamespacedName{Name: "vc-auto-guest-gateway", Namespace: "tenant-ns"}, dr); err != nil {
+		t.Fatalf("failed getting DestinationRule: %v", err)
+	}
+	tp := dr.Object["spec"].(map[string]interface{})["trafficPolicy"].(map[string]interface{})
+	tlsPolicy := tp["tls"].(map[string]interface{})
+	if tlsPolicy["mode"] != "SIMPLE" {
+		t.Fatalf("expected tls mode SIMPLE, got %v", tlsPolicy["mode"])
+	}
+	if tlsPolicy["sni"] != "auto.example.com" {
+		t.Fatalf("expected sni auto.example.com, got %v", tlsPolicy["sni"])
+	}
+	if tlsPolicy["insecureSkipVerify"] != true {
+		t.Fatalf("expected insecureSkipVerify true, got %v", tlsPolicy["insecureSkipVerify"])
+	}
+
+	// 2. Verify host app VirtualService resolved auto-detected external-gateway
+	vsApp := &unstructured.Unstructured{}
+	vsApp.SetGroupVersionKind(virtualServiceGVK)
+	if err := fakeHostClient.Get(ctx, types.NamespacedName{Name: "vc-auto-host-entrypoint", Namespace: "tenant-ns"}, vsApp); err != nil {
+		t.Fatalf("failed getting host app VirtualService: %v", err)
+	}
+	gwList := vsApp.Object["spec"].(map[string]interface{})["gateways"].([]interface{})
+	if len(gwList) != 1 || gwList[0] != "istio-ingress/external-gateway" {
+		t.Fatalf("expected auto-detected gateway istio-ingress/external-gateway, got %v", gwList)
+	}
+
+	// 3. Verify API Gateway resolved auto-detected ingress selector app=istio-ingressgateway
+	gwApi := &unstructured.Unstructured{}
+	gwApi.SetGroupVersionKind(gatewayGVK)
+	if err := fakeHostClient.Get(ctx, types.NamespacedName{Name: "vc-auto-api-gateway", Namespace: "tenant-ns"}, gwApi); err != nil {
+		t.Fatalf("failed getting API Gateway: %v", err)
+	}
+	sel := gwApi.Object["spec"].(map[string]interface{})["selector"].(map[string]interface{})
+	if sel["app"] != "istio-ingressgateway" {
+		t.Fatalf("expected auto-detected selector app=istio-ingressgateway, got %v", sel)
+	}
+}
+

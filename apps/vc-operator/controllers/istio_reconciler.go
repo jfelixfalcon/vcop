@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -437,7 +438,7 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 							Args: []string{
 								"discovery",
 								"--monitoringAddr=:15014",
-								"--domain=cluster.local",
+								fmt.Sprintf("--domain=%s", getClusterDomain()),
 								"--keepaliveMaxServerConnectionAge=30m",
 							},
 							Ports: []corev1.ContainerPort{
@@ -633,7 +634,7 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 								"proxy",
 								"router",
 								"--domain",
-								"istio-system.svc.cluster.local",
+								fmt.Sprintf("istio-system.svc.%s", getClusterDomain()),
 								"--proxyLogLevel=warning",
 								"--log_output_level=default:info",
 							},
@@ -799,8 +800,7 @@ func (r *IstioReconciler) reconcileGateway(ctx context.Context, vc *v1alpha1.Vir
 	}
 
 	_, err := dyn.Resource(gatewayGVR).Namespace("istio-system").Create(ctx, gw, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		// Try update if already exists
+	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			existing, getErr := dyn.Resource(gatewayGVR).Namespace("istio-system").Get(ctx, "default-gateway", metav1.GetOptions{})
 			if getErr == nil {
@@ -870,7 +870,7 @@ func (r *IstioReconciler) reconcileVirtualService(ctx context.Context, vc *v1alp
 	}
 
 	_, err := dyn.Resource(virtualServiceGVR).Namespace("istio-system").Create(ctx, vs, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
+	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			existing, getErr := dyn.Resource(virtualServiceGVR).Namespace("istio-system").Get(ctx, "main-entrypoint", metav1.GetOptions{})
 			if getErr == nil {
@@ -1024,6 +1024,116 @@ func (r *IstioReconciler) GetIngressGatewayReplicas(vc *v1alpha1.VirtualCluster)
 	return 1
 }
 
+// getClusterDomain resolves the cluster domain from CLUSTER_DOMAIN env or /etc/resolv.conf, defaulting to cluster.local
+func getClusterDomain() string {
+	if d := os.Getenv("CLUSTER_DOMAIN"); d != "" {
+		return d
+	}
+	if data, err := os.ReadFile("/etc/resolv.conf"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "search ") {
+				for _, field := range strings.Fields(line[7:]) {
+					if strings.HasPrefix(field, "svc.") {
+						return strings.TrimPrefix(field, "svc.")
+					}
+				}
+			}
+		}
+	}
+	return "cluster.local"
+}
+
+// resolveHostIngressSelector returns the label selector for host ingress gateway pods.
+// If not explicitly provided, it auto-detects from candidate namespaces on the host cluster.
+func (r *IstioReconciler) resolveHostIngressSelector(ctx context.Context, configured map[string]string) map[string]interface{} {
+	if len(configured) > 0 {
+		res := make(map[string]interface{})
+		for k, v := range configured {
+			res[k] = v
+		}
+		return res
+	}
+
+	// Auto-detect from host cluster: look for running ingress gateway pods in standard namespaces
+	candidateNamespaces := []string{"istio-system", "istio-ingress", "ingress"}
+	candidateSelectors := []map[string]string{
+		{"istio": "ingressgateway"},
+		{"app": "istio-ingressgateway"},
+		{"app.kubernetes.io/name": "istio-ingressgateway"},
+		{"app": "istio-ingress"},
+	}
+
+	for _, ns := range candidateNamespaces {
+		for _, sel := range candidateSelectors {
+			podList := &corev1.PodList{}
+			if err := r.hostClient.List(ctx, podList, client.InNamespace(ns), client.MatchingLabels(sel)); err == nil && len(podList.Items) > 0 {
+				res := make(map[string]interface{})
+				for k, v := range sel {
+					res[k] = v
+				}
+				return res
+			}
+		}
+	}
+
+	// Cluster-wide fallback across all namespaces
+	for _, sel := range candidateSelectors {
+		podList := &corev1.PodList{}
+		if err := r.hostClient.List(ctx, podList, client.MatchingLabels(sel)); err == nil && len(podList.Items) > 0 {
+			res := make(map[string]interface{})
+			for k, v := range sel {
+				res[k] = v
+			}
+			return res
+		}
+	}
+
+	return map[string]interface{}{
+		"istio": "ingressgateway",
+	}
+}
+
+// resolveHostDefaultGateway detects or validates the host default gateway for routing application traffic.
+// If the configured gateway is empty or default, and does not exist, it auto-detects any existing host Gateway.
+func (r *IstioReconciler) resolveHostDefaultGateway(ctx context.Context, configured string) string {
+	defaultGw := strings.TrimSpace(configured)
+	if defaultGw != "" && defaultGw != "istio-system/default-gateway" {
+		return defaultGw
+	}
+
+	gwList := &unstructured.UnstructuredList{}
+	gwList.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "networking.istio.io",
+		Version: "v1beta1",
+		Kind:    "GatewayList",
+	})
+	if err := r.hostClient.List(ctx, gwList); err == nil && len(gwList.Items) > 0 {
+		var candidate string
+		for _, item := range gwList.Items {
+			// Skip per-cluster API passthrough gateways created by vcop
+			if strings.HasSuffix(item.GetName(), "-api-gateway") {
+				continue
+			}
+			fullName := fmt.Sprintf("%s/%s", item.GetNamespace(), item.GetName())
+			if fullName == "istio-system/default-gateway" {
+				return fullName
+			}
+			if candidate == "" {
+				candidate = fullName
+			}
+		}
+		if candidate != "" {
+			return candidate
+		}
+	}
+
+	if defaultGw != "" {
+		return defaultGw
+	}
+	return "istio-system/default-gateway"
+}
+
 // reconcileHostRouting deploys the host-level DestinationRule, host VirtualService, and vCluster API Passthrough Gateway
 func (r *IstioReconciler) reconcileHostRouting(ctx context.Context, vc *v1alpha1.VirtualCluster, tlsSecretName, hostFQDN string) error {
 	hostRouting := vc.Spec.Components.Istio.HostRouting
@@ -1053,9 +1163,36 @@ func (r *IstioReconciler) reconcileHostRouting(ctx context.Context, vc *v1alpha1
 		}
 	}
 
-	targetHost := fmt.Sprintf("istio-ingressgateway-x-istio-system-x-%s.%s.svc.cluster.local", vc.Name, vc.Namespace)
+	clusterDomain := getClusterDomain()
+
+	// Look up the actual host service created for the guest ingressgateway (e.g. istio-ingressgateway-x-istio-system-x-vc-dev)
+	svcList := &corev1.ServiceList{}
+	var hostSvcName string
+	if err := r.hostClient.List(ctx, svcList, client.InNamespace(vc.Namespace), client.MatchingLabels{
+		"vcluster.loft.sh/managed-by": vc.Name,
+		"vcluster.loft.sh/namespace":  "istio-system",
+		"app":                         "istio-ingressgateway",
+	}); err == nil && len(svcList.Items) > 0 {
+		hostSvcName = svcList.Items[0].Name
+	} else {
+		hostSvcName = fmt.Sprintf("istio-ingressgateway-x-istio-system-x-%s", vc.Name)
+	}
+	targetHost := fmt.Sprintf("%s.%s.svc.%s", hostSvcName, vc.Namespace, clusterDomain)
 
 	// 1. Host DestinationRule
+	tlsPolicy := map[string]interface{}{
+		"mode": "MUTUAL",
+	}
+	if tlsSecretName != "" {
+		tlsPolicy["credentialName"] = tlsSecretName
+	} else {
+		tlsPolicy["mode"] = "SIMPLE"
+		tlsPolicy["insecureSkipVerify"] = true
+		if hostFQDN != "" {
+			tlsPolicy["sni"] = hostFQDN
+		}
+	}
+
 	dr := &unstructured.Unstructured{}
 	dr.SetGroupVersionKind(destinationRuleGVK)
 	dr.SetName(fmt.Sprintf("%s-guest-gateway", vc.Name))
@@ -1076,22 +1213,17 @@ func (r *IstioReconciler) reconcileHostRouting(ctx context.Context, vc *v1alpha1
 					"h2UpgradePolicy": "DO_NOT_UPGRADE",
 				},
 			},
-			"tls": map[string]interface{}{
-				"mode":           "MUTUAL",
-				"credentialName": tlsSecretName,
-			},
+			"tls": tlsPolicy,
 		},
 	}
 	if err := r.createOrUpdateHostResource(ctx, dr); err != nil {
 		return fmt.Errorf("failed reconciling host DestinationRule %s: %w", dr.GetName(), err)
 	}
 
-	// 2. Host Application VirtualService
-	defaultGw := strings.TrimSpace(hostRouting.DefaultGateway)
-	if defaultGw == "" {
-		defaultGw = "istio-system/default-gateway"
-	}
+	// 2. Resolve Ingress Gateway Selector
+	gwSelector := r.resolveHostIngressSelector(ctx, hostRouting.IngressGatewaySelector)
 
+	// 3. Resolve Application Hosts
 	var appHosts []interface{}
 	if vc.Spec.Components.Istio != nil && len(vc.Spec.Components.Istio.Hosts) > 0 {
 		seen := make(map[string]bool)
@@ -1107,6 +1239,10 @@ func (r *IstioReconciler) reconcileHostRouting(ctx context.Context, vc *v1alpha1
 		appHosts = append(appHosts, hostFQDN)
 	}
 
+	// 4. Host Application Gateway Resolution
+	defaultGw := r.resolveHostDefaultGateway(ctx, hostRouting.DefaultGateway)
+
+	// 5. Host Application VirtualService
 	vsApp := &unstructured.Unstructured{}
 	vsApp.SetGroupVersionKind(virtualServiceGVK)
 	vsApp.SetName(fmt.Sprintf("%s-host-entrypoint", vc.Name))
@@ -1149,16 +1285,7 @@ func (r *IstioReconciler) reconcileHostRouting(ctx context.Context, vc *v1alpha1
 		return fmt.Errorf("failed reconciling host app VirtualService %s: %w", vsApp.GetName(), err)
 	}
 
-	// 3. Host vCluster API Gateway (TLS Mode: PASSTHROUGH on port 443)
-	gwSelector := make(map[string]interface{})
-	if len(hostRouting.IngressGatewaySelector) > 0 {
-		for k, v := range hostRouting.IngressGatewaySelector {
-			gwSelector[k] = v
-		}
-	} else {
-		gwSelector["istio"] = "ingressgateway"
-	}
-
+	// 6. Host vCluster API Gateway (TLS Mode: PASSTHROUGH on port 443)
 	apiHost := strings.TrimSpace(hostRouting.ApiHost)
 	if apiHost == "" {
 		if hostFQDN != "" {
@@ -1201,8 +1328,8 @@ func (r *IstioReconciler) reconcileHostRouting(ctx context.Context, vc *v1alpha1
 		return fmt.Errorf("failed reconciling host API Gateway %s: %w", gwApi.GetName(), err)
 	}
 
-	// 4. Host vCluster API VirtualService (TLS match sniHosts routing to vCluster API Service)
-	apiSvcHost := fmt.Sprintf("%s.%s.svc.cluster.local", vc.Name, vc.Namespace)
+	// 7. Host vCluster API VirtualService (TLS match sniHosts routing to vCluster API Service)
+	apiSvcHost := fmt.Sprintf("%s.%s.svc.%s", vc.Name, vc.Namespace, clusterDomain)
 	vsApi := &unstructured.Unstructured{}
 	vsApi.SetGroupVersionKind(virtualServiceGVK)
 	vsApi.SetName(fmt.Sprintf("%s-api-entrypoint", vc.Name))
@@ -1255,7 +1382,23 @@ func (r *IstioReconciler) createOrUpdateHostResource(ctx context.Context, obj *u
 	}, existing)
 
 	if apierrors.IsNotFound(err) {
-		return r.hostClient.Create(ctx, obj)
+		if err := r.hostClient.Create(ctx, obj); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				if getErr := r.hostClient.Get(ctx, types.NamespacedName{
+					Name:      obj.GetName(),
+					Namespace: obj.GetNamespace(),
+				}, existing); getErr == nil {
+					existing.SetLabels(obj.GetLabels())
+					if len(obj.GetOwnerReferences()) > 0 {
+						existing.SetOwnerReferences(obj.GetOwnerReferences())
+					}
+					existing.Object["spec"] = obj.Object["spec"]
+					return r.hostClient.Update(ctx, existing)
+				}
+			}
+			return err
+		}
+		return nil
 	} else if err == nil {
 		existing.SetLabels(obj.GetLabels())
 		if len(obj.GetOwnerReferences()) > 0 {

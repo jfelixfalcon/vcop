@@ -363,7 +363,7 @@ func (r *SyncerReconciler) ReconcileSyncer(ctx context.Context, vc *v1alpha1.Vir
 		return false, "", fmt.Errorf("failed reconciling vcluster headless service: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("https://%s.%s.svc.cluster.local:443", svc.Name, vc.Namespace)
+	endpoint := fmt.Sprintf("https://%s.%s.svc.%s:443", svc.Name, vc.Namespace, getClusterDomain())
 	if customEp, ok := vc.Annotations["vops.gitops.io/custom-endpoint"]; ok && customEp != "" {
 		endpoint = customEp
 	}

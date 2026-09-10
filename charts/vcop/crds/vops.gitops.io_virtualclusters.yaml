@@ -90,6 +90,24 @@ spec:
                   type: string
                   description: Backing store etcd image tag.
                   default: "3.6.8-0"
+                imageRegistry:
+                  type: string
+                  description: Target container image registry/repository prefix (e.g. "registry.com/library").
+                imageRewriteRules:
+                  type: array
+                  description: Specific source-to-target registry swap rules for this cluster.
+                  items:
+                    type: object
+                    required:
+                      - from
+                      - to
+                    properties:
+                      from:
+                        type: string
+                        description: Source registry or image prefix (e.g. "harbor.com" or "ghcr.io/loft-sh").
+                      to:
+                        type: string
+                        description: Target replacement prefix (e.g. "registry.com/library").
                 sizePreset:
                   type: string
                   description: Sizing preset driving CPU, memory requests, and etcd storage tiers.
@@ -174,6 +192,10 @@ spec:
                             replicas:
                               type: integer
                               description: Replica count for istio ingress gateway (defaults to 3 if highAvailability is true, otherwise 1).
+                            selector:
+                              type: object
+                              additionalProperties:
+                                type: string
                         certificateIssuer:
                           type: string
                         certificateIssuerKind:
@@ -185,6 +207,22 @@ spec:
                             type: string
                         certSecretName:
                           type: string
+                        hostRouting:
+                          type: object
+                          description: Host-level routing (DestinationRule, host VirtualService, and vCluster API Passthrough Gateway).
+                          properties:
+                            enabled:
+                              type: boolean
+                              default: false
+                            defaultGateway:
+                              type: string
+                              default: istio-system/default-gateway
+                            ingressGatewaySelector:
+                              type: object
+                              additionalProperties:
+                                type: string
+                            apiHost:
+                              type: string
                 sync:
                   type: object
                   description: Resource boundary synchronization into host cluster.

@@ -22,7 +22,7 @@ docker.io/istio/proxyv2:1.24.2
 vops/etcd-dr-runner:v1.3.0
 
 # vCOp Platform Stack
-vops/vc-operator:v1.4.1
-vops/vc-operations-center:v1.4.1
+vops/vc-operator:v1.4.5
+vops/vc-operations-center:v1.4.6
 vops/vc-ai:v1.4.1
 docker.io/library/postgres:16-alpine

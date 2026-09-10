@@ -32,28 +32,60 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
 
   try {
     const body = await request.json();
-    const enabled = Boolean(body.enabled);
-    const meshEnabled = Boolean(body.meshEnabled);
-    const certificateIssuer = typeof body.certificateIssuer === 'string' ? body.certificateIssuer.trim() : '';
-    const certificateIssuerKind = body.certificateIssuerKind === 'Issuer' ? 'Issuer' : 'ClusterIssuer';
-    const hosts = Array.isArray(body.hosts) ? body.hosts.filter((h: any) => typeof h === 'string' && h.trim()) : [];
-    const hostRouting = body.hostRouting ? {
-      enabled: Boolean(body.hostRouting.enabled),
-      defaultGateway: typeof body.hostRouting.defaultGateway === 'string' ? body.hostRouting.defaultGateway.trim() : undefined,
-      ingressGatewaySelector: body.hostRouting.ingressGatewaySelector && typeof body.hostRouting.ingressGatewaySelector === 'object'
-        ? body.hostRouting.ingressGatewaySelector
-        : undefined,
-      apiHost: typeof body.hostRouting.apiHost === 'string' ? body.hostRouting.apiHost.trim() : undefined,
-    } : undefined;
+    const existingIstio = cluster.spec?.components?.istio || {};
 
-    const ingressGateway = body.ingressGateway ? {
-      enabled: body.ingressGateway.enabled !== false,
-      serviceType: typeof body.ingressGateway.serviceType === 'string' ? body.ingressGateway.serviceType : undefined,
-      replicas: typeof body.ingressGateway.replicas === 'number' ? body.ingressGateway.replicas : undefined,
-      selector: body.ingressGateway.selector && typeof body.ingressGateway.selector === 'object'
-        ? body.ingressGateway.selector
-        : undefined,
-    } : undefined;
+    const enabled = body.enabled !== undefined ? Boolean(body.enabled) : Boolean(existingIstio.enabled);
+    const meshEnabled = body.meshEnabled !== undefined ? Boolean(body.meshEnabled) : Boolean(existingIstio.meshEnabled);
+    const certificateIssuer = typeof body.certificateIssuer === 'string'
+      ? body.certificateIssuer.trim()
+      : (typeof existingIstio.certificateIssuer === 'string' ? existingIstio.certificateIssuer : '');
+    const certificateIssuerKind = body.certificateIssuerKind === 'Issuer'
+      ? 'Issuer'
+      : (body.certificateIssuerKind === 'ClusterIssuer' ? 'ClusterIssuer' : (existingIstio.certificateIssuerKind || 'ClusterIssuer'));
+    const hosts = Array.isArray(body.hosts)
+      ? body.hosts.filter((h: any) => typeof h === 'string' && h.trim())
+      : (Array.isArray(existingIstio.hosts) ? existingIstio.hosts : []);
+
+    let hostRouting = undefined;
+    if (body.hostRouting !== undefined) {
+      if (typeof body.hostRouting === 'boolean') {
+        hostRouting = { enabled: body.hostRouting };
+      } else if (body.hostRouting && typeof body.hostRouting === 'object') {
+        hostRouting = {
+          enabled: Boolean(body.hostRouting.enabled),
+          defaultGateway: typeof body.hostRouting.defaultGateway === 'string' ? body.hostRouting.defaultGateway.trim() : undefined,
+          ingressGatewaySelector: body.hostRouting.ingressGatewaySelector && typeof body.hostRouting.ingressGatewaySelector === 'object'
+            ? body.hostRouting.ingressGatewaySelector
+            : undefined,
+          apiHost: typeof body.hostRouting.apiHost === 'string' ? body.hostRouting.apiHost.trim() : undefined,
+        };
+      }
+    } else if (body.enableHostRouting !== undefined) {
+      hostRouting = {
+        enabled: Boolean(body.enableHostRouting),
+        defaultGateway: typeof body.hostDefaultGateway === 'string' ? body.hostDefaultGateway.trim() : undefined,
+        ingressGatewaySelector: body.hostGatewaySelector && typeof body.hostGatewaySelector === 'object' ? body.hostGatewaySelector : undefined,
+        apiHost: typeof body.hostApiHost === 'string' ? body.hostApiHost.trim() : undefined,
+      };
+    } else if (existingIstio.hostRouting) {
+      hostRouting = existingIstio.hostRouting;
+    }
+
+    let ingressGateway = undefined;
+    if (body.ingressGateway !== undefined && typeof body.ingressGateway === 'object') {
+      ingressGateway = {
+        enabled: body.ingressGateway.enabled !== false,
+        serviceType: typeof body.ingressGateway.serviceType === 'string' ? body.ingressGateway.serviceType : undefined,
+        replicas: typeof body.ingressGateway.replicas === 'number' ? body.ingressGateway.replicas : undefined,
+        selector: body.ingressGateway.selector && typeof body.ingressGateway.selector === 'object'
+          ? body.ingressGateway.selector
+          : undefined,
+      };
+    } else if (existingIstio.ingressGateway) {
+      ingressGateway = existingIstio.ingressGateway;
+    }
+
+    const version = typeof body.version === 'string' && body.version.trim() ? body.version.trim() : existingIstio.version;
 
     const updated = await updateVirtualClusterIstio(
       name,
@@ -63,6 +95,7 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
         certificateIssuer,
         certificateIssuerKind,
         hosts,
+        version,
         ingressGateway,
         hostRouting,
       },
