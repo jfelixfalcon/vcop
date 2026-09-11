@@ -14,7 +14,7 @@ FROM node:22-alpine AS runner
 
 WORKDIR /app
 
-RUN apk add --no-cache kubectl helm bash && \
+RUN apk add --no-cache kubectl helm bash curl tar && \
     mkdir -p /tmp/helm/cache /tmp/helm/config /tmp/helm/data && \
     chown -R node:node /tmp/helm
 

@@ -377,7 +377,7 @@ export async function deleteClusterBaseline(id: string): Promise<ClusterBaseline
 /**
  * Persists the entire list of cluster baselines to the Kubernetes ConfigMap.
  */
-async function saveEntireBaselinesToK8s(baselines: ClusterBaseline[]): Promise<void> {
+export async function saveEntireBaselinesToK8s(baselines: ClusterBaseline[]): Promise<void> {
   const cmData = {
     apiVersion: 'v1',
     kind: 'ConfigMap',

@@ -17,6 +17,7 @@ import {
   Bot,
   Sliders,
   History,
+  PackageCheck,
 } from 'lucide-react';
 
 const pathname = Astro.url.pathname;
@@ -31,6 +32,7 @@ const isCapacityActive = pathname.startsWith('/capacity');
 const isAppsActive = pathname.startsWith('/apps');
 const isRegistryActive = pathname.startsWith('/registry');
 const isAuditActive = pathname === '/audit' || pathname.startsWith('/audit') || pathname.startsWith('/admin/audit');
+const isBundlesActive = pathname.startsWith('/bundles') || pathname.startsWith('/admin/bundles');
 const isVersionsActive = pathname.startsWith('/admin/versions');
 const isOidcActive = pathname.startsWith('/admin/oidc');
 const isAiActive = pathname.startsWith('/admin/ai');
@@ -54,6 +56,8 @@ if (pathname.startsWith('/clusters/')) {
   currentSection = 'OCI Artifact Registry';
 } else if (isAuditActive) {
   currentSection = 'Audit Trail';
+} else if (isBundlesActive) {
+  currentSection = 'Airgap Bundles';
 } else if (isVersionsActive) {
   currentSection = 'Version Registry';
 } else if (isOidcActive) {
@@ -237,6 +241,15 @@ if (pathname.startsWith('/clusters/')) {
               </a>
               {isAdmin && (
                 <a
+                  href="/bundles"
+                  class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono"
+                >
+                  <PackageCheck class="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Airgap Bundles</span>
+                </a>
+              )}
+              {isAdmin && (
+                <a
                   href="/admin/versions"
                   class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono"
                 >
@@ -379,6 +392,21 @@ if (pathname.startsWith('/clusters/')) {
           <div class="h-4 w-px bg-cyber-800/80 my-auto mx-1"></div>
         )}
 
+        <!-- Admin: Airgap Bundles -->
+        {isAdmin && (
+          <a
+            href="/bundles"
+            class={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl transition-all whitespace-nowrap font-mono ${
+              isBundlesActive
+                ? 'bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-900/60 border border-transparent'
+            }`}
+          >
+            <PackageCheck class={`w-3.5 h-3.5 transition-colors ${isBundlesActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
+            <span>Airgap Bundles</span>
+          </a>
+        )}
+
         <!-- Admin: Version Registry -->
         {isAdmin && (
           <a
@@ -468,6 +496,10 @@ if (pathname.startsWith('/clusters/')) {
     {isAdmin && (
       <>
         <div class="text-xs font-mono text-slate-400 uppercase tracking-wider mt-3 mb-1 px-1">Administration</div>
+        <a href="/bundles" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
+          <PackageCheck class="w-4 h-4 text-cyan-400" />
+          <span>Airgap Bundles</span>
+        </a>
         <a href="/admin/versions" class="flex items-center gap-2.5 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors font-mono">
           <GitBranch class="w-4 h-4 text-cyan-400" />
           <span>Version Registry</span>

@@ -46,7 +46,7 @@ const REGISTRY_HOST = process.env.OCI_REGISTRY_HOST || 'vcop-registry.vcop-syste
 const REGISTRY_PORT = process.env.OCI_REGISTRY_PORT || '5000';
 const REGISTRY_EXTERNAL_HOST = process.env.OCI_REGISTRY_EXTERNAL_HOST || 'localhost:5000';
 
-async function resolveActiveBaseUrl(): Promise<string> {
+export async function resolveActiveBaseUrl(): Promise<string> {
   const candidates = [
     `http://${REGISTRY_HOST}:${REGISTRY_PORT}`,
     'http://localhost:5000',
