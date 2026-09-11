@@ -201,6 +201,9 @@ spec:
     backendRefs:
     - name: vcop-ui
       port: 80
+    timeouts:
+      request: 180s
+      backendRequest: 180s
 
 ---
 apiVersion: gateway.networking.k8s.io/v1

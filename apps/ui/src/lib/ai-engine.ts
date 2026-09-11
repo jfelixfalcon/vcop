@@ -723,15 +723,30 @@ Operational Directives:
    - Never fabricate or hallucinate live cluster telemetry metrics that contradict the provided data.
    - When answering general Kubernetes, architectural, or manifest questions, draw on your deep domain expertise to provide comprehensive, elite-level guidance.
 4. Response Style:
-   - Professional, technical, concise yet thorough.
-   - For live cluster telemetry or executed cluster actions, begin with an informative status badge (e.g. \`[STATUS: OPTIMAL 🟢]\`, \`[STATUS: ACTIVE ⚡]\`, or \`[STATUS: ATTENTION ⚠️]\`), followed by an executive summary, diagnostic breakdown, and recommended CLI commands.
-   - For general architectural questions, how-tos, manifest authoring, or troubleshooting deep-dives, deliver a comprehensive, beautifully structured technical answer formatted in GitHub-flavored Markdown.`;
+    - Professional, technical, concise yet thorough.
+    - For live cluster telemetry or executed cluster actions, begin with an informative status badge (e.g. \`[STATUS: OPTIMAL 🟢]\`, \`[STATUS: ACTIVE ⚡]\`, or \`[STATUS: ATTENTION ⚠️]\`), followed by an executive summary, diagnostic breakdown, and recommended CLI commands.
+    - For general architectural questions, how-tos, manifest authoring, or troubleshooting deep-dives, deliver a comprehensive, beautifully structured technical answer formatted in GitHub-flavored Markdown.`;
+
+  const telemetrySystemPrompt = `You are vCOp Copilot, a Principal Kubernetes SRE embedded in the Virtual Cluster Operations Center.
+You analyze measured cluster telemetry and state with elite precision.
+Operational Directives:
+1. Ground Truth First: Rely strictly on the measured facts, metrics, and pod counts provided below. Never fabricate numbers.
+2. Structure: Begin with an informative status badge (e.g. [STATUS: OPTIMAL 🟢] or [TELEMETRY: VERIFIED 📊]), followed by a crisp executive summary, key diagnostic findings, and relevant verification commands.
+3. Response Length: Keep your answer concise, authoritative, and high-signal (under 200 words).`;
+
+  const effectiveSystemPrompt = isManifestOrGeneralQuestion ? systemPrompt : telemetrySystemPrompt;
+  const targetMaxTokens = isManifestOrGeneralQuestion
+    ? Math.max(settings.maxTokens || 1200, 800)
+    : Math.min(settings.maxTokens || 250, 350);
 
   // Branch 1: Remote OpenAI-Compatible API Mode (when local model is disabled)
   if (!settings.localModelEnabled) {
     const apiKey = (settings.remoteApiKey || '').trim();
     const endpoint = (settings.remoteEndpoint || DEFAULT_REMOTE_ENDPOINT).trim();
     const model = (settings.remoteModel || DEFAULT_REMOTE_MODEL).trim();
+
+    const remoteController = new AbortController();
+    const remoteTimeout = setTimeout(() => remoteController.abort(), 15000);
 
     try {
       let chatUrl = endpoint.replace(/\/+$/, '');
@@ -747,7 +762,7 @@ Operational Directives:
       }
 
       const aiMessages = [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: effectiveSystemPrompt },
         {
           role: 'user',
           content: `Cluster Facts & Data:\n${contextSummary}\n\nUser Question:\n${latestUserMessage}`,
@@ -757,13 +772,15 @@ Operational Directives:
       const res = await fetch(chatUrl, {
         method: 'POST',
         headers,
+        signal: remoteController.signal,
         body: JSON.stringify({
           model,
           messages: aiMessages,
           temperature: settings.temperature ?? 0.15,
-          max_tokens: Math.max(settings.maxTokens || 1200, 1200),
+          max_tokens: targetMaxTokens,
         }),
       });
+      clearTimeout(remoteTimeout);
 
       if (res.ok) {
         const json = await res.json();
@@ -782,13 +799,17 @@ Operational Directives:
         console.warn(`[ai-engine] Remote OpenAI-API call failed (HTTP ${res.status}):`, errBody);
       }
     } catch (err: any) {
-      console.warn('[ai-engine] Remote OpenAI-API call failed, falling back to deterministic synthesis:', err.message);
+      clearTimeout(remoteTimeout);
+      console.warn('[ai-engine] Remote OpenAI-API call failed or timed out, falling back to deterministic synthesis:', err.message);
     }
   } else if (settings.localModelEnabled && health.online) {
     // Branch 2: Local Gemma 3 Inference via local llama-server
+    const localController = new AbortController();
+    const localTimeout = setTimeout(() => localController.abort(), 15000);
+
     try {
       const aiMessages = [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: effectiveSystemPrompt },
         {
           role: 'user',
           content: `Cluster Facts & Data:\n${contextSummary}\n\nUser Question:\n${latestUserMessage}`,
@@ -798,12 +819,14 @@ Operational Directives:
       const res = await fetch(`${health.url}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: localController.signal,
         body: JSON.stringify({
           messages: aiMessages,
           temperature: settings.temperature ?? 0.15,
-          max_tokens: Math.max(settings.maxTokens || 1200, 1200),
+          max_tokens: targetMaxTokens,
         }),
       });
+      clearTimeout(localTimeout);
 
       if (res.ok) {
         const json = await res.json();
@@ -819,7 +842,8 @@ Operational Directives:
         }
       }
     } catch (err: any) {
-      console.warn('[ai-engine] Local model call failed, falling back to deterministic synthesis:', err.message);
+      clearTimeout(localTimeout);
+      console.warn('[ai-engine] Local model call failed or timed out, falling back to deterministic synthesis:', err.message);
     }
   }
 
