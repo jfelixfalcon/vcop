@@ -43,6 +43,8 @@ import {
   Settings,
   Network,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   RotateCcw,
 } from 'lucide-react';
 import type { VirtualCluster, ClusterCondition, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition, K8sEvent } from '../lib/types';
@@ -239,6 +241,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [syncingApps, setSyncingApps] = useState<boolean>(false);
   const [events, setEvents] = useState<K8sEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState<boolean>(false);
+  const [eventsPage, setEventsPage] = useState<number>(1);
   const [actionsOpen, setActionsOpen] = useState<boolean>(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const [selectedConditionType, setSelectedConditionType] = useState<string | null>(null);
@@ -322,6 +325,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   }, [activeModal]);
 
   useEffect(() => {
+    setEventsPage(1);
     if (!user) {
       fetch('/api/auth/me')
         .then((res) => res.json())
@@ -1472,68 +1476,117 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 );
               }
 
+              const EVENTS_PER_PAGE = 10;
+              const totalEvents = displayEvents.length;
+              const totalPages = Math.max(1, Math.ceil(totalEvents / EVENTS_PER_PAGE));
+              const currentPage = Math.min(Math.max(1, eventsPage), totalPages);
+              const startIndex = (currentPage - 1) * EVENTS_PER_PAGE;
+              const endIndex = Math.min(startIndex + EVENTS_PER_PAGE, totalEvents);
+              const paginatedEvents = displayEvents.slice(startIndex, endIndex);
+
               return (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs font-mono">
-                    <thead>
-                      <tr className="border-b border-cyber-800 text-slate-400 text-[10px] uppercase">
-                        <th className="pb-2 font-semibold">Type</th>
-                        <th className="pb-2 font-semibold">Reason</th>
-                        <th className="pb-2 font-semibold">Message</th>
-                        <th className="pb-2 font-semibold">Involved Object</th>
-                        <th className="pb-2 font-semibold">Component</th>
-                        <th className="pb-2 font-semibold text-right">Age / Count</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-cyber-800/50 text-slate-300">
-                      {displayEvents.map((ev, idx) => {
-                        const isWarn = ev.type === 'Warning';
-                        return (
-                          <tr key={ev.name || idx} className="hover:bg-cyber-800/30 transition-colors">
-                            <td className="py-2.5 pr-3 whitespace-nowrap">
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  isWarn
-                                    ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                                    : 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                                }`}
-                              >
-                                {isWarn ? <AlertTriangle className="w-2.5 h-2.5" /> : <CheckCircle2 className="w-2.5 h-2.5" />}
-                                {ev.type}
-                              </span>
-                            </td>
-                            <td className="py-2.5 pr-3 font-semibold text-white whitespace-nowrap">
-                              {ev.reason}
-                            </td>
-                            <td className="py-2.5 pr-3 font-sans text-xs text-slate-300 max-w-md break-words">
-                              {ev.message}
-                            </td>
-                            <td className="py-2.5 pr-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
-                              {ev.involvedObject ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyber-950 border border-cyber-800 text-slate-300">
-                                  <span className="text-slate-500">{ev.involvedObject.kind || 'Resource'}/</span>
-                                  <span className="text-white font-semibold truncate max-w-[150px]" title={ev.involvedObject.name}>
-                                    {ev.involvedObject.name || cluster.name}
-                                  </span>
+                <div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs font-mono">
+                      <thead>
+                        <tr className="border-b border-cyber-800 text-slate-400 text-[10px] uppercase">
+                          <th className="pb-2 font-semibold">Type</th>
+                          <th className="pb-2 font-semibold">Reason</th>
+                          <th className="pb-2 font-semibold">Message</th>
+                          <th className="pb-2 font-semibold">Involved Object</th>
+                          <th className="pb-2 font-semibold">Component</th>
+                          <th className="pb-2 font-semibold text-right">Age / Count</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-cyber-800/50 text-slate-300">
+                        {paginatedEvents.map((ev, idx) => {
+                          const isWarn = ev.type === 'Warning';
+                          return (
+                            <tr key={ev.name || `${startIndex}-${idx}`} className="hover:bg-cyber-800/30 transition-colors">
+                              <td className="py-2.5 pr-3 whitespace-nowrap">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    isWarn
+                                      ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                                      : 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                  }`}
+                                >
+                                  {isWarn ? <AlertTriangle className="w-2.5 h-2.5" /> : <CheckCircle2 className="w-2.5 h-2.5" />}
+                                  {ev.type}
                                 </span>
-                              ) : (
-                                <span className="text-slate-500">{cluster.name}</span>
-                              )}
-                            </td>
-                            <td className="py-2.5 pr-3 text-slate-400 whitespace-nowrap text-[11px]">
-                              {ev.sourceComponent || ev.source?.component || 'vc-operator'}
-                            </td>
-                            <td className="py-2.5 text-right text-slate-400 whitespace-nowrap text-[10px]">
-                              <div>{ev.lastTimestamp ? new Date(ev.lastTimestamp).toLocaleTimeString() : 'now'}</div>
-                              {ev.count && ev.count > 1 && (
-                                <div className="text-cyan-400 font-semibold">(x{ev.count})</div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                              </td>
+                              <td className="py-2.5 pr-3 font-semibold text-white whitespace-nowrap">
+                                {ev.reason}
+                              </td>
+                              <td className="py-2.5 pr-3 font-sans text-xs text-slate-300 max-w-md break-words">
+                                {ev.message}
+                              </td>
+                              <td className="py-2.5 pr-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
+                                {ev.involvedObject ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyber-950 border border-cyber-800 text-slate-300">
+                                    <span className="text-slate-500">{ev.involvedObject.kind || 'Resource'}/</span>
+                                    <span className="text-white font-semibold truncate max-w-[150px]" title={ev.involvedObject.name}>
+                                      {ev.involvedObject.name || cluster.name}
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500">{cluster.name}</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 pr-3 text-slate-400 whitespace-nowrap text-[11px]">
+                                {ev.sourceComponent || ev.source?.component || 'vc-operator'}
+                              </td>
+                              <td className="py-2.5 text-right text-slate-400 whitespace-nowrap text-[10px]">
+                                <div>{ev.lastTimestamp ? new Date(ev.lastTimestamp).toLocaleTimeString() : 'now'}</div>
+                                {ev.count && ev.count > 1 && (
+                                  <div className="text-cyan-400 font-semibold">(x{ev.count})</div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination Footer */}
+                  <div className="mt-4 pt-3 border-t border-cyber-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-mono text-slate-400">
+                    <div className="flex items-center gap-1.5">
+                      <span>Showing</span>
+                      <span className="text-white font-semibold">{totalEvents > 0 ? startIndex + 1 : 0}</span>
+                      <span>to</span>
+                      <span className="text-white font-semibold">{endIndex}</span>
+                      <span>of</span>
+                      <span className="text-white font-semibold">{totalEvents}</span>
+                      <span>events</span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setEventsPage((p) => Math.max(1, p - 1))}
+                        disabled={currentPage <= 1}
+                        className="p-1.5 rounded-lg bg-cyber-950 border border-cyber-800 text-slate-400 hover:text-white hover:bg-cyber-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        title="Previous page"
+                        aria-label="Previous events page"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="px-2 text-slate-300">
+                        Page <span className="text-white font-bold">{currentPage}</span> of {totalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setEventsPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={currentPage >= totalPages}
+                        className="p-1.5 rounded-lg bg-cyber-950 border border-cyber-800 text-slate-400 hover:text-white hover:bg-cyber-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        title="Next page"
+                        aria-label="Next events page"
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               );
             })()}
