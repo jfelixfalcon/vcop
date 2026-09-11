@@ -115,8 +115,11 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
   const [customValuesMap, setCustomValuesMap] = useState<Record<string, string>>({});
   const [expandedValueAppId, setExpandedValueAppId] = useState<string | null>(null);
 
-  // Opinionated Core Stack: Istio Ingress & Cert-Manager
-  const [enableIstio, setEnableIstio] = useState<boolean>(true);
+  // Ingress Provider Selection: 'istio' | 'gateway-api' | 'none'
+  const [ingressProvider, setIngressProvider] = useState<'istio' | 'gateway-api' | 'none'>('istio');
+  const enableIstio = ingressProvider === 'istio';
+  const enableGatewayAPI = ingressProvider === 'gateway-api';
+
   const [enableMesh, setEnableMesh] = useState<boolean>(false);
   const [certIssuerKind, setCertIssuerKind] = useState<'ClusterIssuer' | 'Issuer'>('ClusterIssuer');
   const [certIssuer, setCertIssuer] = useState<string>('');
@@ -128,11 +131,20 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
     error?: string;
   }>({ installed: false, clusterIssuers: [], issuers: [] });
 
-  // Host Ingress Routing (DestinationRule + Host VirtualService + API Passthrough Gateway)
+  // Host Ingress Routing (Istio: DestinationRule + Host VirtualService + API Passthrough Gateway)
   const [enableHostRouting, setEnableHostRouting] = useState<boolean>(false);
   const [hostDefaultGateway, setHostDefaultGateway] = useState<string>('istio-system/default-gateway');
   const [hostGatewaySelector, setHostGatewaySelector] = useState<string>('istio: ingressgateway');
   const [hostApiHost, setHostApiHost] = useState<string>('');
+
+  // Kubernetes Gateway API State
+  const [gatewayClassName, setGatewayClassName] = useState<string>('eg');
+  const [gatewayDefaultName, setGatewayDefaultName] = useState<string>('default-gateway');
+  const [gatewayReplicas, setGatewayReplicas] = useState<number>(1);
+  const [gatewayHostRoutingEnabled, setGatewayHostRoutingEnabled] = useState<boolean>(true);
+  const [gatewayHostName, setGatewayHostName] = useState<string>('eg');
+  const [gatewayHostNamespace, setGatewayHostNamespace] = useState<string>('envoy-gateway-system');
+  const [gatewayApiHost, setGatewayApiHost] = useState<string>('');
 
   const [clusterCapacity, setClusterCapacity] = useState<ClusterCapacityData | null>(null);
   const [ignoreCapacityCheck, setIgnoreCapacityCheck] = useState<boolean>(false);
@@ -267,8 +279,21 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
     setEnableMonitoringAndDNS(b.enableMonitoringAndDNS);
     setEtcdStorageClass(b.etcdStorageClass || '');
     setStorageClass(b.storageClass || '');
-    if (b.istio) {
-      setEnableIstio(b.istio.enabled);
+    if (b.gatewayAPI && b.gatewayAPI.enabled) {
+      setIngressProvider('gateway-api');
+      if (b.gatewayAPI.gatewayClassName) setGatewayClassName(b.gatewayAPI.gatewayClassName);
+      if (b.gatewayAPI.certificateIssuer) setCertIssuer(b.gatewayAPI.certificateIssuer);
+      if (b.gatewayAPI.certificateIssuerKind) setCertIssuerKind(b.gatewayAPI.certificateIssuerKind);
+      if (b.gatewayAPI.gatewayConfig?.defaultGateway) setGatewayDefaultName(b.gatewayAPI.gatewayConfig.defaultGateway);
+      if (b.gatewayAPI.gatewayConfig?.replicas) setGatewayReplicas(b.gatewayAPI.gatewayConfig.replicas);
+      if (b.gatewayAPI.hostRouting) {
+        setGatewayHostRoutingEnabled(b.gatewayAPI.hostRouting.enabled);
+        if (b.gatewayAPI.hostRouting.gatewayName) setGatewayHostName(b.gatewayAPI.hostRouting.gatewayName);
+        if (b.gatewayAPI.hostRouting.gatewayNamespace) setGatewayHostNamespace(b.gatewayAPI.hostRouting.gatewayNamespace);
+        if (b.gatewayAPI.hostRouting.apiHost) setGatewayApiHost(b.gatewayAPI.hostRouting.apiHost);
+      }
+    } else if (b.istio) {
+      setIngressProvider(b.istio.enabled ? 'istio' : 'none');
       setEnableMesh(b.istio.meshEnabled ?? false);
       if (b.istio.certificateIssuer) setCertIssuer(b.istio.certificateIssuer);
       if (b.istio.certificateIssuerKind) setCertIssuerKind(b.istio.certificateIssuerKind);
@@ -280,6 +305,8 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
       } else {
         setEnableHostRouting(false);
       }
+    } else {
+      setIngressProvider('none');
     }
     if (b.disasterRecovery) {
       setEnableBackup(b.disasterRecovery.enabled);
@@ -539,6 +566,26 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
                     defaultGateway: hostDefaultGateway.trim() || 'istio-system/default-gateway',
                     ingressGatewaySelector: parseSelector(hostGatewaySelector),
                     apiHost: hostApiHost.trim() || undefined,
+                  }
+                : { enabled: false },
+            }
+          : { enabled: false },
+        gatewayAPI: enableGatewayAPI
+          ? {
+              enabled: true,
+              gatewayClassName: gatewayClassName.trim() || 'eg',
+              hosts: hostsList,
+              certificateIssuer: certIssuer.trim() || undefined,
+              certificateIssuerKind: certIssuerKind,
+              gatewayConfig: {
+                enabled: true,
+                replicas: sizePreset === 'ha' || sizePreset === 'large' ? 3 : (gatewayReplicas || 1),
+              },
+              hostRouting: gatewayHostRoutingEnabled
+                ? {
+                    enabled: true,
+                    defaultGateway: `${gatewayHostNamespace.trim() || 'envoy-gateway-system'}/${gatewayHostName.trim() || 'eg'}`,
+                    apiHost: gatewayApiHost.trim() || undefined,
                   }
                 : { enabled: false },
             }
@@ -1612,8 +1659,8 @@ policies:
               </span>
             </div>
 
-            {/* OPINIONATED CORE APP ENTRYPOINT: ISTIO & TLS GATEWAY */}
-            <div className="bg-cyber-950/80 border border-cyan-500/30 rounded-2xl p-5 shadow-glow-sm">
+            {/* OPINIONATED CORE APP ENTRYPOINT: GATEWAYS & ROUTING */}
+            <div className="bg-cyber-950/80 border border-cyan-500/30 rounded-2xl p-5 shadow-glow-sm space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-cyber-850">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 text-cyan-400 rounded-xl shrink-0">
@@ -1621,29 +1668,327 @@ policies:
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h4 className="text-sm font-bold text-white">Opinionated Core App Entrypoint (Istio & TLS Gateway)</h4>
+                      <h4 className="text-sm font-bold text-white">Ingress & Edge Routing Entrypoint</h4>
                       <span className="text-[10px] font-mono uppercase bg-cyan-950 text-cyan-400 px-2 py-0.5 rounded border border-cyan-800 font-bold">
                         Opinionated Stack
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Deploys dedicated <code className="text-cyan-300">istiod</code> control plane and <code className="text-cyan-300">istio-ingressgateway</code> serving Port 80 (auto-redirect to HTTPS) and Port 443 with TLS certificates.
+                      Select how incoming HTTP/HTTPS traffic enters your virtual cluster.
                     </p>
                   </div>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={enableIstio}
-                    onChange={(e) => setEnableIstio(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-cyber-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-cyber-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
-                </label>
               </div>
 
-              {enableIstio && (
-                <div className="mt-4 space-y-4 pt-1">
+              {/* Provider Selection Buttons */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIngressProvider('gateway-api')}
+                  className={`p-3.5 rounded-xl border text-left transition-all ${
+                    ingressProvider === 'gateway-api'
+                      ? 'bg-blue-950/40 border-blue-500/60 shadow-glow-sm ring-1 ring-blue-500/50'
+                      : 'bg-cyber-900/50 border-cyber-800 hover:border-cyber-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${ingressProvider === 'gateway-api' ? 'bg-blue-400' : 'bg-slate-500'}`} />
+                      Gateway API
+                    </span>
+                    <span className="text-[9px] font-mono uppercase bg-blue-950 text-blue-300 px-1.5 py-0.5 rounded border border-blue-800">
+                      Standard
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-snug">
+                    Kubernetes Gateway API with Envoy proxy, HTTPRoute redirects, and host Envoy integration.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIngressProvider('istio')}
+                  className={`p-3.5 rounded-xl border text-left transition-all ${
+                    ingressProvider === 'istio'
+                      ? 'bg-cyan-950/40 border-cyan-500/60 shadow-glow-sm ring-1 ring-cyan-500/50'
+                      : 'bg-cyber-900/50 border-cyber-800 hover:border-cyber-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${ingressProvider === 'istio' ? 'bg-cyan-400' : 'bg-slate-500'}`} />
+                      Istio Mesh & Gateway
+                    </span>
+                    <span className="text-[9px] font-mono uppercase bg-cyan-950 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-800">
+                      Mesh
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-snug">
+                    Dedicated istiod control plane and ingress gateway (ports 80/443) with optional sidecar mTLS.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIngressProvider('none')}
+                  className={`p-3.5 rounded-xl border text-left transition-all ${
+                    ingressProvider === 'none'
+                      ? 'bg-slate-900/60 border-slate-600 shadow-glow-sm ring-1 ring-slate-500/50'
+                      : 'bg-cyber-900/50 border-cyber-800 hover:border-cyber-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${ingressProvider === 'none' ? 'bg-slate-400' : 'bg-slate-600'}`} />
+                      Direct Syncer Only
+                    </span>
+                    <span className="text-[9px] font-mono uppercase bg-cyber-950 text-slate-400 px-1.5 py-0.5 rounded border border-cyber-800">
+                      None
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-snug">
+                    No ingress controller deployed. Reach services via standard vCluster service synchronization.
+                  </p>
+                </button>
+              </div>
+
+              {/* Provider Config: Kubernetes Gateway API */}
+              {ingressProvider === 'gateway-api' && (
+                <div className="space-y-4 pt-1">
+                  {/* HA Gateway Notice */}
+                  {(sizePreset === 'ha' || sizePreset === 'large') && (
+                    <div className="flex items-center gap-2.5 p-3 rounded-xl bg-blue-950/40 border border-blue-500/30 text-blue-300 text-xs font-mono">
+                      <Zap className="w-4 h-4 text-blue-400 shrink-0" />
+                      <span>
+                        <strong className="text-white">High Availability Mode:</strong> Gateway API will automatically provision <strong className="text-blue-200">3 Envoy proxy replicas</strong> for multi-replica resilience.
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Cert-Manager Host Issuer Configuration */}
+                  <div className="p-3.5 rounded-xl bg-cyber-900/60 border border-cyber-800 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                        <Shield className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Host Cert-Manager Issuer & TLS Certificate</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="certIssuerKind"
+                            value="ClusterIssuer"
+                            checked={certIssuerKind === 'ClusterIssuer'}
+                            onChange={() => setCertIssuerKind('ClusterIssuer')}
+                            className="text-blue-500 focus:ring-blue-500"
+                          />
+                          ClusterIssuer
+                        </label>
+                        <label className="flex items-center gap-1 text-[11px] text-slate-300 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="certIssuerKind"
+                            value="Issuer"
+                            checked={certIssuerKind === 'Issuer'}
+                            onChange={() => setCertIssuerKind('Issuer')}
+                            className="text-blue-500 focus:ring-blue-500"
+                          />
+                          Issuer (Namespace)
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                          Certificate Issuer Name
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={certIssuer}
+                            onChange={(e) => setCertIssuer(e.target.value)}
+                            placeholder="e.g. letsencrypt-prod, vault-issuer, selfsigned-ca"
+                            list="discovered-issuers-list"
+                            className="w-full bg-cyber-950 border border-cyber-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+                          />
+                          <datalist id="discovered-issuers-list">
+                            {(certIssuerKind === 'ClusterIssuer' ? hostCertIssuers.clusterIssuers : hostCertIssuers.issuers)?.map((name) => (
+                              <option key={name} value={name} />
+                            ))}
+                          </datalist>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                          Entrypoint Host FQDN
+                        </label>
+                        <input
+                          type="text"
+                          value={gatewayHost}
+                          onChange={(e) => setGatewayHost(e.target.value)}
+                          placeholder={clusterName ? `${clusterName.trim().toLowerCase()}.example.com` : 'e.g. vc-dev.example.com'}
+                          className="w-full bg-cyber-950 border border-cyber-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Pre-Creation Alert Check */}
+                    {certIssuer.trim() && (
+                      <div>
+                        {!hostCertIssuers.installed ? (
+                          <div className="p-3 bg-rose-950/40 border border-rose-500/40 rounded-xl text-xs text-rose-300 flex items-start gap-2.5 animate-in fade-in duration-150">
+                            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                            <div>
+                              <strong className="font-semibold text-rose-200">Host Cert-Manager Missing:</strong> Cert-manager CRDs are not detected on the host cluster. Deployment will abort with an error unless a valid cert-manager issuer is present.
+                            </div>
+                          </div>
+                        ) : certIssuerKind === 'ClusterIssuer' && !hostCertIssuers.clusterIssuers.includes(certIssuer.trim()) ? (
+                          <div className="p-3 bg-amber-950/40 border border-amber-500/40 rounded-xl text-xs text-amber-300 flex items-start gap-2.5 animate-in fade-in duration-150">
+                            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                            <div>
+                              <strong className="font-semibold text-amber-200">Issuer Not Found on Host:</strong> ClusterIssuer <code className="bg-amber-900/60 px-1 py-0.5 rounded font-mono text-white">{certIssuer.trim()}</code> was not detected in the host cluster.
+                            </div>
+                          </div>
+                        ) : certIssuerKind === 'Issuer' && !hostCertIssuers.issuers.includes(certIssuer.trim()) ? (
+                          <div className="p-3 bg-amber-950/40 border border-amber-500/40 rounded-xl text-xs text-amber-300 flex items-start gap-2.5 animate-in fade-in duration-150">
+                            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                            <div>
+                              <strong className="font-semibold text-amber-200">Issuer Not Found:</strong> Namespaced Issuer <code className="bg-amber-900/60 px-1 py-0.5 rounded font-mono text-white">{certIssuer.trim()}</code> was not detected.
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-2.5 bg-emerald-950/30 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2 animate-in fade-in duration-150">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                            <span>Valid {certIssuerKind} <strong className="font-mono text-white">{certIssuer.trim()}</strong> verified on host cluster.</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Gateway API Specs */}
+                  <div className="p-3.5 rounded-xl bg-cyber-900/60 border border-cyber-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-3.5 h-3.5 text-blue-400" />
+                        <span className="text-xs font-bold text-slate-200">In-Guest Gateway API Specifications</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-blue-400 bg-blue-950/80 px-1.5 py-0.5 rounded border border-blue-800">
+                        gateway.networking.k8s.io/v1
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                          GatewayClass Name
+                        </label>
+                        <input
+                          type="text"
+                          value={gatewayClassName}
+                          onChange={(e) => setGatewayClassName(e.target.value)}
+                          placeholder="eg"
+                          className="w-full bg-cyber-950 border border-cyber-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none font-mono"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-1">In-cluster GatewayClass controller reference.</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                          Guest Gateway Name
+                        </label>
+                        <input
+                          type="text"
+                          value={gatewayDefaultName}
+                          onChange={(e) => setGatewayDefaultName(e.target.value)}
+                          placeholder="default-gateway"
+                          className="w-full bg-cyber-950 border border-cyber-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none font-mono"
+                        />
+                        <p className="text-[10px] text-slate-500 mt-1">Default Gateway resource in tenant namespace.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Host-Level Gateway API Routing */}
+                  <div className="p-3.5 rounded-xl bg-cyber-900/60 border border-cyber-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Network className="w-3.5 h-3.5 text-blue-400" />
+                          <span className="text-xs font-bold text-slate-200">Host Envoy Gateway Routing</span>
+                          <span className="text-[10px] font-mono text-blue-400 bg-blue-950/80 px-1.5 py-0.5 rounded border border-blue-800">
+                            Host Integration
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Creates host-level HTTPRoutes pointing directly to the synced guest gateway service.
+                        </p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={gatewayHostRoutingEnabled}
+                          onChange={(e) => setGatewayHostRoutingEnabled(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-cyber-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-cyber-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+
+                    {gatewayHostRoutingEnabled && (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-cyber-800/80 animate-in fade-in duration-150">
+                        <div>
+                          <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                            Host Gateway Name
+                          </label>
+                          <input
+                            type="text"
+                            value={gatewayHostName}
+                            onChange={(e) => setGatewayHostName(e.target.value)}
+                            placeholder="eg"
+                            className="w-full bg-cyber-950 border border-cyber-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none font-mono"
+                          />
+                          <p className="text-[10px] text-slate-500 mt-1">Host Envoy Gateway name.</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                            Host Gateway Namespace
+                          </label>
+                          <input
+                            type="text"
+                            value={gatewayHostNamespace}
+                            onChange={(e) => setGatewayHostNamespace(e.target.value)}
+                            placeholder="envoy-gateway-system"
+                            className="w-full bg-cyber-950 border border-cyber-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none font-mono"
+                          />
+                          <p className="text-[10px] text-slate-500 mt-1">Host Gateway namespace.</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                            vCluster API Hostname
+                          </label>
+                          <input
+                            type="text"
+                            value={gatewayApiHost}
+                            onChange={(e) => setGatewayApiHost(e.target.value)}
+                            placeholder={clusterName ? `api.${clusterName.trim().toLowerCase()}.example.com` : 'api.cluster.example.com'}
+                            className="w-full bg-cyber-950 border border-cyber-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none font-mono"
+                          />
+                          <p className="text-[10px] text-slate-500 mt-1">Optional host routing for API server.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Provider Config: Istio */}
+              {ingressProvider === 'istio' && (
+                <div className="space-y-4 pt-1">
                   {/* HA Istio Notice */}
                   {(sizePreset === 'ha' || sizePreset === 'large') && (
                     <div className="flex items-center gap-2.5 p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-xs font-mono">
@@ -1853,6 +2198,15 @@ policies:
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* Provider Config: None */}
+              {ingressProvider === 'none' && (
+                <div className="p-4 rounded-xl bg-cyber-900/40 border border-cyber-800 text-xs text-slate-400">
+                  <p>
+                    Workloads will be accessible via standard internal cluster service networking. You can enable Istio or Gateway API at any time later via the Cluster Settings.
+                  </p>
                 </div>
               )}
             </div>
@@ -2132,15 +2486,25 @@ policies:
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
                   <div className="p-2.5 rounded-xl bg-cyber-900 border border-cyber-800">
-                    <span className="text-[10px] text-slate-500 uppercase font-mono block">Istio Gateway</span>
-                    <span className={`font-semibold ${enableIstio ? 'text-cyan-400' : 'text-slate-500'}`}>
-                      {enableIstio ? 'Enabled (Port 80/443)' : 'Disabled'}
+                    <span className="text-[10px] text-slate-500 uppercase font-mono block">Ingress Provider</span>
+                    <span className={`font-semibold ${
+                      ingressProvider === 'gateway-api' ? 'text-blue-400' :
+                      ingressProvider === 'istio' ? 'text-cyan-400' : 'text-slate-500'
+                    }`}>
+                      {ingressProvider === 'gateway-api' ? 'Gateway API' :
+                       ingressProvider === 'istio' ? 'Istio Gateway' : 'None (Syncer)'}
                     </span>
                   </div>
                   <div className="p-2.5 rounded-xl bg-cyber-900 border border-cyber-800">
-                    <span className="text-[10px] text-slate-500 uppercase font-mono block">Service Mesh</span>
-                    <span className={`font-semibold ${enableMesh ? 'text-purple-400' : 'text-slate-500'}`}>
-                      {enableMesh ? 'Sidecars Active' : 'Disabled (Gateway only)'}
+                    <span className="text-[10px] text-slate-500 uppercase font-mono block">
+                      {ingressProvider === 'gateway-api' ? 'Gateway Class' : 'Service Mesh'}
+                    </span>
+                    <span className={`font-semibold ${
+                      ingressProvider === 'gateway-api' ? 'text-blue-300 font-mono' :
+                      enableMesh ? 'text-purple-400' : 'text-slate-500'
+                    }`}>
+                      {ingressProvider === 'gateway-api' ? (gatewayClassName || 'eg') :
+                       (enableMesh ? 'Sidecars Active' : 'Disabled (Gateway only)')}
                     </span>
                   </div>
                   <div className="p-2.5 rounded-xl bg-cyber-900 border border-cyber-800">

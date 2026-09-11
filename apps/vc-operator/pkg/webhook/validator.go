@@ -160,6 +160,32 @@ func (v *VirtualClusterValidator) validateBasicSpec(ctx context.Context, vc *v1a
 		}
 	}
 
+	// Validate Gateway API opinionated component & cert-manager issuer
+	if vc.Spec.Components.GatewayAPI != nil && vc.Spec.Components.GatewayAPI.Enabled {
+		gwPath := fldPath.Child("components", "gatewayAPI")
+		issuerKind := vc.Spec.Components.GatewayAPI.CertificateIssuerKind
+		if issuerKind != "" && issuerKind != "ClusterIssuer" && issuerKind != "Issuer" {
+			allErrs = append(allErrs, field.NotSupported(gwPath.Child("certificateIssuerKind"), issuerKind, []string{"ClusterIssuer", "Issuer"}))
+		}
+
+		issuerName := strings.TrimSpace(vc.Spec.Components.GatewayAPI.CertificateIssuer)
+		if issuerName != "" && v.Client != nil {
+			u := &unstructured.Unstructured{}
+			var targetNamespace string
+			if strings.EqualFold(issuerKind, "Issuer") {
+				u.SetGroupVersionKind(schema.GroupVersionKind{Group: "cert-manager.io", Version: "v1", Kind: "Issuer"})
+				targetNamespace = vc.Namespace
+			} else {
+				u.SetGroupVersionKind(schema.GroupVersionKind{Group: "cert-manager.io", Version: "v1", Kind: "ClusterIssuer"})
+				targetNamespace = ""
+			}
+			err := v.Client.Get(ctx, types.NamespacedName{Name: issuerName, Namespace: targetNamespace}, u)
+			if err != nil {
+				allErrs = append(allErrs, field.Invalid(gwPath.Child("certificateIssuer"), issuerName, fmt.Sprintf("cert-manager %s %q does not exist on host cluster", issuerKind, issuerName)))
+			}
+		}
+	}
+
 	return allErrs
 }
 

@@ -50,6 +50,7 @@ type VirtualClusterReconciler struct {
 	QuotaReconciler            *QuotaReconciler
 	RBACReconciler             *RBACReconciler
 	IstioReconciler            *IstioReconciler
+	GatewayAPIReconciler       *GatewayAPIReconciler
 	DisasterRecoveryReconciler *DisasterRecoveryReconciler
 }
 
@@ -97,6 +98,9 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	if r.IstioReconciler == nil {
 		r.IstioReconciler = NewIstioReconciler(r.Client, r.AddonsReconciler)
+	}
+	if r.GatewayAPIReconciler == nil {
+		r.GatewayAPIReconciler = NewGatewayAPIReconciler(r.Client, r.AddonsReconciler)
 	}
 	if r.DisasterRecoveryReconciler == nil {
 		r.DisasterRecoveryReconciler = NewDisasterRecoveryReconciler(r.Client)
@@ -306,14 +310,55 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				r.setCondition(&vc, v1alpha1.ConditionIstioReady, metav1.ConditionFalse, "IstioStarting", "Istio ingress rollout in progress")
 			}
 		}
+	} else {
+		if r.IstioReconciler != nil {
+			_ = r.IstioReconciler.CleanupAllIstio(ctx, &vc)
+		}
+		meta.RemoveStatusCondition(&vc.Status.Conditions, v1alpha1.ConditionIstioReady)
 	}
-	log.Info("Component status", "cluster", vc.Name, "etcd", etcdReady, "syncer", syncerReady, "kubeconfig", kubeconfigReady, "addons", addonsReady, "quota", quotaReady, "rbac", rbacReady, "istio", istioReady)
+
+	// 9b. Reconcile Opinionated Application Entrypoint (Gateway API & TLS)
+	var gatewayAPIReady bool = true
+	if vc.Spec.Components.GatewayAPI != nil && vc.Spec.Components.GatewayAPI.Enabled {
+		if !kubeconfigReady {
+			r.setCondition(&vc, v1alpha1.ConditionGatewayAPIReady, metav1.ConditionFalse, "WaitingForControlPlane", "Gateway API ingress awaiting control plane readiness")
+			gatewayAPIReady = false
+		} else {
+			ready, err := r.GatewayAPIReconciler.ReconcileGatewayAPI(ctx, &vc)
+			if err != nil {
+				log.Error(err, "failed reconciling opinionated Gateway API entrypoint")
+				r.setCondition(&vc, v1alpha1.ConditionGatewayAPIReady, metav1.ConditionFalse, "GatewayAPIReconcileFailed", err.Error())
+				vc.Status.Phase = v1alpha1.PhaseDegraded
+				_ = r.Status().Update(ctx, &vc)
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+			}
+			gatewayAPIReady = ready
+			if ready {
+				r.setCondition(&vc, v1alpha1.ConditionGatewayAPIReady, metav1.ConditionTrue, "GatewayAPIConfigured", "Gateway API Gateway, HTTPRoute, and entrypoint proxy are active")
+			} else {
+				r.setCondition(&vc, v1alpha1.ConditionGatewayAPIReady, metav1.ConditionFalse, "GatewayAPIStarting", "Gateway API ingress rollout in progress")
+			}
+		}
+	} else {
+		if r.GatewayAPIReconciler != nil {
+			_ = r.GatewayAPIReconciler.CleanupGuestGatewayAPI(ctx, &vc)
+		}
+		meta.RemoveStatusCondition(&vc.Status.Conditions, v1alpha1.ConditionGatewayAPIReady)
+	}
+
+	// 9c. Reconcile Unified Host Ingress Routing (Envoy Gateway)
+	if r.GatewayAPIReconciler != nil {
+		if err := r.GatewayAPIReconciler.ReconcileUnifiedHostRouting(ctx, &vc); err != nil {
+			log.Error(err, "failed reconciling unified host ingress routing")
+		}
+	}
+	log.Info("Component status", "cluster", vc.Name, "etcd", etcdReady, "syncer", syncerReady, "kubeconfig", kubeconfigReady, "addons", addonsReady, "quota", quotaReady, "rbac", rbacReady, "istio", istioReady, "gatewayAPI", gatewayAPIReady)
 
 	// 10. Update Observed Versions & Final Phase
 	previousPhase := vc.Status.Phase
 	if isSleeping {
 		vc.Status.Phase = v1alpha1.PhaseSleeping
-	} else if etcdReady && syncerReady && addonsReady && quotaReady && rbacReady && istioReady {
+	} else if etcdReady && syncerReady && addonsReady && quotaReady && rbacReady && istioReady && gatewayAPIReady {
 		targetK8s := vc.Spec.KubernetesVersion
 		if targetK8s == "" {
 			targetK8s = "v1.31.0"
@@ -342,6 +387,13 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				targetIstio = "1.24.2"
 			}
 		}
+		targetGatewayAPI := ""
+		if vc.Spec.Components.GatewayAPI != nil && vc.Spec.Components.GatewayAPI.Enabled {
+			targetGatewayAPI = vc.Spec.Components.GatewayAPI.Version
+			if targetGatewayAPI == "" {
+				targetGatewayAPI = "v1.2.0"
+			}
+		}
 
 		vc.Status.VirtualK8sVersion = targetK8s
 		vc.Status.VClusterVersion = targetVCluster
@@ -350,6 +402,7 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			CoreDNS:       targetCoreDNS,
 			MetricsServer: targetMetrics,
 			Istio:         targetIstio,
+			GatewayAPI:    targetGatewayAPI,
 		}
 		vc.Status.Phase = v1alpha1.PhaseReady
 		if previousPhase != v1alpha1.PhaseReady {
@@ -377,6 +430,9 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		if !istioReady {
 			pending = append(pending, "istio")
+		}
+		if !gatewayAPIReady {
+			pending = append(pending, "gatewayAPI")
 		}
 		log.Info("Virtual cluster components syncing / pending", "cluster", vc.Name, "phase", vc.Status.Phase, "pending", pending)
 	}
@@ -423,6 +479,13 @@ func (r *VirtualClusterReconciler) handleDeletion(ctx context.Context, log logr.
 	if r.IstioReconciler != nil {
 		if err := r.IstioReconciler.CleanupAllIstio(ctx, vc); err != nil {
 			log.Error(err, "error cleaning up istio resources during deletion")
+		}
+	}
+
+	// 2b. Clean up Gateway API host routing resources, cert-manager certificates, and TLS secrets
+	if r.GatewayAPIReconciler != nil {
+		if err := r.GatewayAPIReconciler.CleanupAllGatewayAPI(ctx, vc); err != nil {
+			log.Error(err, "error cleaning up gateway API resources during deletion")
 		}
 	}
 
@@ -821,6 +884,7 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.QuotaReconciler = NewQuotaReconciler(mgr.GetClient())
 	r.RBACReconciler = NewRBACReconciler(mgr.GetClient())
 	r.IstioReconciler = NewIstioReconciler(mgr.GetClient(), r.AddonsReconciler)
+	r.GatewayAPIReconciler = NewGatewayAPIReconciler(mgr.GetClient(), r.AddonsReconciler)
 	r.DisasterRecoveryReconciler = NewDisasterRecoveryReconciler(mgr.GetClient())
 
 	return ctrl.NewControllerManagedBy(mgr).

@@ -646,6 +646,23 @@ export async function createVirtualCluster(data: {
       apiHost?: string;
     };
   };
+  gatewayAPI?: {
+    enabled: boolean;
+    gatewayClassName?: string;
+    hosts?: string[];
+    certificateIssuer?: string;
+    certificateIssuerKind?: 'ClusterIssuer' | 'Issuer';
+    gatewayConfig?: {
+      replicas?: number;
+      defaultGateway?: string;
+    };
+    hostRouting?: {
+      enabled: boolean;
+      gatewayName?: string;
+      gatewayNamespace?: string;
+      apiHost?: string;
+    };
+  };
 }): Promise<VirtualCluster> {
   const name = data.clusterName.trim().toLowerCase();
   let k8sVer = data.kubernetesVersion;
@@ -849,6 +866,11 @@ export async function createVirtualCluster(data: {
                 ...data.istio,
                 version: istioVer,
               },
+            }
+          : {}),
+        ...(data.gatewayAPI
+          ? {
+              gatewayAPI: data.gatewayAPI,
             }
           : {}),
       },
@@ -1840,6 +1862,75 @@ export async function updateVirtualClusterIstio(
   }
 
   throw new Error((res.data as any)?.message || `Failed to update virtual cluster Istio: HTTP ${res.statusCode}`);
+}
+
+/**
+ * Update opinionated Kubernetes Gateway API configuration on a VirtualCluster
+ */
+export async function updateVirtualClusterGatewayAPI(
+  name: string,
+  gatewayAPIConfig: {
+    enabled: boolean;
+    version?: string;
+    gatewayClassName?: string;
+    replicas?: number;
+    gatewayConfig?: {
+      enabled?: boolean;
+      serviceType?: string;
+      replicas?: number;
+      selector?: Record<string, string>;
+    };
+    certificateIssuer?: string;
+    certificateIssuerKind?: string;
+    hosts?: string[];
+    certSecretName?: string;
+    hostRouting?: {
+      enabled: boolean;
+      defaultGateway?: string;
+      ingressGatewaySelector?: Record<string, string>;
+      apiHost?: string;
+    };
+  },
+  namespace?: string
+): Promise<VirtualCluster> {
+  const targetNs = namespace || (name === 'team-alpha-dev' ? 'default' : name);
+  const getRes = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`
+  );
+
+  if (getRes.statusCode !== 200 || !getRes.data) {
+    throw new Error(`Virtual cluster ${name} not found in namespace ${targetNs}`);
+  }
+
+  const existing = getRes.data;
+  const existingComponents = existing.spec?.components || {};
+
+  const patch = {
+    metadata: {
+      annotations: {
+        'vops.gitops.io/reconcile-trigger': Date.now().toString(),
+      },
+    },
+    spec: {
+      components: {
+        ...existingComponents,
+        gatewayAPI: gatewayAPIConfig,
+      },
+    },
+  };
+
+  const res = await k8sRequest<any>(
+    `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`,
+    'PATCH',
+    patch,
+    'application/merge-patch+json'
+  );
+
+  if (res.statusCode >= 200 && res.statusCode < 300) {
+    return mapK8sResourceToVirtualCluster(res.data);
+  }
+
+  throw new Error((res.data as any)?.message || `Failed to update virtual cluster Gateway API: HTTP ${res.statusCode}`);
 }
 
 // ==========================================

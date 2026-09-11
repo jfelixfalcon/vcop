@@ -66,15 +66,24 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 - Automatically deploys a dedicated 3-replica etcd StatefulSet (`controlPlane.backingStore.etcd.deploy.statefulSet.highAvailability.replicas: 3`).
 - Configures automated headless peer discovery and quorum health gating before control-plane readiness is asserted.
 
-### 3. Opinionated Core Add-ons & Ingress Entrypoint
+### 3. Opinionated Core Add-ons & Ingress Entrypoints
 - **CoreDNS:** Enabled inside the virtual control plane for independent intra-vcluster service discovery without host DNS pollution.
 - **Kubernetes Metrics Server:** Integrated inside the virtual cluster (`integrations.metricsServer.enabled: true`), allowing `kubectl top` and HPA controllers to function seamlessly within tenant boundaries.
-- **Istio Application Entrypoint (`charts/vcluster-istio`):**
-  - High-performance ingress powered by in-cluster `istiod` and `istio-ingressgateway`.
-  - **Full High Availability Mode (3 Gateways & 3 istiod):** When high availability is chosen (`spec.highAvailability: true` or preset `ha`), the operator automatically provisions **3 `istiod` control plane replicas** and **3 `istio-ingressgateway` edge replicas** for multi-node fault tolerance and zero-downtime traffic ingress. Non-HA clusters run 1 replica each to conserve resources.
+- **Kubernetes Gateway API Entrypoint (`gateway.networking.k8s.io/v1`):**
+  - Modern cloud-native ingress using official SIG-Network Gateway API CRDs (`GatewayClass`, `Gateway`, `HTTPRoute`).
+  - Powered by in-cluster Envoy Gateway data plane (`gateway-system/gateway-proxy`).
+  - **High Availability Sizing:** Automatically deploys **3 Envoy proxy replicas** in HA mode (`spec.highAvailability: true` or preset `ha`) for multi-node fault tolerance and zero-downtime routing, or 1 replica in standard mode.
+  - Minimal resource overhead, zero sidecar complexity, and native Kubernetes declarative APIs.
+- **Istio Application Entrypoint (`istio.io/v1beta1` / `charts/vcluster-istio`):**
+  - High-performance ingress and service mesh powered by in-cluster `istiod` and `istio-ingressgateway`.
+  - **Full High Availability Mode (3 Gateways & 3 istiod):** Automatically provisions **3 `istiod` control plane replicas** and **3 `istio-ingressgateway` edge replicas** in HA mode, or 1 replica each in non-HA mode.
   - Service mesh is optional and disabled by default (`meshEnabled: false`) to preserve lightweight isolation.
-  - Automatic HTTP-to-HTTPS upgrade: Gateway terminates port 80 and redirects traffic cleanly to port 443 with TLS.
-  - Pre-configured `main-entrypoint` VirtualService routing traffic to tenant services for cluster FQDN hosts.
+  - Automatic HTTP-to-HTTPS upgrade and pre-configured `main-entrypoint` routing.
+- **Unified Host Ingress Architecture & Dynamic Multiplexing:**
+  - Host Envoy Gateway (`envoy-gateway-system/eg` on `172.18.255.200`) dynamically routes both control plane traffic (`api.<cluster>.local`) and application traffic (`<cluster>.local`).
+  - **Zero Host Reconfiguration:** Seamlessly toggle between Gateway API and Istio without modifying `/etc/hosts` or host infrastructure.
+  - Automatic edge HTTP 80 -> HTTPS 443 redirection (`HTTPRoute/<cluster>-redirect`) prevents internal redirect loops.
+  - Control plane proxying via `HTTPRoute/<cluster>-api-route` paired with `BackendTLSPolicy` referencing the cluster's CA ConfigMap directly to `svc/<cluster>:443`.
 
 ### 4. Robust Cert-Manager TLS Integration (Fail-Closed)
 - Operator interfaces with host-level cert-manager `Issuer` or `ClusterIssuer` resources.
@@ -133,14 +142,14 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 
 ---
 
-## Helm Deployment & Automated Istio Management
+## Helm Deployment & Platform Installation
 
 ### Do I need to deploy both `vcop` and `vcluster-istio` Helm charts?
 
 > [!IMPORTANT]
 > **No, you only need to deploy `charts/vcop`.**
 >
-> When you deploy the `vcop` Helm chart onto your host Kubernetes cluster, it installs the **vCOp Operator**, the **Operations Center UI**, and the **Metrics DB**. The operator then **natively reconciles, provisions, and manages Istio directly inside each virtual cluster**.
+> When you deploy the `vcop` Helm chart onto your host Kubernetes cluster, it installs the **vCOp Operator**, the **Operations Center UI**, and the **Metrics DB**. The operator then **natively reconciles, provisions, and manages ingress entrypoints (Gateway API or Istio) directly inside each virtual cluster**.
 >
 > You **do not** need to install `vcluster-istio` manually. The standalone [`charts/vcluster-istio`](charts/vcluster-istio) chart is provided as an optional reference/fallback package for teams wishing to deploy the opinionated Istio entrypoint stack manually or via GitOps (ArgoCD/Flux) on clusters without the vCOp operator.
 
@@ -185,7 +194,132 @@ cd vcop-airgap-bundle-v1.4.1
 
 ---
 
-### How vCOp Installs and Manages Istio
+## Ingress Architecture & Entrypoint Management: Gateway API & Istio
+
+vCOp provides an enterprise-grade, dual-engine ingress architecture supporting both the modern **Kubernetes Gateway API standard** (via Envoy Gateway) and the **Istio Service Mesh**. Both options are dynamically orchestrated by the operator and multiplexed across a unified host gateway layer with zero host-level reconfiguration.
+
+---
+
+### Unified Host Ingress Architecture (Zero-Friction Dynamic Multiplexing)
+
+In multi-tenant environments, managing edge routing for both control plane APIs and tenant workloads often leads to brittle DNS configurations and manual `/etc/hosts` changes whenever ingress tooling changes. vCOp solves this with an opinionated **Unified Host Ingress Architecture**:
+
+```mermaid
+flowchart TD
+    Client["Client / Developer / curl"]
+    
+    subgraph Host["Kubernetes Host Cluster (172.18.255.200)"]
+        HostGW["Host Envoy Gateway (envoy-gateway-system/eg)\nPort 80 (HTTP) & Port 443 (HTTPS)"]
+        
+        RedirectRoute["HTTPRoute: <cluster>-redirect\nPort 80 -> HTTPS 301 Redirect"]
+        AppRoute["HTTPRoute: <cluster>-route\nPort 443 SNI: <cluster>.local"]
+        APIRoute["HTTPRoute: <cluster>-api-route\nPort 443 SNI: api.<cluster>.local"]
+        BTP["BackendTLSPolicy: <cluster>-api-backend-tls\nCA Ref: ConfigMap/<cluster>-apiserver-ca"]
+        
+        HostGWSvc["Syncer Service:\ngateway-proxy-x-gateway-system-x-<cluster>:80"]
+        HostIstioSvc["Syncer Service:\nistio-ingressgateway-x-istio-system-x-<cluster>:80"]
+        HostAPISvc["Syncer Service:\n<cluster>:443 (vCluster Syncer)"]
+    end
+
+    subgraph Guest["Virtual Cluster (Guest Namespace)"]
+        subgraph ModeGW["When Gateway API is Active"]
+            GWProxy["Envoy Gateway-Proxy (gateway-system)\n3x HA Replicas / 1x Standard"]
+            GWCRD["GatewayClass 'eg', Gateway 'eg', HTTPRoutes"]
+        end
+        
+        subgraph ModeIstio["When Istio is Active"]
+            IstioGW["istio-ingressgateway (istio-system)\n3x HA Replicas / 1x Standard"]
+            Istiod["istiod Control Plane (3x HA / 1x Standard)"]
+            IstioCRD["Istio Gateways & VirtualServices"]
+        end
+        
+        KubeAPI["Guest Kubernetes API Server"]
+        Apps["Tenant Workloads / Application Services"]
+    end
+
+    Client -->|"http://<cluster>.local:80"| HostGW
+    HostGW --> RedirectRoute
+    RedirectRoute -->|"HTTP 301 Redirect -> https://"| Client
+
+    Client -->|"https://api.<cluster>.local:443"| HostGW
+    HostGW --> APIRoute
+    APIRoute -.->|"Enforces Upstream TLS Validation"| BTP
+    APIRoute --> HostAPISvc
+    HostAPISvc --> KubeAPI
+
+    Client -->|"https://<cluster>.local:443"| HostGW
+    HostGW --> AppRoute
+    
+    AppRoute -->|"If Gateway API Active"| HostGWSvc
+    HostGWSvc --> GWProxy
+    GWProxy --> Apps
+
+    AppRoute -->|"If Istio Active"| HostIstioSvc
+    HostIstioSvc --> IstioGW
+    IstioGW --> Apps
+```
+
+#### Core Architectural Guarantees:
+
+1. **Single Static DNS & IP (`172.18.255.200`):**
+   - Host Envoy Gateway (`envoy-gateway-system/eg`) listens on a single LoadBalancer/MetalLB IP (`172.18.255.200`).
+   - Platform users and developers only configure a single entry in `/etc/hosts` (or corporate DNS):
+     ```text
+     172.18.255.200 vcop.local keycloak.local vc-dev.local api.vc-dev.local
+     ```
+   - **Zero Host Reconfiguration:** When switching between Istio and Kubernetes Gateway API, developers and operators **never need to touch `/etc/hosts`**, reallocate IPs, or alter edge proxy settings. The operator reconciles the host `HTTPRoute` target backend dynamically.
+
+2. **Dedicated Control Plane Ingress (`api.<cluster>.local`) via `BackendTLSPolicy`:**
+   - Access to the virtual cluster's Kubernetes API server is routed through `https://api.<cluster>.local`.
+   - The operator creates a host `HTTPRoute/<cluster>-api-route` pointing to the internal vCluster syncer Service (`svc/<cluster>:443`).
+   - To prevent "Client sent an HTTP request to an HTTPS server" or TLS handshake failures, the operator automatically provisions a `BackendTLSPolicy` (`<cluster>-api-backend-tls`) and exports the vCluster's internal Certificate Authority into a host `ConfigMap` (`<cluster>-apiserver-ca`). Envoy Gateway initiates encrypted upstream TLS to the virtual API server and validates its certificate against the exported CA.
+
+3. **Unified Edge HTTP-to-HTTPS Redirection:**
+   - Ingress on port 80 is handled cleanly at the host edge by `HTTPRoute/<cluster>-redirect`, issuing an immediate HTTP 301 `RequestRedirect` to HTTPS 443 with TLS.
+   - In-guest ingress proxies (both Envoy Gateway-Proxy and Istio Ingressgateway) serve plain HTTP on their internal port 80, preventing redirect loops between the host edge and tenant pods.
+
+4. **Dynamic Provider Multiplexing & Decoupled Cleanup:**
+   - When **Gateway API** is enabled: The operator points host routing to `gateway-proxy-x-gateway-system-x-<cluster>:80`.
+   - When **Istio** is enabled: The operator points host routing to `istio-ingressgateway-x-istio-system-x-<cluster>:80`.
+   - When an entrypoint option is disabled, the operator's teardown handler (`CleanupGuestGatewayAPI` or Istio teardown) cleans up in-guest deployments, services, and CRDs without impacting the host API server route (`api.<cluster>.local`).
+
+---
+
+### Ingress Provider Comparison: Gateway API vs. Istio
+
+| Dimension | Kubernetes Gateway API (Envoy Gateway) | Istio Service Mesh & Ingress Gateway |
+|---|---|---|
+| **API Standard** | Official `gateway.networking.k8s.io/v1` (Kubernetes SIG-Network) | `istio.io/v1beta1` (Istio Project Custom Resources) |
+| **Data Plane** | High-performance Envoy Proxy (`gateway-system/gateway-proxy`) | Envoy-based `istio-ingressgateway` (`istio-system`) |
+| **Control Plane** | Lightweight host-integrated Envoy Gateway | In-guest `istiod` pilot discovery daemon |
+| **Resource Footprint** | **Minimal (~60MB RAM)**; no in-guest control plane daemon | **Moderate (~350MB RAM)**; runs `istiod` and Envoy |
+| **Service Mesh & Sidecars** | Pure Ingress; zero sidecar injection overhead | Optional Sidecars (`meshEnabled: true`); mTLS, L7 telemetry |
+| **High Availability** | 3x Envoy Gateway-Proxy pods in HA; 1x in Non-HA | 3x `istiod` + 3x `istio-ingressgateway` in HA; 1x in Non-HA |
+| **Primary Use Case** | Cloud-native microservices, standard declarative routing, low overhead | Enterprise microservices requiring zero-trust mTLS & policies |
+
+---
+
+### Option A: Kubernetes Gateway API Entrypoint Stack
+
+When you enable Gateway API (via the Operations Center UI or by setting `spec.components.gatewayAPI.enabled: true`), the operator's `GatewayAPIReconciler` automates the entire lifecycle inside the guest and at the host edge:
+
+#### 1. In-Guest Gateway API CRDs & Infrastructure
+- The operator installs official Gateway API v1 CRDs (`GatewayClass`, `Gateway`, `HTTPRoute`, `BackendTLSPolicy`) inside the tenant cluster.
+- A tenant-level `GatewayClass` named `eg` (`gateway.envoyproxy.io/gatewayclass-controller`) and a tenant `Gateway` named `eg` are provisioned in namespace `gateway-system`.
+- In-guest Envoy Gateway-Proxy is deployed with readiness gating on `:19001/ready`.
+
+#### 2. High Availability Sizing
+- If `spec.highAvailability: true` (or `ha` preset), the operator provisions **3 Envoy proxy replicas** across host nodes for fault tolerance.
+- Non-HA clusters deploy 1 replica to conserve resources.
+- Teams can specify exact custom replica counts using `spec.components.gatewayAPI.replicas`.
+
+#### 3. In-Guest Application Routing
+- A default in-guest `HTTPRoute` named `main-entrypoint` routes traffic matching `spec.components.gatewayAPI.hosts` to tenant application services on port 80.
+- Decoupled cleanup: Disabling Gateway API triggers `CleanupGuestGatewayAPI`, cleanly removing in-guest proxies while preserving cluster uptime.
+
+---
+
+### Option B: Istio Entrypoint Stack & Service Mesh
 
 When you enable Istio (via the **Operations Center UI** or by setting `spec.components.istio.enabled: true` in your `VirtualCluster` CR), the vCOp Operator's `IstioReconciler` automates the entire lifecycle:
 
@@ -400,21 +534,51 @@ When you configure High Availability on a virtual cluster:
 
 ---
 
-#### 5. Operational Commands & Inspection Snippets
+### Operational Commands & Verification Snippets
+
+#### 1. Seamlessly Switching Between Gateway API and Istio
+
+You can toggle between Gateway API and Istio at runtime with zero downtime and zero changes to `/etc/hosts`:
 
 ```bash
-# Check running Istio version across your fleet
-kubectl get vc -A -o custom-columns=NAME:.metadata.name,HA:.spec.highAvailability,ISTIO_VER:.status.componentVersions.istio,PHASE:.status.phase
+# Switch active ingress to Kubernetes Gateway API (Envoy Gateway)
+kubectl patch vc vc-dev -n vc-dev --type='merge' -p \
+  '{"spec":{"components":{"gatewayAPI":{"enabled":true},"istio":{"enabled":false}}}}'
 
-# Upgrade a virtual cluster's Istio version via kubectl
-kubectl patch vc vc-dev -n vc-dev --type='merge' -p '{"spec":{"components":{"istio":{"version":"1.25.0"}}}}'
+# Switch active ingress back to Istio Service Mesh
+kubectl patch vc vc-dev -n vc-dev --type='merge' -p \
+  '{"spec":{"components":{"gatewayAPI":{"enabled":false},"istio":{"enabled":true}}}}'
+```
 
-# Inspect the guest Istio pods running inside a virtual cluster from the host
-kubectl get pods -n vc-dev --show-labels | grep istio
+#### 2. Validating Endpoints from the Host
 
-# Verify Istio endpoint health inside the virtual cluster
-kubectl exec -n vc-dev -c istio-proxy $(kubectl get pods -n vc-dev -l app=istio-ingressgateway -o jsonpath='{.items[0].metadata.name}') -- \
-  pilot-agent request GET /healthz/ready
+With `/etc/hosts` pointing `172.18.255.200` to `vc-dev.local` and `api.vc-dev.local`:
+
+```bash
+# Verify the Virtual Cluster API Server endpoint (via BackendTLSPolicy & Envoy Gateway)
+curl -k https://api.vc-dev.local/version
+# Output: {"major":"1","minor":"31","gitVersion":"v1.31.0",...}
+
+# Verify Edge HTTP-to-HTTPS 301 Redirection
+curl -I http://vc-dev.local/
+# Output: HTTP/1.1 301 Moved Permanently -> Location: https://vc-dev.local:443/
+
+# Verify Application Traffic routing through the active ingress provider
+curl -k https://vc-dev.local/
+# Output: vCOp Platform: Virtual Cluster Application Entrypoint is Healthy and Ready.
+```
+
+#### 3. Inspecting Host Gateway & Route Resources
+
+```bash
+# Inspect host HTTPRoutes managed by the operator
+kubectl get httproutes -n vc-dev
+
+# Inspect host BackendTLSPolicies for API server TLS upstream validation
+kubectl get backendtlspolicies -n vc-dev
+
+# Inspect guest ingress proxy deployments from the host
+kubectl get pods -n vc-dev -l 'app.kubernetes.io/component in (gateway-proxy,istio-ingressgateway)'
 ```
 
 ---
@@ -430,6 +594,7 @@ vCOp provides full dynamic version governance and zero-downtime rolling upgrades
 | **etcd Backing Store** | `3.6.8-0` | `registry.k8s.io/etcd:<tag>` | Operator StatefulSet |
 | **CoreDNS** | `v1.11.3` | `registry.k8s.io/coredns/coredns:<tag>` | Operator Addon |
 | **Metrics-Server** | `v0.7.2` | `registry.k8s.io/metrics-server/metrics-server:<tag>` | Operator Addon |
+| **Kubernetes Gateway API** | `v1.2.1` / Envoy `1.32.3` | `envoyproxy/envoy:<tag>` | Operator GatewayAPIReconciler |
 | **Istio Control Plane & Gateway** | `1.24.2` | `docker.io/istio/pilot:<tag>` & `proxyv2:<tag>` | Operator IstioReconciler |
 
 ---
@@ -757,8 +922,16 @@ spec:
     metricsServer:
       enabled: true
       version: "v0.7.2"
-    istio:
+    # Ingress Option 1: Kubernetes Gateway API (Envoy Gateway)
+    gatewayAPI:
       enabled: true
+      gatewayClassName: "eg"
+      hosts:
+        - "billing.apps.example.com"
+      # replicas: 3 # defaults to 3 in HA mode, 1 in standard mode
+    # Ingress Option 2: Istio Service Mesh & Gateway
+    istio:
+      enabled: false # Seamlessly toggle between Gateway API and Istio
       version: "1.24.2"
       certificateIssuer: "vcluster-ca-issuer"
       certificateIssuerKind: "ClusterIssuer" # ClusterIssuer | Issuer

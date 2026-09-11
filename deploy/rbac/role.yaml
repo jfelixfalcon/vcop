@@ -138,6 +138,26 @@ rules:
       - patch
       - update
       - watch
+  # Kubernetes Gateway API resources
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - gatewayclasses
+      - gateways
+      - httproutes
+      - referencegrants
+      - tlsroutes
+      - tcproutes
+      - grpcroutes
+      - backendtlspolicies
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
   # CRD discovery
   - apiGroups:
       - apiextensions.k8s.io
@@ -248,6 +268,22 @@ rules:
     resources:
       - gateways
       - virtualservices
+    verbs:
+      - get
+      - list
+      - watch
+  # Kubernetes Gateway API resources
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - gatewayclasses
+      - gateways
+      - httproutes
+      - referencegrants
+      - tlsroutes
+      - tcproutes
+      - grpcroutes
+      - backendtlspolicies
     verbs:
       - get
       - list

@@ -46,6 +46,8 @@ spec:
               value: "true"
             - name: PILOT_ENABLE_INBOUND_PASSTHROUGH
               value: "1"
+            - name: PILOT_ENABLE_GATEWAY_API
+              value: "false"
             - name: POD_NAME
               valueFrom:
                 fieldRef:

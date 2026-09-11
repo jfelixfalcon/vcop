@@ -51,6 +51,8 @@ spec:
               value: istiod
             - name: CA_ADDR
               value: istiod.{{ .Values.global.namespace }}.svc:15012
+            - name: PROXY_CONFIG
+              value: "discoveryAddress: istiod.{{ .Values.global.namespace }}.svc:15012\n"
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -71,6 +73,13 @@ spec:
               value: istio-ingressgateway
             - name: ISTIO_META_OWNER
               value: kubernetes://apis/apps/v1/namespaces/{{ .Values.global.namespace }}/deployments/istio-ingressgateway
+            - name: ISTIO_META_CLUSTER_ID
+              value: "Kubernetes"
+          volumeMounts:
+            - mountPath: /var/run/secrets/tokens
+              name: istio-token
+            - mountPath: /var/run/secrets/istio
+              name: istio-ca-root-cert
           readinessProbe:
             httpGet:
               path: /healthz/ready
@@ -80,4 +89,15 @@ spec:
             timeoutSeconds: 3
           resources:
             {{- toYaml .Values.ingressGateway.resources | nindent 12 }}
+      volumes:
+        - name: istio-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: istio-ca
+                  expirationSeconds: 43200
+                  path: istio-token
+        - name: istio-ca-root-cert
+          configMap:
+            name: istio-ca-root-cert
 {{- end }}

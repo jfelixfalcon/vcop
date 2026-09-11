@@ -183,7 +183,7 @@ export const DocsView: React.FC<Props> = ({ currentUser }) => {
     { id: 'rbac', label: 'RBAC Matrix', icon: ShieldCheck, badge: 'Matrix' },
     { id: 'architecture', label: 'Architecture', icon: Layers },
     { id: 'lifecycle', label: 'Cluster Lifecycle', icon: Server },
-    { id: 'networking', label: 'Networking & Istio', icon: Globe },
+    { id: 'networking', label: 'Networking & Gateways', icon: Globe },
     { id: 'dr', label: 'Disaster Recovery', icon: Database },
     { id: 'capacity', label: 'Capacity Engine', icon: Gauge },
     { id: 'apps', label: 'App Store', icon: Package },
@@ -648,7 +648,7 @@ export const DocsView: React.FC<Props> = ({ currentUser }) => {
             </div>
           </section>
 
-          {/* SECTION 4: Networking & Istio */}
+          {/* SECTION 4: Networking & Ingress Gateways */}
           <section id="networking" className="scroll-mt-24 space-y-6">
             <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
               <div className="flex items-center gap-3">
@@ -657,46 +657,293 @@ export const DocsView: React.FC<Props> = ({ currentUser }) => {
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-white tracking-tight">
-                    Networking & Ingress (Istio Engine)
+                    Networking & Ingress: Gateway API & Istio
                   </h2>
                   <p className="text-xs text-slate-400 font-mono">
-                    Automated in-cluster Istio Gateway, cert-manager TLS mirroring, and HTTP-to-HTTPS redirect
+                    Unified host ingress multiplexing with zero /etc/hosts changes, BackendTLSPolicy API routing, and dual-stack entrypoints
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6 space-y-4">
-              <p className="text-xs text-slate-300 leading-relaxed">
-                When you enable Istio ingress on a virtual cluster, the operator's <code className="text-cyan-300">IstioReconciler</code> executes
-                a complete in-cluster networking rollout without requiring manual Helm deployments:
-              </p>
+            <div className="space-y-6">
+              {/* Unified Host Ingress Card */}
+              <div className="bg-cyber-900/90 border border-cyan-500/30 rounded-2xl p-6 space-y-5 shadow-lg shadow-cyan-950/20">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-3 h-3 rounded-full bg-cyan-400 animate-pulse"></span>
+                    <h3 className="text-base font-bold text-white tracking-tight">
+                      Unified Host Ingress Architecture (Zero-Friction Dynamic Multiplexer)
+                    </h3>
+                  </div>
+                  <span className="text-[11px] font-mono text-cyan-300 bg-cyan-950/80 px-2.5 py-1 rounded-lg border border-cyan-700/60 self-start sm:self-auto">
+                    Host Envoy Gateway @ 172.18.255.200
+                  </span>
+                </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
-                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
-                  <span className="text-cyan-400 font-bold block">1. Fail-Closed Cert-Manager Check</span>
-                  <p className="text-slate-400 font-sans text-[11px]">
-                    Verifies that the target <code className="text-slate-300">ClusterIssuer</code> exists on the host cluster before proceeding,
-                    preventing broken endpoints.
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  vCOp decouples host-level edge infrastructure from virtual cluster runtime ingress. A dedicated host Envoy Gateway
+                  (<code className="text-cyan-300">envoy-gateway-system/eg</code>) on a single LoadBalancer/MetalLB IP terminates edge traffic,
+                  dynamically multiplexing both control plane API traffic and application traffic without requiring manual host modifications:
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
+                  <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
+                    <div className="flex items-center gap-2 text-cyan-400 font-bold">
+                      <Zap className="w-4 h-4 text-cyan-400" />
+                      <span>Zero /etc/hosts Churn</span>
+                    </div>
+                    <p className="text-slate-400 font-sans text-[11px] leading-relaxed">
+                      Developers configure one static IP in <code className="text-slate-300">/etc/hosts</code>:
+                      <code className="block mt-1 text-[10px] text-cyan-300 bg-cyber-900 px-2 py-1 rounded border border-cyber-800">
+                        172.18.255.200 &lt;name&gt;.local api.&lt;name&gt;.local
+                      </code>
+                      Switching between Gateway API and Istio requires zero DNS or host changes.
+                    </p>
+                  </div>
+
+                  <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
+                    <div className="flex items-center gap-2 text-purple-400 font-bold">
+                      <Shield className="w-4 h-4 text-purple-400" />
+                      <span>BackendTLSPolicy API Routing</span>
+                    </div>
+                    <p className="text-slate-400 font-sans text-[11px] leading-relaxed">
+                      API requests to <code className="text-slate-300">api.&lt;name&gt;.local</code> proxy through host Envoy directly to the vCluster syncer (<code className="text-slate-300">svc/&lt;name&gt;:443</code>).
+                      A synced CA ConfigMap and BackendTLSPolicy ensure encrypted upstream verification.
+                    </p>
+                  </div>
+
+                  <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
+                    <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                      <RefreshCw className="w-4 h-4 text-emerald-400" />
+                      <span>Dynamic Edge Multiplexing</span>
+                    </div>
+                    <p className="text-slate-400 font-sans text-[11px] leading-relaxed">
+                      The host <code className="text-slate-300">HTTPRoute/&lt;name&gt;-route</code> automatically points to either the Gateway API syncer service
+                      (<code className="text-slate-300">gateway-proxy-x-gateway-system-x-*</code>) or the Istio syncer service
+                      (<code className="text-slate-300">istio-ingressgateway-x-istio-system-x-*</code>).
+                    </p>
+                  </div>
+                </div>
+
+                {/* Architecture Pipeline Callout */}
+                <div className="bg-cyber-950/80 border border-cyber-800 p-4 rounded-xl text-xs space-y-2">
+                  <span className="font-mono text-slate-300 font-semibold flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                    Edge Redirection & Zero Proxy Loops:
+                  </span>
+                  <p className="text-slate-400 text-[11px] leading-relaxed">
+                    Edge HTTP port 80 traffic is intercepted at the host level by <code className="text-slate-300">HTTPRoute/&lt;name&gt;-redirect</code>, which returns an immediate HTTP 301 <code className="text-cyan-300">RequestRedirect</code> to HTTPS 443. In-guest ingress proxies (Envoy Gateway-Proxy and Istio Ingressgateway) serve plain HTTP on their internal port 80 behind the decrypted host edge, completely eliminating internal redirect loops.
                   </p>
                 </div>
-                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
-                  <span className="text-purple-400 font-bold block">2. Automatic TLS Secret Mirroring</span>
-                  <p className="text-slate-400 font-sans text-[11px]">
-                    Certificates issued on the host cluster are securely mirrored into the guest <code className="text-slate-300">istio-system</code> namespace.
+              </div>
+
+              {/* Ingress Provider Cards Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Gateway API Details Card */}
+                <div className="bg-cyber-900/90 border border-blue-500/30 rounded-2xl p-6 space-y-4 shadow-lg shadow-blue-950/10">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-400"></span>
+                      Option 1: Kubernetes Gateway API (Envoy Gateway)
+                    </h3>
+                    <span className="text-[10px] font-mono text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded border border-blue-800">
+                      gateway.networking.k8s.io/v1
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Modern cloud-native ingress using official SIG-Network Gateway API CRDs. Powered by in-cluster Envoy Gateway-Proxy with zero sidecar overhead:
                   </p>
+
+                  <div className="space-y-2.5 text-xs font-mono">
+                    <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800 space-y-1">
+                      <span className="text-blue-400 font-bold block">In-Guest CRDs & GatewayClass</span>
+                      <p className="text-slate-400 font-sans text-[11px]">
+                        Installs <code className="text-slate-300">GatewayClass/eg</code>, <code className="text-slate-300">Gateway/eg</code>, and <code className="text-slate-300">HTTPRoute/main-entrypoint</code> in <code className="text-slate-300">gateway-system</code>.
+                      </p>
+                    </div>
+                    <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800 space-y-1">
+                      <span className="text-cyan-400 font-bold block">HA & Standard Replica Scaling</span>
+                      <p className="text-slate-400 font-sans text-[11px]">
+                        Provisions <strong>3 Envoy proxy replicas</strong> in HA mode (<code className="text-slate-300">highAvailability: true</code> or <code className="text-slate-300">ha</code> preset); 1 replica in standard mode.
+                      </p>
+                    </div>
+                    <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800 space-y-1">
+                      <span className="text-emerald-400 font-bold block">Decoupled Lifecycle Teardown</span>
+                      <p className="text-slate-400 font-sans text-[11px]">
+                        Disabling Gateway API cleanly tears down guest deployments, services, and CRDs without disrupting the host API server route.
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
-                  <span className="text-emerald-400 font-bold block">3. In-Cluster istiod Control Plane</span>
-                  <p className="text-slate-400 font-sans text-[11px]">
-                    Deploys 1 replica for standard clusters, or automatically scales to 3 replicas for high availability (HA) clusters.
+
+                {/* Istio Details Card */}
+                <div className="bg-cyber-900/90 border border-cyan-500/30 rounded-2xl p-6 space-y-4 shadow-lg shadow-cyan-950/10">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+                      Option 2: Istio Service Mesh & Ingress Gateway
+                    </h3>
+                    <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">
+                      istio.io/v1beta1
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Full-featured service mesh and ingress gateway stack powered by in-cluster <code className="text-cyan-300">istiod</code> and <code className="text-cyan-300">istio-ingressgateway</code>:
                   </p>
+
+                  <div className="space-y-2.5 text-xs font-mono">
+                    <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800 space-y-1">
+                      <span className="text-cyan-400 font-bold block">Fail-Closed Cert-Manager Validation</span>
+                      <p className="text-slate-400 font-sans text-[11px]">
+                        Verifies host <code className="text-slate-300">ClusterIssuer</code> exists before provisioning and mirrors certificates to <code className="text-slate-300">istio-system</code>.
+                      </p>
+                    </div>
+                    <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800 space-y-1">
+                      <span className="text-purple-400 font-bold block">HA & Standard Replica Scaling</span>
+                      <p className="text-slate-400 font-sans text-[11px]">
+                        Provisions <strong>3 istiod & 3 ingress gateway replicas</strong> in HA mode; 1 replica each in standard mode.
+                      </p>
+                    </div>
+                    <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800 space-y-1">
+                      <span className="text-amber-400 font-bold block">Optional Sidecar Service Mesh</span>
+                      <p className="text-slate-400 font-sans text-[11px]">
+                        Mesh disabled by default (<code className="text-slate-300">meshEnabled: false</code>) for lightweight operation; easily enabled for zero-trust mTLS.
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
-                  <span className="text-amber-400 font-bold block">4. Envoy Ingress Gateway & Redirect</span>
-                  <p className="text-slate-400 font-sans text-[11px]">
-                    Terminates port 80 and issues strict 301 redirects to HTTPS 443, routing tenant traffic to internal services.
-                  </p>
+              </div>
+
+              {/* Comparison Table */}
+              <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5">
+                <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-cyan-400" />
+                  Ingress Stack Feature Comparison
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="border-b border-cyber-800 text-slate-400 text-[11px]">
+                        <th className="pb-2.5 font-semibold">Capability</th>
+                        <th className="pb-2.5 font-semibold text-blue-400">Kubernetes Gateway API</th>
+                        <th className="pb-2.5 font-semibold text-cyan-400">Istio Service Mesh</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-cyber-800/60 text-slate-300 text-[11px]">
+                      <tr>
+                        <td className="py-2.5 font-sans font-medium text-white">API Specification</td>
+                        <td className="py-2.5 text-blue-300">gateway.networking.k8s.io (SIG-Network)</td>
+                        <td className="py-2.5 text-cyan-300">networking.istio.io (Istio Project)</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 font-sans font-medium text-white">Memory Footprint</td>
+                        <td className="py-2.5 text-emerald-400 font-semibold">Ultra-Light (~60MB RAM)</td>
+                        <td className="py-2.5 text-amber-400">Moderate (~350MB RAM)</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 font-sans font-medium text-white">In-Guest Control Plane</td>
+                        <td className="py-2.5 text-slate-300">None (Host Envoy Gateway managed)</td>
+                        <td className="py-2.5 text-slate-300">istiod discovery daemon</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 font-sans font-medium text-white">HA Replicas (High Availability)</td>
+                        <td className="py-2.5 text-slate-300">3x Envoy Gateway-Proxy</td>
+                        <td className="py-2.5 text-slate-300">3x istiod + 3x ingressgateway</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 font-sans font-medium text-white">Service Mesh & mTLS Sidecars</td>
+                        <td className="py-2.5 text-slate-400">Not supported (Ingress only)</td>
+                        <td className="py-2.5 text-emerald-400">Supported (meshEnabled: true)</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 font-sans font-medium text-white">Recommended For</td>
+                        <td className="py-2.5 text-blue-300 font-sans">Standard declarative routing, microservices, low resource usage</td>
+                        <td className="py-2.5 text-cyan-300 font-sans">Complex traffic management, zero-trust mTLS, canary rollouts</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Live Verification & CLI Snippets */}
+              <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-cyan-400" />
+                    Live CLI Verification & Seamless Switching Snippets
+                  </h3>
+                  <span className="text-[10px] font-mono text-slate-400">Run from host terminal</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Curl API Verification */}
+                  <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-mono text-purple-400 font-semibold">1. Test VirtualCluster API (via BackendTLSPolicy):</span>
+                      <button
+                        onClick={() => copyToClipboard('test-api', 'curl -k https://api.vc-dev.local/version')}
+                        className="flex items-center gap-1 text-[11px] font-mono text-cyan-400 hover:text-cyan-300"
+                      >
+                        {copiedSnippets['test-api'] ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                        <span>{copiedSnippets['test-api'] ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                    <code className="text-cyan-300 block bg-cyber-900 p-2 rounded-lg border border-cyber-800 font-mono text-[11px]">
+                      curl -k https://api.vc-dev.local/version
+                    </code>
+                  </div>
+
+                  {/* Curl HTTP Redirect Verification */}
+                  <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-mono text-emerald-400 font-semibold">2. Test Port 80 HTTP-to-HTTPS 301 Redirect:</span>
+                      <button
+                        onClick={() => copyToClipboard('test-redirect', 'curl -I http://vc-dev.local/')}
+                        className="flex items-center gap-1 text-[11px] font-mono text-cyan-400 hover:text-cyan-300"
+                      >
+                        {copiedSnippets['test-redirect'] ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                        <span>{copiedSnippets['test-redirect'] ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                    <code className="text-cyan-300 block bg-cyber-900 p-2 rounded-lg border border-cyber-800 font-mono text-[11px]">
+                      curl -I http://vc-dev.local/
+                    </code>
+                  </div>
+
+                  {/* Curl App Root Verification */}
+                  <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-mono text-cyan-400 font-semibold">3. Test Application Route (HTTPS 443):</span>
+                      <button
+                        onClick={() => copyToClipboard('test-app', 'curl -k https://vc-dev.local/')}
+                        className="flex items-center gap-1 text-[11px] font-mono text-cyan-400 hover:text-cyan-300"
+                      >
+                        {copiedSnippets['test-app'] ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                        <span>{copiedSnippets['test-app'] ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                    <code className="text-cyan-300 block bg-cyber-900 p-2 rounded-lg border border-cyber-800 font-mono text-[11px]">
+                      curl -k https://vc-dev.local/
+                    </code>
+                  </div>
+
+                  {/* Patch Ingress Switch */}
+                  <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-mono text-blue-400 font-semibold">4. Toggle Ingress Provider via Kubectl:</span>
+                      <button
+                        onClick={() => copyToClipboard('toggle-ingress', 'kubectl patch vc vc-dev -n vc-dev --type=\'merge\' -p \'{"spec":{"components":{"gatewayAPI":{"enabled":true},"istio":{"enabled":false}}}}\'')}
+                        className="flex items-center gap-1 text-[11px] font-mono text-cyan-400 hover:text-cyan-300"
+                      >
+                        {copiedSnippets['toggle-ingress'] ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                        <span>{copiedSnippets['toggle-ingress'] ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                    <code className="text-cyan-300 block bg-cyber-900 p-2 rounded-lg border border-cyber-800 font-mono text-[11px] truncate">
+                      kubectl patch vc vc-dev -n vc-dev --type='merge' -p '&#123;"spec":&#123;"components":&#123;"gatewayAPI":&#123;"enabled":true&#125;,"istio":&#123;"enabled":false&#125;&#125;&#125;&#125;'
+                    </code>
+                  </div>
                 </div>
               </div>
             </div>

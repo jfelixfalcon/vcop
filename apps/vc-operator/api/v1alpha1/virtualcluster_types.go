@@ -43,6 +43,7 @@ const (
 	ConditionSleeping              = "Sleeping"
 	ConditionRBACReady             = "RBACReady"
 	ConditionIstioReady            = "IstioReady"
+	ConditionGatewayAPIReady       = "GatewayAPIReady"
 	ConditionCertificateReady      = "CertificateReady"
 	ConditionCapacityAvailable     = "CapacityAvailable"
 	ConditionDisasterRecoveryReady = "DisasterRecoveryReady"
@@ -152,6 +153,88 @@ type IstioComponent struct {
 	HostRouting *HostRoutingConfig `json:"hostRouting,omitempty"`
 }
 
+// GatewayConfig defines settings for the Kubernetes Gateway API entrypoint proxy
+type GatewayConfig struct {
+	// +kubebuilder:default=true
+	Enabled bool `json:"enabled"`
+	// ServiceType defines Kubernetes service type for the gateway proxy (ClusterIP, LoadBalancer, NodePort)
+	// +kubebuilder:default="ClusterIP"
+	// +optional
+	ServiceType string `json:"serviceType,omitempty"`
+	// Replicas defines the replica count for the gateway proxy (defaults to 3 if highAvailability is true, otherwise 1)
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+	// Selector defines the pod label selector for the gateway proxy
+	// +optional
+	Selector map[string]string `json:"selector,omitempty"`
+}
+
+// GatewayHostRoutingConfig configures host-level Gateway API ingress routing and API passthrough
+type GatewayHostRoutingConfig struct {
+	// Enabled deploys host HTTPRoutes and API routing on the host Gateway
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled"`
+
+	// DefaultGateway is the host-side gateway reference (e.g. "envoy-gateway-system/eg")
+	// +kubebuilder:default="envoy-gateway-system/eg"
+	// +optional
+	DefaultGateway string `json:"defaultGateway,omitempty"`
+
+	// IngressGatewaySelector is the label selector for host ingress gateway pods
+	// +optional
+	IngressGatewaySelector map[string]string `json:"ingressGatewaySelector,omitempty"`
+
+	// ApiHost is the external hostname for the vCluster Kubernetes API (defaults to "api.<clusterName>.<baseDomain>")
+	// +optional
+	ApiHost string `json:"apiHost,omitempty"`
+}
+
+// GatewayAPIComponent configures the opinionated Kubernetes Gateway API entrypoint
+type GatewayAPIComponent struct {
+	// Enabled deploys Gateway API (CRDs, GatewayClass, Gateway, HTTPRoute) as the application entrypoint
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled"`
+
+	// Version defines the Gateway API version (default: "v1.2.0")
+	// +kubebuilder:default="v1.2.0"
+	// +optional
+	Version string `json:"version,omitempty"`
+
+	// GatewayClassName defines the GatewayClass to bind (default: "eg")
+	// +kubebuilder:default="eg"
+	// +optional
+	GatewayClassName string `json:"gatewayClassName,omitempty"`
+
+	// Replicas defines the replica count for the gateway proxy (defaults to 3 if highAvailability is true, otherwise 1)
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// GatewayConfig configuration
+	// +optional
+	GatewayConfig *GatewayConfig `json:"gatewayConfig,omitempty"`
+
+	// CertificateIssuer defines the cert-manager Issuer or ClusterIssuer name on the host cluster
+	// +optional
+	CertificateIssuer string `json:"certificateIssuer,omitempty"`
+
+	// CertificateIssuerKind defines Issuer or ClusterIssuer (default: ClusterIssuer)
+	// +kubebuilder:default="ClusterIssuer"
+	// +optional
+	CertificateIssuerKind string `json:"certificateIssuerKind,omitempty"`
+
+	// Hosts are the external hostnames for the Gateway and HTTPRoute (defaults to cluster FQDN)
+	// +optional
+	Hosts []string `json:"hosts,omitempty"`
+
+	// CertSecretName overrides the TLS secret name (defaults to <clusterName>-gateway-tls)
+	// +optional
+	CertSecretName string `json:"certSecretName,omitempty"`
+
+	// HostRouting configures host-level Gateway API routing and vCluster API passthrough
+	// +optional
+	HostRouting *GatewayHostRoutingConfig `json:"hostRouting,omitempty"`
+}
+
 // ComponentsSpec defines embedded add-ons for the virtual cluster
 type ComponentsSpec struct {
 	// +kubebuilder:default={enabled: true}
@@ -165,6 +248,10 @@ type ComponentsSpec struct {
 	// Istio configures the opinionated application entrypoint and service mesh stack
 	// +optional
 	Istio *IstioComponent `json:"istio,omitempty"`
+
+	// GatewayAPI configures the opinionated Kubernetes Gateway API application entrypoint
+	// +optional
+	GatewayAPI *GatewayAPIComponent `json:"gatewayAPI,omitempty"`
 }
 
 // SyncSpec configures resource synchronization from vcluster to host
@@ -581,6 +668,10 @@ type ComponentVersionsStatus struct {
 	// Istio reflects the active Istio ingress & mesh version
 	// +optional
 	Istio string `json:"istio,omitempty"`
+
+	// GatewayAPI reflects the active Gateway API entrypoint version
+	// +optional
+	GatewayAPI string `json:"gatewayAPI,omitempty"`
 }
 
 // +kubebuilder:object:root=true

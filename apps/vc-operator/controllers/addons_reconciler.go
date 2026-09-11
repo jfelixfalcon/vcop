@@ -327,6 +327,10 @@ func (r *AddonsReconciler) reconcileCoreDNS(ctx context.Context, vc *v1alpha1.Vi
        lameduck 5s
     }
     ready
+    rewrite stop {
+        name regex (.*)\.svc\.?$ {1}.svc.cluster.local.
+        answer name (.*)\.svc\.cluster\.local\.?$ {1}.svc.
+    }
     rewrite name regex (.*)\.nodes\.vcluster\.com kubernetes.default.svc.cluster.local
     kubernetes cluster.local in-addr.arpa ip6.arpa {
        pods insecure

@@ -57,6 +57,7 @@ import { InstallAppModal } from './InstallAppModal';
 import { ClusterGroupModal } from './ClusterGroupModal';
 import { WorkloadMetricsView } from './WorkloadMetricsView';
 import { IstioModal } from './IstioModal';
+import { GatewayAPIModal } from './GatewayAPIModal';
 import { DisasterRecoveryTab } from './DisasterRecoveryTab';
 
 function parseK8sQuantity(val?: string): number {
@@ -99,7 +100,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [cluster, setCluster] = useState<VirtualCluster | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'telemetry' | 'workloads' | 'quota' | 'access' | 'apps' | 'dr' | 'yaml'>('telemetry');
-  const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'quota' | 'sleep' | 'rbac' | 'install-app' | 'group' | 'istio' | null>(null);
+  const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'quota' | 'sleep' | 'rbac' | 'install-app' | 'group' | 'istio' | 'gateway-api' | null>(null);
   const [kubeconfigInitialTab, setKubeconfigInitialTab] = useState<'admin' | 'oidc' | 'endpoint' | 'settings'>('admin');
   const [installAppTab, setInstallAppTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>('catalog');
   const [catalog, setCatalog] = useState<AppStoreCatalog | null>(null);
@@ -615,17 +616,26 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  CoreDNS, Metrics-Server, and Istio Ingress with Cert-Manager TLS termination.
+                  CoreDNS, Metrics-Server, and Ingress (Gateway API or Istio) with Cert-Manager TLS termination.
                 </p>
               </div>
               {canManage && (
-                <button
-                  onClick={() => setActiveModal('istio')}
-                  className="px-3 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all self-start sm:self-auto"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                  Configure Ingress
-                </button>
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <button
+                    onClick={() => setActiveModal('gateway-api')}
+                    className={`px-3 py-1.5 ${cluster.spec.components?.gatewayAPI?.enabled ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50' : 'bg-cyber-800 text-slate-300 border-cyber-700'} hover:bg-cyber-750 border text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all`}
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    Gateway API
+                  </button>
+                  <button
+                    onClick={() => setActiveModal('istio')}
+                    className={`px-3 py-1.5 ${cluster.spec.components?.istio?.enabled ? 'bg-cyan-950/80 text-cyan-300 border-cyan-500/50' : 'bg-cyber-800 text-slate-300 border-cyber-700'} hover:bg-cyber-750 border text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all`}
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    Istio
+                  </button>
+                </div>
               )}
             </div>
 
@@ -650,11 +660,18 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                 <span className="text-[11px] text-slate-400 font-mono block">metrics.k8s.io active</span>
               </div>
 
-              {/* Istio Gateway */}
+              {/* Ingress Gateway (Gateway API or Istio) */}
               <div className="p-3.5 bg-cyber-950/70 border border-cyber-800 rounded-xl space-y-1">
                 <span className="text-[10px] font-mono text-slate-500 uppercase block">Ingress Entrypoint</span>
                 <div className="flex items-center gap-2">
-                  {cluster.spec.components?.istio?.enabled ? (
+                  {cluster.spec.components?.gatewayAPI?.enabled ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-bold text-emerald-300">
+                        Gateway API {cluster.spec.highAvailability && <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-800 ml-1">HA (3x)</span>}
+                      </span>
+                    </>
+                  ) : cluster.spec.components?.istio?.enabled ? (
                     <>
                       <CheckCircle2 className="w-4 h-4 text-cyan-400" />
                       <span className="text-xs font-bold text-cyan-300">
@@ -669,7 +686,9 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   )}
                 </div>
                 <span className="text-[11px] text-slate-400 font-mono block">
-                  {cluster.spec.components?.istio?.enabled
+                  {cluster.spec.components?.gatewayAPI?.enabled
+                    ? (cluster.spec.highAvailability ? '3 Gateways (HA) • Port 80 & 443' : '1 Gateway • Port 80 & 443')
+                    : cluster.spec.components?.istio?.enabled
                     ? (cluster.spec.highAvailability ? '3 Gateways & 3 istiod • Port 80 & 443' : '1 Gateway & 1 istiod • Port 80 & 443')
                     : 'Disabled'}
                 </span>
@@ -679,11 +698,11 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <div className="p-3.5 bg-cyber-950/70 border border-cyber-800 rounded-xl space-y-1">
                 <span className="text-[10px] font-mono text-slate-500 uppercase block">TLS Certificate</span>
                 <div className="flex items-center gap-2">
-                  {cluster.spec.components?.istio?.certificateIssuer ? (
+                  {cluster.spec.components?.gatewayAPI?.certificateIssuer || cluster.spec.components?.istio?.certificateIssuer ? (
                     <>
                       <ShieldCheck className="w-4 h-4 text-emerald-400" />
                       <span className="text-xs font-bold text-white font-mono truncate">
-                        {cluster.spec.components.istio.certificateIssuer}
+                        {cluster.spec.components?.gatewayAPI?.certificateIssuer || cluster.spec.components?.istio?.certificateIssuer}
                       </span>
                     </>
                   ) : (
@@ -694,21 +713,30 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   )}
                 </div>
                 <span className="text-[11px] text-slate-400 font-mono block truncate">
-                  {cluster.spec.components?.istio?.certificateIssuer
+                  {cluster.spec.components?.gatewayAPI?.certificateIssuer
+                    ? `${cluster.spec.components.gatewayAPI.certificateIssuerKind || 'ClusterIssuer'} (Host)`
+                    : cluster.spec.components?.istio?.certificateIssuer
                     ? `${cluster.spec.components.istio.certificateIssuerKind || 'ClusterIssuer'} (Host)`
                     : 'Unencrypted HTTP'}
                 </span>
               </div>
 
-              {/* Host Istio Ingress & API Passthrough */}
+              {/* Host Ingress & API Passthrough */}
               <div className="p-3.5 bg-cyber-950/70 border border-cyber-800 rounded-xl space-y-1">
                 <span className="text-[10px] font-mono text-slate-500 uppercase block">Host Routing</span>
                 <div className="flex items-center gap-2">
-                  {cluster.spec.components?.istio?.hostRouting?.enabled ? (
+                  {cluster.spec.components?.gatewayAPI?.hostRouting?.enabled ? (
+                    <>
+                      <Network className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-bold text-emerald-300">
+                        Active (Gateway API)
+                      </span>
+                    </>
+                  ) : cluster.spec.components?.istio?.hostRouting?.enabled ? (
                     <>
                       <Network className="w-4 h-4 text-cyan-400" />
                       <span className="text-xs font-bold text-cyan-300">
-                        Active
+                        Active (Istio)
                       </span>
                     </>
                   ) : (
@@ -718,15 +746,53 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                     </>
                   )}
                 </div>
-                <span className="text-[11px] text-slate-400 font-mono block truncate" title={cluster.spec.components?.istio?.hostRouting?.apiHost || cluster.spec.components?.istio?.hostRouting?.defaultGateway || 'Host Entrypoint'}>
-                  {cluster.spec.components?.istio?.hostRouting?.enabled
-                    ? (cluster.spec.components.istio.hostRouting.apiHost || cluster.spec.components.istio.hostRouting.defaultGateway || 'Host Integration')
+                <span className="text-[11px] text-slate-400 font-mono block truncate" title={cluster.spec.components?.gatewayAPI?.hostRouting?.apiHost || cluster.spec.components?.gatewayAPI?.hostRouting?.defaultGateway || cluster.spec.components?.istio?.hostRouting?.apiHost || cluster.spec.components?.istio?.hostRouting?.defaultGateway || 'Host Entrypoint'}>
+                  {cluster.spec.components?.gatewayAPI?.hostRouting?.enabled
+                    ? (cluster.spec.components.gatewayAPI.hostRouting.apiHost || cluster.spec.components.gatewayAPI.hostRouting.defaultGateway || 'Envoy Gateway')
+                    : cluster.spec.components?.istio?.hostRouting?.enabled
+                    ? (cluster.spec.components.istio.hostRouting.apiHost || cluster.spec.components.istio.hostRouting.defaultGateway || 'Istio Gateway')
                     : 'Gateway Only'}
                 </span>
               </div>
             </div>
 
-            {/* Gateway & VirtualService Live Link */}
+            {/* Gateway API Live Link Banner */}
+            {cluster.spec.components?.gatewayAPI?.enabled && (
+              <div className="mt-3 pt-3 border-t border-cyber-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-300">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold">Main Entrypoint HTTPRoute:</span>
+                    <a
+                      href={`https://${cluster.spec.components?.gatewayAPI?.hosts?.[0] || cluster.spec.customEndpoint || `${cluster.name}.local`}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-mono text-emerald-400 hover:text-emerald-300 underline flex items-center gap-1"
+                    >
+                      https://{cluster.spec.components?.gatewayAPI?.hosts?.[0] || cluster.spec.customEndpoint || `${cluster.name}.local`}
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                  {cluster.spec.components?.gatewayAPI?.hostRouting?.enabled && cluster.spec.components.gatewayAPI.hostRouting.apiHost && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-slate-400">API Host:</span>
+                      <span className="font-mono text-emerald-300">
+                        https://{cluster.spec.components.gatewayAPI.hostRouting.apiHost}:443
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] font-mono text-slate-500">
+                    Host Routing: {cluster.spec.components?.gatewayAPI?.hostRouting?.enabled ? 'Active (Gateway API)' : 'Disabled'}
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-500">
+                    GatewayClass: {cluster.spec.components?.gatewayAPI?.gatewayClassName || 'eg'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Istio Live Link Banner */}
             {cluster.spec.components?.istio?.enabled && (
               <div className="mt-3 pt-3 border-t border-cyber-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-300">
@@ -2028,6 +2094,18 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             <IstioModal
               cluster={cluster}
               isOpen={activeModal === 'istio'}
+              onClose={() => setActiveModal(null)}
+              onSuccess={(updated) => {
+                setCluster(updated);
+                fetchCluster();
+              }}
+            />
+          )}
+
+          {activeModal === 'gateway-api' && (
+            <GatewayAPIModal
+              cluster={cluster}
+              isOpen={activeModal === 'gateway-api'}
               onClose={() => setActiveModal(null)}
               onSuccess={(updated) => {
                 setCluster(updated);

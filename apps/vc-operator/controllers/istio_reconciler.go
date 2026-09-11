@@ -92,8 +92,16 @@ func NewIstioReconciler(hostClient client.Client, addonsRec *AddonsReconciler) *
 
 // ExtractClusterHost resolves the primary FQDN / host to use for the ingress entrypoint
 func (r *IstioReconciler) ExtractClusterHost(vc *v1alpha1.VirtualCluster) string {
-	if vc.Spec.Components.Istio != nil && len(vc.Spec.Components.Istio.Hosts) > 0 && vc.Spec.Components.Istio.Hosts[0] != "" {
-		return vc.Spec.Components.Istio.Hosts[0]
+	if vc.Spec.Components.Istio != nil && len(vc.Spec.Components.Istio.Hosts) > 0 {
+		for _, h := range vc.Spec.Components.Istio.Hosts {
+			trimmed := strings.TrimSpace(h)
+			if trimmed != "" && !strings.HasPrefix(trimmed, "*.") {
+				return trimmed
+			}
+		}
+		if vc.Spec.Components.Istio.Hosts[0] != "" {
+			return strings.TrimPrefix(strings.TrimSpace(vc.Spec.Components.Istio.Hosts[0]), "*.")
+		}
 	}
 
 	if customEp, ok := vc.Annotations["vops.gitops.io/custom-endpoint"]; ok && customEp != "" {
@@ -162,7 +170,7 @@ func (r *IstioReconciler) ValidateCertManagerIssuer(ctx context.Context, vc *v1a
 // ReconcileIstio manages the complete lifecycle of Istio and Cert-Manager TLS inside the virtual cluster
 func (r *IstioReconciler) ReconcileIstio(ctx context.Context, vc *v1alpha1.VirtualCluster) (bool, error) {
 	if vc.Spec.Components.Istio == nil || !vc.Spec.Components.Istio.Enabled {
-		_ = r.cleanupHostRouting(ctx, vc)
+		_ = r.CleanupAllIstio(ctx, vc)
 		return true, nil
 	}
 
@@ -353,8 +361,13 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 		Rules: []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{""},
-				Resources: []string{"endpoints", "pods", "services", "namespaces", "nodes", "secrets", "configmaps"},
+				Resources: []string{"endpoints", "pods", "services", "namespaces", "nodes"},
 				Verbs:     []string{"get", "list", "watch"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"secrets", "configmaps"},
+				Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
 			},
 			{
 				APIGroups: []string{"discovery.k8s.io"},
@@ -371,9 +384,54 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 				Resources: []string{"*"},
 				Verbs:     []string{"*"},
 			},
+			{
+				APIGroups: []string{"coordination.k8s.io"},
+				Resources: []string{"leases"},
+				Verbs:     []string{"get", "list", "watch", "create", "update", "patch", "delete"},
+			},
+			{
+				APIGroups: []string{"apiextensions.k8s.io"},
+				Resources: []string{"customresourcedefinitions"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
+			{
+				APIGroups: []string{"networking.k8s.io"},
+				Resources: []string{"ingressclasses", "ingresses"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
+			{
+				APIGroups: []string{"gateway.networking.k8s.io"},
+				Resources: []string{"*"},
+				Verbs:     []string{"*"},
+			},
+			{
+				APIGroups: []string{"authentication.k8s.io"},
+				Resources: []string{"tokenreviews"},
+				Verbs:     []string{"create"},
+			},
+			{
+				APIGroups: []string{"authorization.k8s.io"},
+				Resources: []string{"subjectaccessreviews"},
+				Verbs:     []string{"create"},
+			},
+			{
+				APIGroups: []string{"admissionregistration.k8s.io"},
+				Resources: []string{"mutatingwebhookconfigurations", "validatingwebhookconfigurations"},
+				Verbs:     []string{"get", "list", "watch", "update"},
+			},
 		},
 	}
-	if err := vClient.Create(ctx, cr); err != nil && !apierrors.IsAlreadyExists(err) {
+	existingCR := &rbacv1.ClusterRole{}
+	if err := vClient.Get(ctx, types.NamespacedName{Name: cr.Name}, existingCR); err == nil {
+		existingCR.Rules = cr.Rules
+		if err := vClient.Update(ctx, existingCR); err != nil && !apierrors.IsConflict(err) {
+			return err
+		}
+	} else if apierrors.IsNotFound(err) {
+		if err := vClient.Create(ctx, cr); err != nil && !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+	} else {
 		return err
 	}
 
@@ -451,6 +509,7 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 								{Name: "REVISION", Value: "default"},
 								{Name: "PILOT_ENABLE_STATUS", Value: "true"},
 								{Name: "PILOT_ENABLE_INBOUND_PASSTHROUGH", Value: "1"},
+								{Name: "PILOT_ENABLE_GATEWAY_API", Value: "false"},
 							},
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
@@ -479,11 +538,8 @@ func (r *IstioReconciler) reconcileIstiod(ctx context.Context, vc *v1alpha1.Virt
 			existingDep.Spec.Replicas = &replicas
 			updated = true
 		}
-		if len(existingDep.Spec.Template.Spec.Containers) > 0 &&
-			existingDep.Spec.Template.Spec.Containers[0].Image != dep.Spec.Template.Spec.Containers[0].Image {
-			existingDep.Spec.Template = dep.Spec.Template
-			updated = true
-		}
+		existingDep.Spec.Template = dep.Spec.Template
+		updated = true
 		if updated {
 			if err := vClient.Update(ctx, existingDep); err != nil && !apierrors.IsConflict(err) {
 				return err
@@ -645,8 +701,10 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 							},
 							Env: []corev1.EnvVar{
 								{Name: "JWT_POLICY", Value: "third-party-jwt"},
-								{Name: "PILOT_CERT_PROVIDER", Value: "none"},
-								{Name: "PROXY_CONFIG", Value: "discoveryAddress: istiod.istio-system.svc:15010\ncontrolPlaneAuthPolicy: NONE\n"},
+								{Name: "PILOT_CERT_PROVIDER", Value: "istiod"},
+								{Name: "CA_ADDR", Value: "istiod.istio-system.svc:15012"},
+								{Name: "PROXY_CONFIG", Value: "discoveryAddress: istiod.istio-system.svc:15012\n"},
+								{Name: "ISTIO_META_CLUSTER_ID", Value: "Kubernetes"},
 								{
 									Name: "POD_NAME",
 									ValueFrom: &corev1.EnvVarSource{
@@ -660,6 +718,10 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 									},
 								},
 							},
+							VolumeMounts: []corev1.VolumeMount{
+								{Name: "istio-token", MountPath: "/var/run/secrets/tokens"},
+								{Name: "istio-ca-root-cert", MountPath: "/var/run/secrets/istio"},
+							},
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -668,6 +730,35 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 								Limits: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse("1000m"),
 									corev1.ResourceMemory: resource.MustParse("512Mi"),
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "istio-token",
+							VolumeSource: corev1.VolumeSource{
+								Projected: &corev1.ProjectedVolumeSource{
+									Sources: []corev1.VolumeProjection{
+										{
+											ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+												Audience:          "istio-ca",
+												ExpirationSeconds: func(i int64) *int64 { return &i }(43200),
+												Path:              "istio-token",
+											},
+										},
+									},
+								},
+							},
+						},
+						{
+							Name: "istio-ca-root-cert",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "istio-ca-root-cert",
+									},
+									Optional: ptrBool(true),
 								},
 							},
 						},
@@ -687,11 +778,8 @@ func (r *IstioReconciler) reconcileIngressGateway(ctx context.Context, vc *v1alp
 			existingDep.Spec.Replicas = &replicas
 			updated = true
 		}
-		if len(existingDep.Spec.Template.Spec.Containers) > 0 &&
-			existingDep.Spec.Template.Spec.Containers[0].Image != dep.Spec.Template.Spec.Containers[0].Image {
-			existingDep.Spec.Template = dep.Spec.Template
-			updated = true
-		}
+		existingDep.Spec.Template = dep.Spec.Template
+		updated = true
 		if updated {
 			if err := vClient.Update(ctx, existingDep); err != nil && !apierrors.IsConflict(err) {
 				return err
@@ -769,7 +857,7 @@ func (r *IstioReconciler) reconcileGateway(ctx context.Context, vc *v1alpha1.Vir
 			"spec": map[string]interface{}{
 				"selector": gwSelector,
 				"servers": []interface{}{
-					// Port 80 HTTP with automatic Upgrade/Redirect to 443 HTTPS
+					// Port 80 HTTP
 					map[string]interface{}{
 						"port": map[string]interface{}{
 							"number":   int64(80),
@@ -777,9 +865,6 @@ func (r *IstioReconciler) reconcileGateway(ctx context.Context, vc *v1alpha1.Vir
 							"protocol": "HTTP",
 						},
 						"hosts": []interface{}{hostFQDN, "*"},
-						"tls": map[string]interface{}{
-							"httpsRedirect": true,
-						},
 					},
 					// Port 443 HTTPS using Cert-Manager TLS Secret
 					map[string]interface{}{
@@ -939,9 +1024,20 @@ func (r *IstioReconciler) reconcileCRDs(ctx context.Context, dyn dynamic.Interfa
 					"scope": "Namespaced",
 					"versions": []interface{}{
 						map[string]interface{}{
-							"name":    "v1beta1",
+							"name":    "v1",
 							"served":  true,
 							"storage": true,
+							"schema": map[string]interface{}{
+								"openAPIV3Schema": map[string]interface{}{
+									"type":                                 "object",
+									"x-kubernetes-preserve-unknown-fields": true,
+								},
+							},
+						},
+						map[string]interface{}{
+							"name":    "v1beta1",
+							"served":  true,
+							"storage": false,
 							"schema": map[string]interface{}{
 								"openAPIV3Schema": map[string]interface{}{
 									"type":                                 "object",
@@ -965,9 +1061,18 @@ func (r *IstioReconciler) reconcileCRDs(ctx context.Context, dyn dynamic.Interfa
 			},
 		}
 
-		_, err := dyn.Resource(crdGVR).Create(ctx, crd, metav1.CreateOptions{})
-		if err != nil && !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("failed creating CRD %s: %w", c.name, err)
+		existingCRD, err := dyn.Resource(crdGVR).Get(ctx, c.name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err = dyn.Resource(crdGVR).Create(ctx, crd, metav1.CreateOptions{})
+			if err != nil && !apierrors.IsAlreadyExists(err) {
+				return fmt.Errorf("failed creating CRD %s: %w", c.name, err)
+			}
+		} else if err == nil {
+			crd.SetResourceVersion(existingCRD.GetResourceVersion())
+			_, err = dyn.Resource(crdGVR).Update(ctx, crd, metav1.UpdateOptions{})
+			if err != nil && !apierrors.IsConflict(err) {
+				return fmt.Errorf("failed updating CRD %s: %w", c.name, err)
+			}
 		}
 	}
 	return nil
@@ -1180,17 +1285,20 @@ func (r *IstioReconciler) reconcileHostRouting(ctx context.Context, vc *v1alpha1
 	targetHost := fmt.Sprintf("%s.%s.svc.%s", hostSvcName, vc.Namespace, clusterDomain)
 
 	// 1. Host DestinationRule
-	tlsPolicy := map[string]interface{}{
-		"mode": "MUTUAL",
-	}
+	tlsPolicy := map[string]interface{}{}
 	if tlsSecretName != "" {
+		tlsPolicy["mode"] = "MUTUAL"
 		tlsPolicy["credentialName"] = tlsSecretName
 	} else {
 		tlsPolicy["mode"] = "SIMPLE"
 		tlsPolicy["insecureSkipVerify"] = true
-		if hostFQDN != "" {
-			tlsPolicy["sni"] = hostFQDN
-		}
+	}
+	sniHost := hostFQDN
+	if strings.HasPrefix(sniHost, "*.") {
+		sniHost = strings.TrimPrefix(sniHost, "*.")
+	}
+	if sniHost != "" {
+		tlsPolicy["sni"] = sniHost
 	}
 
 	dr := &unstructured.Unstructured{}
@@ -1414,18 +1522,21 @@ func (r *IstioReconciler) cleanupHostRouting(ctx context.Context, vc *v1alpha1.V
 	resources := []struct {
 		gvk  schema.GroupVersionKind
 		name string
+		ns   string
 	}{
-		{destinationRuleGVK, fmt.Sprintf("%s-guest-gateway", vc.Name)},
-		{virtualServiceGVK, fmt.Sprintf("%s-host-entrypoint", vc.Name)},
-		{gatewayGVK, fmt.Sprintf("%s-api-gateway", vc.Name)},
-		{virtualServiceGVK, fmt.Sprintf("%s-api-entrypoint", vc.Name)},
+		{destinationRuleGVK, fmt.Sprintf("%s-guest-gateway", vc.Name), vc.Namespace},
+		{virtualServiceGVK, fmt.Sprintf("%s-host-entrypoint", vc.Name), vc.Namespace},
+		{gatewayGVK, fmt.Sprintf("%s-api-gateway", vc.Name), vc.Namespace},
+		{gatewayGVK, fmt.Sprintf("%s-api-gateway", vc.Name), "istio-system"},
+		{virtualServiceGVK, fmt.Sprintf("%s-api-entrypoint", vc.Name), vc.Namespace},
+		{virtualServiceGVK, fmt.Sprintf("%s-api-entrypoint", vc.Name), "istio-system"},
 	}
 
 	for _, res := range resources {
 		u := &unstructured.Unstructured{}
 		u.SetGroupVersionKind(res.gvk)
 		u.SetName(res.name)
-		u.SetNamespace(vc.Namespace)
+		u.SetNamespace(res.ns)
 		err := r.hostClient.Delete(ctx, u)
 		if err != nil && !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
 			// ignore not found or missing CRD
@@ -1434,7 +1545,7 @@ func (r *IstioReconciler) cleanupHostRouting(ctx context.Context, vc *v1alpha1.V
 	return nil
 }
 
-// CleanupAllIstio cleans up all host routing resources, cert-manager certificates, and TLS secrets
+// CleanupAllIstio cleans up all host routing resources, cert-manager certificates, TLS secrets, and in-guest Istio resources
 func (r *IstioReconciler) CleanupAllIstio(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
 	_ = r.cleanupHostRouting(ctx, vc)
 
@@ -1458,6 +1569,60 @@ func (r *IstioReconciler) CleanupAllIstio(ctx context.Context, vc *v1alpha1.Virt
 		},
 	}
 	_ = r.hostClient.Delete(ctx, tlsSec)
+
+	// Clean up in-guest Istio components if cluster is reachable
+	if r.addonsRec != nil {
+		vClient, dynClient, err := r.addonsRec.GetVirtualClusterClients(ctx, vc)
+		if err == nil && vClient != nil {
+			_ = r.cleanupGuestIstioResources(ctx, vc, vClient, dynClient)
+		}
+	}
+
+	return nil
+}
+
+func (r *IstioReconciler) cleanupGuestIstioResources(ctx context.Context, vc *v1alpha1.VirtualCluster, vClient client.Client, dynClient dynamic.Interface) error {
+	// 1. Delete in-guest Deployments immediately with background propagation so pods terminate
+	depNames := []string{"istio-ingressgateway", "istiod"}
+	for _, name := range depNames {
+		dep := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "istio-system",
+			},
+		}
+		_ = vClient.Delete(ctx, dep, client.PropagationPolicy(metav1.DeletePropagationBackground))
+	}
+
+	// 2. Delete in-guest Services
+	svcNames := []string{"istio-ingressgateway", "istiod"}
+	for _, name := range svcNames {
+		svc := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "istio-system",
+			},
+		}
+		_ = vClient.Delete(ctx, svc)
+	}
+
+	// 3. Delete in-guest Gateways & VirtualServices
+	if dynClient != nil {
+		_ = dynClient.Resource(gatewayGVR).Namespace("istio-system").Delete(ctx, "default-gateway", metav1.DeleteOptions{})
+		_ = dynClient.Resource(virtualServiceGVR).Namespace("istio-system").Delete(ctx, "main-entrypoint", metav1.DeleteOptions{})
+	}
+
+	// 4. Delete cluster-scoped RBAC
+	_ = vClient.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "istiod-clusterrolebinding"}})
+	_ = vClient.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "istiod-clusterrole"}})
+
+	// 5. Delete guest namespace istio-system
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "istio-system",
+		},
+	}
+	_ = vClient.Delete(ctx, ns, client.PropagationPolicy(metav1.DeletePropagationBackground))
 
 	return nil
 }

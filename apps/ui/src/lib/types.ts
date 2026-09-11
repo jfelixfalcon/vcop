@@ -186,6 +186,28 @@ export interface VirtualCluster {
         certSecretName?: string;
         hostRouting?: HostRoutingConfig;
       };
+      gatewayAPI?: {
+        enabled: boolean;
+        version?: string;
+        gatewayClassName?: string;
+        replicas?: number;
+        gatewayConfig?: {
+          enabled?: boolean;
+          serviceType?: string;
+          replicas?: number;
+          selector?: Record<string, string>;
+        };
+        certificateIssuer?: string;
+        certificateIssuerKind?: string;
+        hosts?: string[];
+        certSecretName?: string;
+        hostRouting?: {
+          enabled: boolean;
+          defaultGateway?: string;
+          ingressGatewaySelector?: Record<string, string>;
+          apiHost?: string;
+        };
+      };
     };
     sync: {
       pods: boolean;
@@ -225,6 +247,7 @@ export interface VirtualCluster {
       coreDNS?: string;
       metricsServer?: string;
       istio?: string;
+      gatewayAPI?: string;
     };
     disasterRecovery?: DisasterRecoveryStatus;
   };
@@ -359,7 +382,7 @@ export interface InstalledApp {
 
 export type VersionTag = 'default' | 'stable' | 'lts' | 'preview' | 'deprecated';
 
-export type VersionCategory = 'k8s' | 'vcluster' | 'etcd' | 'coredns' | 'metricsServer' | 'istio';
+export type VersionCategory = 'k8s' | 'vcluster' | 'etcd' | 'coredns' | 'metricsServer' | 'istio' | 'gatewayAPI';
 
 export interface ImagePatterns {
   k8s?: string;
@@ -368,6 +391,7 @@ export interface ImagePatterns {
   coredns?: string;
   metricsServer?: string;
   istio?: string;
+  gatewayAPI?: string;
   [key: string]: string | undefined;
 }
 
@@ -388,6 +412,7 @@ export interface VersionRegistry {
   coreDNSVersions?: VersionItem[];
   metricsServerVersions?: VersionItem[];
   istioVersions?: VersionItem[];
+  gatewayAPIVersions?: VersionItem[];
   imagePatterns?: ImagePatterns;
   updatedAt: string;
 }
@@ -639,6 +664,18 @@ export interface ClusterBaseline {
     serviceType?: string;
     ingressGatewaySelector?: Record<string, string>;
     hostRouting?: HostRoutingConfig;
+  };
+  gatewayAPI?: {
+    enabled: boolean;
+    gatewayClassName?: string;
+    certificateIssuer?: string;
+    certificateIssuerKind?: 'ClusterIssuer' | 'Issuer';
+    serviceType?: string;
+    hostRouting?: {
+      enabled: boolean;
+      defaultGateway?: string;
+      apiHost?: string;
+    };
   };
   disasterRecovery: {
     enabled: boolean;
