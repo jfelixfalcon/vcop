@@ -2272,29 +2272,33 @@ appStore:
       )}
 
       {/* VCS: App Version Control Modal */}
-      <AppVCSModal
-        app={vcsApp}
-        isOpen={isAppVCSOpen && Boolean(vcsApp)}
-        onClose={() => {
-          setIsAppVCSOpen(false);
-          setVcsApp(null);
-        }}
-        onRollbackSuccess={fetchCatalog}
-        isAdmin={isAdmin}
-      />
+      {vcsApp && (
+        <AppVCSModal
+          app={vcsApp}
+          isOpen={isAppVCSOpen}
+          onClose={() => {
+            setIsAppVCSOpen(false);
+            setVcsApp(null);
+          }}
+          onRollbackSuccess={fetchCatalog}
+          isAdmin={isAdmin}
+        />
+      )}
 
       {/* VCS: Group Version Control Modal */}
-      <GroupVCSModal
-        group={vcsGroup}
-        catalogApps={catalog?.apps || []}
-        isOpen={isGroupVCSOpen && Boolean(vcsGroup)}
-        onClose={() => {
-          setIsGroupVCSOpen(false);
-          setVcsGroup(null);
-        }}
-        onRollbackSuccess={fetchCatalog}
-        isAdmin={isAdmin}
-      />
+      {vcsGroup && (
+        <GroupVCSModal
+          group={vcsGroup}
+          catalogApps={catalog?.apps || []}
+          isOpen={isGroupVCSOpen}
+          onClose={() => {
+            setIsGroupVCSOpen(false);
+            setVcsGroup(null);
+          }}
+          onRollbackSuccess={fetchCatalog}
+          isAdmin={isAdmin}
+        />
+      )}
 
       {/* VCS: Platform-Wide GitOps Commit History Modal */}
       <GlobalVCSModal

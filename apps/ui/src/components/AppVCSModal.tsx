@@ -23,7 +23,7 @@ import type { AppDefinition, AppRevisionSnapshot, DiffLine } from '../lib/types'
 import { ModalPortal } from './ModalPortal';
 
 interface Props {
-  app: AppDefinition;
+  app: AppDefinition | null;
   isOpen: boolean;
   onClose: () => void;
   onRollbackSuccess: () => void;
@@ -51,6 +51,7 @@ export const AppVCSModal: React.FC<Props> = ({
   const [confirmRollback, setConfirmRollback] = useState(false);
 
   const fetchRevisions = async () => {
+    if (!app) return;
     setLoading(true);
     try {
       const res = await fetch(`/api/appstore/vcs/apps/${app.id}`);
@@ -71,14 +72,14 @@ export const AppVCSModal: React.FC<Props> = ({
   };
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && app) {
       fetchRevisions();
     }
-  }, [isOpen, app.id]);
+  }, [isOpen, app?.id]);
 
   // Compute text diff when selected revision changes
   useEffect(() => {
-    if (!selectedRev) return;
+    if (!selectedRev || !app) return;
 
     // Diff selected rev against current app definition
     computeDiff(selectedRev.manifests || '', app.manifests || '').then(setDiffLines);
@@ -161,7 +162,7 @@ export const AppVCSModal: React.FC<Props> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || !app) return null;
 
   const isCurrentActive = selectedRev && (
     selectedRev.version === app.version &&

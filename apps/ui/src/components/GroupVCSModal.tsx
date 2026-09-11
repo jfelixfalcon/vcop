@@ -19,7 +19,7 @@ import type { AppGroup, GroupRevisionSnapshot, AppDefinition } from '../lib/type
 import { ModalPortal } from './ModalPortal';
 
 interface Props {
-  group: AppGroup;
+  group: AppGroup | null;
   catalogApps: AppDefinition[];
   isOpen: boolean;
   onClose: () => void;
@@ -45,6 +45,7 @@ export const GroupVCSModal: React.FC<Props> = ({
   const [confirmRollback, setConfirmRollback] = useState(false);
 
   const fetchRevisions = async () => {
+    if (!group) return;
     setLoading(true);
     try {
       const res = await fetch(`/api/appstore/vcs/groups/${group.id}`);
@@ -65,10 +66,10 @@ export const GroupVCSModal: React.FC<Props> = ({
   };
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && group) {
       fetchRevisions();
     }
-  }, [isOpen, group.id]);
+  }, [isOpen, group?.id]);
 
   const handleRollback = async () => {
     if (!selectedRev) return;
@@ -125,7 +126,7 @@ export const GroupVCSModal: React.FC<Props> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || !group) return null;
 
   return (
     <ModalPortal>
