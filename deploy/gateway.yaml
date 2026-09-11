@@ -1,0 +1,219 @@
+# Gateway API Deployment Manifest for Kind Cluster (.local domain & TLS-first)
+# Controller: Envoy Gateway (gateway.envoyproxy.io)
+# LoadBalancer Provider: MetalLB (Layer 2)
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+
+---
+# 1. Local Development Root CA & ClusterIssuer
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: local-dev-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: "Local Development Root CA"
+  secretName: local-dev-ca-keypair
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: local-ca-issuer
+spec:
+  ca:
+    secretName: local-dev-ca-keypair
+
+---
+# 2. TLS Certificates for Gateway & Keycloak
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-tls-cert
+  namespace: envoy-gateway-system
+spec:
+  secretName: gateway-tls-cert
+  issuerRef:
+    name: local-ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - "vcop.local"
+  - "keycloak.local"
+  - "*.local"
+  - "localhost"
+
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-tls-cert
+  namespace: default
+spec:
+  secretName: keycloak-tls-secret
+  issuerRef:
+    name: local-ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - "keycloak.local"
+  - "example-keycloak-service.default.svc.cluster.local"
+  - "example-keycloak-service.default.svc"
+  - "example-keycloak-service"
+  - "localhost"
+
+---
+# 3. Gateway Definition (HTTP -> HTTPS Redirect & TLS Listeners)
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: eg
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+  - name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: gateway-tls-cert
+    allowedRoutes:
+      namespaces:
+        from: All
+  - name: https-8443
+    port: 8443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: gateway-tls-cert
+    allowedRoutes:
+      namespaces:
+        from: All
+
+---
+# 4. HTTP-to-HTTPS Automatic 301 Redirects (Port 80)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: vcop-ui-redirect
+  namespace: vcop-system
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: http
+  hostnames:
+  - "vcop.local"
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect:
+        scheme: https
+        statusCode: 301
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak-redirect
+  namespace: default
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: http
+  hostnames:
+  - "keycloak.local"
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect:
+        scheme: https
+        statusCode: 301
+
+---
+# 5. HTTPS Application Routes
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: vcop-ui-route
+  namespace: vcop-system
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: https
+  hostnames:
+  - "vcop.local"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: vcop-ui
+      port: 80
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: keycloak-backend-tls
+  namespace: default
+spec:
+  targetRefs:
+  - group: ""
+    kind: Service
+    name: example-keycloak-service
+  validation:
+    caCertificateRefs:
+    - group: ""
+      kind: ConfigMap
+      name: keycloak-ca-cert
+    hostname: keycloak.local
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak-route
+  namespace: default
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: https
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: https-8443
+  hostnames:
+  - "keycloak.local"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: example-keycloak-service
+      port: 8443

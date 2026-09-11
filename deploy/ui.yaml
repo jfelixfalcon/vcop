@@ -19,7 +19,7 @@ spec:
       serviceAccountName: vcop-ui
       containers:
         - name: ui
-          image: vops/vc-operations-center:v1.4.6
+          image: vops/vc-operations-center:v1.4.11
           env:
             - name: HOST
               value: "0.0.0.0"
@@ -50,7 +50,7 @@ spec:
             - name: OIDC_ENABLED
               value: "true"
             - name: OIDC_ISSUER_URL
-              value: "https://keycloak.example.com:8443/realms/master"
+              value: "https://keycloak.local/realms/master"
             - name: OIDC_USERINFO_URL
               value: "" # Optional override; auto-discovered from issuerUrl if empty
             - name: OIDC_CLIENT_ID

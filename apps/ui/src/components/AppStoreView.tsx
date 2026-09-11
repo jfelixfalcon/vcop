@@ -261,16 +261,24 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
     setDeployError(null);
 
     try {
+      const targetClusterObj = availableClusters.find((c) => c.name === selectedTargetCluster);
+      const hostNamespace = targetClusterObj?.namespace;
+      const inClusterNamespace = deployNamespace.trim() || 'default';
+
       let payload: any;
       if (deployTargetApp) {
         payload = {
-          namespace: deployNamespace.trim() || 'default',
-          apps: [{ appId: deployTargetApp.id, customValues: deployCustomValues }],
+          hostNamespace,
+          targetNamespace: inClusterNamespace,
+          namespace: hostNamespace,
+          apps: [{ appId: deployTargetApp.id, customValues: deployCustomValues, targetNamespace: inClusterNamespace }],
         };
       } else if (deployTargetGroup) {
         payload = {
-          namespace: deployNamespace.trim() || 'default',
-          apps: deployTargetGroup.appIds.map((id) => ({ appId: id })),
+          hostNamespace,
+          targetNamespace: inClusterNamespace,
+          namespace: hostNamespace,
+          apps: deployTargetGroup.appIds.map((id) => ({ appId: id, targetNamespace: inClusterNamespace })),
         };
       } else {
         return;
@@ -314,6 +322,7 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
 
   useEffect(() => {
     fetchCatalog();
+    fetchClusters();
   }, []);
 
   const handleCopy = (text: string, key: string) => {

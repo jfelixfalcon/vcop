@@ -24,6 +24,7 @@ import {
   Moon,
   Sun,
   Lock,
+  BookOpen,
   Users,
   Mail,
   ShieldCheck,
@@ -1378,74 +1379,26 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             </div>
           </div>
 
-          {/* Permissions Matrix */}
-          <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6">
-            <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-              <Lock className="w-4 h-4 text-cyan-400" />
-              Role-Based Access Control Matrix
-            </h4>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left font-mono text-xs">
-                <thead>
-                  <tr className="border-b border-cyber-800 text-slate-400">
-                    <th className="pb-3 font-medium">Action / Operation</th>
-                    <th className="pb-3 font-medium text-cyan-400">Platform Admin</th>
-                    <th className="pb-3 font-medium text-amber-400">Developer Persona</th>
-                    <th className="pb-3 font-medium text-purple-400">Viewer Persona</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-cyber-800/40">
-                  {[
-                    { op: 'View Cluster Topology & Status', admin: true, dev: true, viewer: true },
-                    { op: 'Download / View Kubeconfig', admin: true, dev: true, viewer: true },
-                    { op: 'Deploy Applications from Catalog', admin: true, dev: true, viewer: false },
-                    { op: 'Dynamic Quota & Limit Adjustments', admin: true, dev: true, viewer: false },
-                    { op: 'Sleep / Wake Operations', admin: true, dev: true, viewer: false },
-                    { op: 'Kubernetes Distro Engine Upgrades', admin: true, dev: true, viewer: false },
-                    { op: 'Update RBAC & Access Delegation', admin: true, dev: true, viewer: false },
-                    { op: 'Disaster Recovery Snapshots & Restore', admin: true, dev: true, viewer: false },
-                    { op: 'Teardown / Delete Virtual Cluster', admin: true, dev: false, viewer: false },
-                    { op: 'Manage Registries, Baselines & AI', admin: true, dev: false, viewer: false },
-                  ].map((row, idx) => (
-                    <tr key={idx} className="hover:bg-cyber-800/20">
-                      <td className="py-2.5 font-sans font-medium text-slate-200">{row.op}</td>
-                      <td className="py-2.5">
-                        <span className="inline-flex items-center gap-1 text-emerald-400">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Allowed</span>
-                        </span>
-                      </td>
-                      <td className="py-2.5">
-                        {row.dev ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-400">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Allowed</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-rose-400">
-                            <XCircle className="w-3.5 h-3.5" />
-                            <span>Restricted</span>
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2.5">
-                        {row.viewer ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-400">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Allowed</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-rose-400">
-                            <XCircle className="w-3.5 h-3.5" />
-                            <span>Restricted</span>
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Documentation Notice for RBAC Matrix */}
+          <div className="bg-cyber-950 border border-cyber-800/80 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center shrink-0">
+                <BookOpen className="w-4 h-4 text-cyan-400" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider">Role-Based Access Control (RBAC) Matrix</h4>
+                <p className="text-[11px] font-mono text-slate-400 mt-0.5">
+                  The Persona Permissions Matrix and authorization policies have moved to Documentation.
+                </p>
+              </div>
             </div>
+            <a
+              href="/docs#rbac"
+              className="px-3 py-1.5 rounded-lg bg-cyber-900 hover:bg-cyber-850 border border-cyber-700 hover:border-cyan-500/50 text-cyan-400 hover:text-cyan-300 text-xs font-mono font-medium inline-flex items-center gap-1.5 transition-all shrink-0"
+            >
+              <span>View Docs Matrix</span>
+              <span>&rarr;</span>
+            </a>
           </div>
 
           {/* Kubernetes Metadata Storage Details */}

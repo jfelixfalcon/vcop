@@ -77,6 +77,13 @@ export async function executeAppDeployment(
     const internalKc = prepareInternalKubeconfig(rawKubeconfig, guestNamespace, clusterName, clusterNamespace);
     fs.writeFileSync(kcPath, internalKc, { mode: 0o600 });
 
+    // Pre-create target guest namespace if needed
+    if (guestNamespace && guestNamespace !== 'default' && guestNamespace !== 'kube-system') {
+      try {
+        await execFileAsync('kubectl', ['--kubeconfig', kcPath, 'create', 'namespace', guestNamespace], { env: defaultEnv, timeout: 15000 });
+      } catch {}
+    }
+
     // 1. Deploy manifests if defined
     let manifests = app.manifests;
     if ((!manifests || !manifests.trim()) && app.appId) {
@@ -258,9 +265,10 @@ export async function getInstalledApps(clusterName: string, namespace?: string):
  */
 export async function installAppsToCluster(
   clusterName: string,
-  appRequests: Array<{ appId: string; customValues?: string }>,
+  appRequests: Array<{ appId: string; customValues?: string; targetNamespace?: string }>,
   user?: UserSession | null,
-  namespace?: string
+  namespace?: string,
+  targetGuestNamespace?: string
 ): Promise<InstalledApp[]> {
   let targetNs = namespace;
   const currentCluster = await getVirtualCluster(clusterName, targetNs);
@@ -297,6 +305,7 @@ export async function installAppsToCluster(
     }
 
     const customValues = req.customValues !== undefined ? req.customValues : catalogApp.helm?.values;
+    const appGuestNs = req.targetNamespace || targetGuestNamespace || catalogApp.helm?.namespace || 'default';
 
     const installed: InstalledApp = {
       appId: catalogApp.id,
@@ -307,12 +316,12 @@ export async function installAppsToCluster(
       installedBy: installerName,
       status: 'Installing',
       customValues,
-      helm: catalogApp.helm ? { ...catalogApp.helm, values: customValues } : undefined,
+      helm: catalogApp.helm ? { ...catalogApp.helm, values: customValues, namespace: appGuestNs } : undefined,
       manifests: catalogApp.manifests,
     };
 
     // Execute actual deployment to the guest cluster
-    const deployResult = await executeAppDeployment(rawKubeconfig, installed, clusterName, targetNs);
+    const deployResult = await executeAppDeployment(rawKubeconfig, installed, clusterName, targetNs, appGuestNs);
     if (deployResult.success) {
       installed.status = 'Installed';
       installed.error = undefined;

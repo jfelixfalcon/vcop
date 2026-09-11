@@ -1,6 +1,7 @@
 ---
 import Navbar from '../components/Navbar.astro';
 import AIChatOverlay from '../components/AIChatOverlay';
+import { BookOpen } from 'lucide-react';
 
 interface Props {
   title?: string;
@@ -41,10 +42,22 @@ const {
     </main>
 
     <!-- Footer -->
-    <footer class="border-t border-cyber-800/80 bg-cyber-950/60 py-6 text-center text-xs font-mono text-slate-500">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
-        <span>vCluster Center of Operations (vCOp) • Powered by vCluster OSS</span>
-        <span class="text-slate-400">Kubernetes-Native Operator + Astro SSR</span>
+    <footer class="border-t border-cyber-800/80 bg-cyber-950/60 py-6 text-xs font-mono text-slate-500">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <span>vCluster Center of Operations (vCOp) • Powered by vCluster OSS</span>
+        </div>
+        <div class="flex items-center gap-4 text-slate-400">
+          <a
+            href="/docs"
+            class="inline-flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 transition-colors font-medium hover:underline"
+          >
+            <BookOpen class="w-3.5 h-3.5" />
+            <span>Documentation</span>
+          </a>
+          <span class="text-cyber-700 select-none">•</span>
+          <span>Kubernetes-Native Operator + Astro SSR</span>
+        </div>
       </div>
     </footer>
 

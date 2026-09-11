@@ -8,6 +8,7 @@ import {
   listClusterNamespaces,
   restartWorkload,
   scaleWorkload,
+  deleteWorkload,
   findWorkload,
   listAllDeployments,
   getClusterHardware,
@@ -15,6 +16,7 @@ import {
   type ClusterPodsSummary,
   type WorkloadRestartResult,
   type WorkloadScaleResult,
+  type WorkloadDeleteResult,
   type DeploymentSummary,
 } from './k8s-client';
 import {
@@ -60,7 +62,7 @@ export interface ActionPayload {
   kind: string;
   name: string;
   namespace: string;
-  status: 'success' | 'failed' | 'blocked';
+  status: 'success' | 'failed';
   message: string;
   policyReason?: string;
   restartedAt?: string;
@@ -216,7 +218,7 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
   const nsMatch = lower.match(/(?:in\s+namespace|\bnamespace\b|in\s+ns|\bns\b|\bin\b)\s+([a-zA-Z0-9_-]+)/);
   if (nsMatch) {
     const raw = nsMatch[1].trim();
-    if (!['the', 'all', 'a', 'this', 'our', 'my', 'cluster', 'total', 'namespace', 'ns', 'in'].includes(raw)) {
+    if (!['the', 'all', 'a', 'this', 'our', 'my', 'cluster', 'total', 'namespace', 'ns', 'in', 'kubernetes', 'k8s', 'here', 'prod', 'production', 'general', 'practice'].includes(raw)) {
       detectedNamespace = raw;
     }
   }
@@ -240,100 +242,31 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
     }
   }
 
-  // 0. Safety Guardrail: Prevent deleting any resources on Kubernetes via AI chat
-  const isDirectDeleteCommand = /\b(?:kubectl\s+delete|helm\s+(?:uninstall|delete))\b/i.test(lower);
-
-  const deleteVerbs = '(?:delete|destroy|remove|kill|terminate|prune|purge|wipe(?:\\s+out)?|drop|tear\\s+down|uninstall)';
-  const k8sResources = '(?:pods?|deployments?|deploy|statefulsets?|sts|daemonsets?|ds|replicasets?|rs|services?|svc|ingresses?|namespaces?|ns|virtual\\s*clusters?|vclusters?|clusters?|pvcs?|pvs?|persistentvolumes?(?:claims?)?|secrets?|configmaps?|cm|nodes?|crds?|workloads?|resources?|cronjobs?|jobs?|catalog|catalog\\s*apps?|everything|all)';
-
-  const isImperativeDelete =
-    new RegExp(`\\b${deleteVerbs}\\s+(?:the\\s+)?(?:all\\s+)?${k8sResources}\\b`, 'i').test(lower) ||
-    new RegExp(`\\b${deleteVerbs}\\s+(?:the\\s+)?([a-zA-Z0-9_-]+)\\s+${k8sResources}\\b`, 'i').test(lower) ||
-    new RegExp(`\\b(?:can\\s+you|please|could\\s+you|help\\s+me|i\\s+want\\s+to|how\\s+to|how\\s+do\\s+i|how\\s+can\\s+i)?\\s*${deleteVerbs}\\s+(?:the\\s+)?(?:all\\s+)?(?:it|this|them|everything|all|cluster|resources?)\\b`, 'i').test(lower) ||
-    new RegExp(`^(?:${deleteVerbs})\\b`, 'i').test(lower);
-
-  // Exclude non-destructive diagnostic inquiries about past events or informational questions (e.g. "why was the pod deleted?")
-  const isPastInquiry =
-    /\b(?:why|when|who|which)\s+(?:was|were|did|has|have)\b/i.test(lower) ||
-    /\b(?:history|log|logs|events?)\s+of\s+(?:deleted|terminated)/i.test(lower) ||
-    /\bwhat\s+happens\s+if\b/i.test(lower);
-
-  const isDeleteAction = (isDirectDeleteCommand || isImperativeDelete) && !isPastInquiry;
-
-  if (isDeleteAction) {
-    let targetResourceKind = 'Kubernetes Resource';
-    if (/\b(?:virtual\s*cluster|vcluster)\b/i.test(lower)) targetResourceKind = 'VirtualCluster';
-    else if (/\b(?:deployment|deploy)\b/i.test(lower)) targetResourceKind = 'Deployment';
-    else if (/\b(?:pod|pods)\b/i.test(lower)) targetResourceKind = 'Pod';
-    else if (/\b(?:statefulset|sts)\b/i.test(lower)) targetResourceKind = 'StatefulSet';
-    else if (/\b(?:daemonset|ds)\b/i.test(lower)) targetResourceKind = 'DaemonSet';
-    else if (/\b(?:service|svc)\b/i.test(lower)) targetResourceKind = 'Service';
-    else if (/\b(?:namespace|ns)\b/i.test(lower)) targetResourceKind = 'Namespace';
-    else if (/\b(?:pvc|pv|persistentvolume)\b/i.test(lower)) targetResourceKind = 'PersistentVolumeClaim';
-    else if (/\b(?:secret|secrets)\b/i.test(lower)) targetResourceKind = 'Secret';
-    else if (/\b(?:configmap|cm)\b/i.test(lower)) targetResourceKind = 'ConfigMap';
-    else if (/\b(?:node|nodes)\b/i.test(lower)) targetResourceKind = 'Node';
-
-    let targetResourceName: string | undefined;
-    const deleteNameMatch = lower.match(
-      /(?:delete|destroy|remove|kill|terminate|prune|purge|wipe|drop|uninstall)\s+(?:the\s+)?(?:deployment|deploy|pod|statefulset|sts|daemonset|ds|service|svc|namespace|ns|virtual\s*cluster|vcluster|pvc|secret|configmap)?\s*([a-zA-Z0-9_-]+)/i
-    );
-    if (deleteNameMatch && deleteNameMatch[1]) {
-      const candidate = deleteNameMatch[1].trim();
-      if (!['the', 'a', 'all', 'this', 'our', 'my', 'deployment', 'pod', 'namespace', 'vcluster', 'cluster', 'for', 'please', 'me', 'it', 'to', 'in', 'everything'].includes(candidate)) {
-        targetResourceName = candidate;
-      }
-    }
-
-    const scopeStr = targetResourceName
-      ? `${targetResourceKind} '${targetResourceName}'${detectedNamespace ? ` in namespace '${detectedNamespace}'` : ''}`
-      : `${targetResourceKind}s${detectedNamespace ? ` in namespace '${detectedNamespace}'` : ' across the cluster'}`;
-
-    const blockedPayload: ToolDataPayload = {
-      type: 'action',
-      action: {
-        type: 'delete',
-        kind: targetResourceKind,
-        name: targetResourceName || 'targeted-resource',
-        namespace: detectedNamespace || 'all-namespaces',
-        status: 'blocked',
-        message: `Deletion of ${scopeStr} was blocked. Resource deletion via AI Chat is strictly prohibited by platform security policy.`,
-        policyReason: 'AI Cyber-Copilot enforces read-only safety guardrails for cluster resources. Destructive deletion actions are disabled through the conversational interface to prevent accidental downtime and unauthorized data destruction.',
-      },
-    };
-
-    return {
-      role: 'assistant',
-      content: `[STATUS: BLOCKED 🛑]\n\n` +
-        `**Security Guardrail Enforcement**: Resource deletion via AI Cyber-Copilot is strictly prohibited by platform policy.\n\n` +
-        `### Operation Details\n` +
-        `- **Requested Action**: \`DELETE / TERMINATE\`\n` +
-        `- **Target Resource**: \`${scopeStr}\`\n` +
-        `- **Safety Status**: \`OPERATION BLOCKED 🛑\`\n` +
-        `- **Security Policy**: \`VCOP-SEC-GUARD-001 (Zero Destructive Conversational Actions)\`\n\n` +
-        `### Safety Rationale\n` +
-        `AI Cyber-Copilot is restricted from deleting, terminating, or modifying existing resources destructively. This safeguard eliminates accidental outages, unauthorized tenant removals, and unrecoverable data loss in production environments.\n\n` +
-        `### Authorized Deletion Procedures\n` +
-        `If this resource must be deleted or decommissioned, an authorized **Platform Administrator** must execute the change through formal governance workflows:\n` +
-        `1. **Virtual Cluster Operations Center UI**: Navigate to **Cluster Fleet** or **Baselines**, select the resource, and use the authenticated deletion modal (subject to administrator approval).\n` +
-        `2. **Authorized CLI**: Execute standard \`kubectl\` commands using direct administrator credentials with audit logging enabled:\n` +
-        `\`\`\`bash\n` +
-        `# Must be executed by an authorized Administrator with appropriate RBAC\n` +
-        `kubectl delete ${targetResourceKind.toLowerCase()} ${targetResourceName || '<name>'} ${detectedNamespace ? `-n ${detectedNamespace}` : ''}\n` +
-        `\`\`\`\n` +
-        `3. All deletions are permanently recorded in the Kubernetes API audit log.`,
-      model: 'vCOp Security Guardrail',
-      hardware: 'Safety Policy Interceptor',
-      toolData: blockedPayload,
-    };
-  }
-
-  // 1. Identify intent & action commands
+  // 1. Identify intent & action commands (restart, scale, delete)
   const isRestartAction = /\b(?:restart|reboot|bounce|rollout\s+restart)\b/i.test(lower);
   const isScaleAction = /\b(?:scale|resize)\b/i.test(lower);
-  const isActionQuery = isRestartAction || isScaleAction;
+
+  // Check if this is an informational / instructional inquiry rather than an imperative execution command
+  const isInstructionalInquiry =
+    /\b(?:how\s+(?:to|do|can)|why|what\s+is|what\s+are|explain|guide|tutorial|documentation|sample|example|write\s+(?:a\s+)?(?:yaml|manifest|script))\b/i.test(lower) ||
+    /\b(?:what\s+happens|when\s+should|difference\s+between)\b/i.test(lower);
+
+  const isDeleteExecution = !isInstructionalInquiry && /\b(?:delete|destroy|remove|kill|terminate|prune|uninstall)\b/i.test(lower);
+  const isActionQuery = isRestartAction || isScaleAction || isDeleteExecution;
 
   let targetWorkloadName: string | undefined;
+  let targetKind: string | undefined;
+
+  if (/\b(?:virtual\s*cluster|vcluster)\b/i.test(lower)) targetKind = 'VirtualCluster';
+  else if (/\b(?:deployment|deploy)\b/i.test(lower)) targetKind = 'Deployment';
+  else if (/\b(?:statefulset|sts)\b/i.test(lower)) targetKind = 'StatefulSet';
+  else if (/\b(?:daemonset|ds)\b/i.test(lower)) targetKind = 'DaemonSet';
+  else if (/\b(?:service|svc)\b/i.test(lower)) targetKind = 'Service';
+  else if (/\b(?:configmap|cm)\b/i.test(lower)) targetKind = 'ConfigMap';
+  else if (/\b(?:secret|secrets)\b/i.test(lower)) targetKind = 'Secret';
+  else if (/\b(?:namespace|ns)\b/i.test(lower)) targetKind = 'Namespace';
+  else if (/\b(?:pod|pods)\b/i.test(lower)) targetKind = 'Pod';
+
   if (isActionQuery) {
     const actionPatterns = [
       /(?:restart|reboot|bounce|rollout\s+restart)\s+(?:the\s+)?(?:deployment|deploy|statefulset|sts|daemonset|ds|pod)\s+([a-zA-Z0-9_-]+)/i,
@@ -342,13 +275,16 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
       /(?:scale|resize)\s+(?:the\s+)?(?:deployment|deploy|statefulset|sts)\s+([a-zA-Z0-9_-]+)/i,
       /(?:scale|resize)\s+(?:the\s+)?([a-zA-Z0-9_-]+)\s+(?:deployment|deploy|statefulset|sts)/i,
       /(?:scale|resize)\s+(?:the\s+)?([a-zA-Z0-9_-]+)/i,
+      /(?:delete|destroy|remove|kill|terminate|prune|uninstall)\s+(?:the\s+)?(?:deployment|deploy|statefulset|sts|daemonset|ds|service|svc|configmap|cm|secret|pod|vcluster|virtual\s*cluster|namespace|ns)\s+([a-zA-Z0-9_-]+)/i,
+      /(?:delete|destroy|remove|kill|terminate|prune|uninstall)\s+(?:the\s+)?([a-zA-Z0-9_-]+)\s+(?:deployment|deploy|statefulset|sts|daemonset|ds|service|svc|configmap|cm|secret|pod|vcluster|virtual\s*cluster|namespace|ns)/i,
+      /(?:delete|destroy|remove|kill|terminate|prune|uninstall)\s+(?:the\s+)?([a-zA-Z0-9_-]+)/i,
     ];
 
     for (const pat of actionPatterns) {
       const m = lower.match(pat);
       if (m && m[1]) {
         const candidate = m[1].trim();
-        if (!['the', 'a', 'this', 'our', 'my', 'deployment', 'statefulset', 'daemonset', 'pod', 'for', 'please', 'me', 'it', 'to'].includes(candidate)) {
+        if (!['the', 'a', 'this', 'our', 'my', 'deployment', 'statefulset', 'daemonset', 'pod', 'for', 'please', 'me', 'it', 'to', 'all', 'everything', 'resources', 'pods', 'deployments', 'workload', 'workloads', 'cluster'].includes(candidate)) {
           targetWorkloadName = candidate;
           break;
         }
@@ -364,17 +300,24 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
     }
   }
 
-  const isPodsQuery = !isActionQuery && /\b(?:pods?|containers?|workloads?|how\s+many\s+pods|deployments?|daemonsets?|statefulsets?)\b/i.test(lower);
-  const isMetricsQuery = !isActionQuery && !isPodsQuery && (/cpu|memory|mem|usage|stats|average|avg|peak|utilization|history|metric/i.test(lower) || (Boolean(detectedNamespace) && !isPodsQuery));
-  const isCapacityQuery = !isActionQuery && /capacity|headroom|allocat|starvat|quota|nodes?|physical/i.test(lower);
-  const isVClusterQuery = !isActionQuery && /virtual\s*cluster|vcluster|guest|tenan|mesh|istio/i.test(lower);
-  const isEventsQuery = !isActionQuery && /event|error|warning|crash|fail|backoff|oom|unhealthy/i.test(lower);
-  const isBackupQuery = !isActionQuery && /backup|snapshot|dr|disaster|restore|etcd/i.test(lower);
+  const isManifestOrGeneralQuestion =
+    /\b(?:write|create|generate|sample|example|template|scaffold|manifest|yaml)\b/i.test(lower) ||
+    isInstructionalInquiry;
+
+  const isPodsQuery = !isActionQuery && !isManifestOrGeneralQuestion &&
+    (/\b(?:show|get|list|check|view|count|status\s+of|how\s+many|running|failed|unhealthy)\s+(?:the\s+)?(?:pods?|containers?|workloads?|deployments?|statefulsets?|daemonsets?)\b/i.test(lower) ||
+     /\b(?:pods?|workloads?)\s+(?:status|health|overview|inventory|list)\b/i.test(lower) ||
+     /^(?:pods?|workloads?|deployments?)$/i.test(lower.trim()));
+  const isMetricsQuery = !isActionQuery && !isManifestOrGeneralQuestion && !isPodsQuery && (/cpu|memory|mem|usage|stats|average|avg|peak|utilization|history|metric/i.test(lower) || (Boolean(detectedNamespace) && !isPodsQuery));
+  const isCapacityQuery = !isActionQuery && !isManifestOrGeneralQuestion && /capacity|headroom|allocat|starvat|quota|nodes?|physical/i.test(lower);
+  const isVClusterQuery = !isActionQuery && !isManifestOrGeneralQuestion && /virtual\s*cluster|vcluster|guest|tenan|mesh|istio/i.test(lower);
+  const isEventsQuery = !isActionQuery && !isManifestOrGeneralQuestion && /event|error|warning|crash|fail|backoff|oom|unhealthy/i.test(lower);
+  const isBackupQuery = !isActionQuery && !isManifestOrGeneralQuestion && /backup|snapshot|dr|disaster|restore|etcd/i.test(lower);
 
   let toolPayload: ToolDataPayload | undefined;
   let contextSummary = '';
 
-  // TOOL -1: CLUSTER WORKLOAD ACTIONS (RESTART / SCALE)
+  // TOOL -1: CLUSTER WORKLOAD ACTIONS (RESTART / SCALE / DELETE)
   if (isActionQuery && targetWorkloadName) {
     if (isRestartAction) {
       try {
@@ -475,6 +418,51 @@ Resource Target: ${targetWorkloadName}
 Error: ${err.message}
 `;
       }
+    } else if (isDeleteExecution) {
+      try {
+        const result = await deleteWorkload(targetWorkloadName, detectedNamespace, targetKind);
+        toolPayload = {
+          type: 'action',
+          action: {
+            type: 'delete',
+            kind: result.kind,
+            name: result.name,
+            namespace: result.namespace,
+            status: 'success',
+            message: result.message,
+            cliCommand: result.cliCommand,
+          },
+        };
+
+        contextSummary += `\n[Cluster Action Execution Result]
+Action: Resource Deletion Executed
+Status: SUCCESS (200 OK)
+Resource: ${result.kind}/${result.name}
+Namespace: ${result.namespace}
+CLI Command: ${result.cliCommand}
+`;
+      } catch (err: any) {
+        toolPayload = {
+          type: 'action',
+          action: {
+            type: 'delete',
+            kind: targetKind || 'Resource',
+            name: targetWorkloadName,
+            namespace: detectedNamespace || 'default',
+            status: 'failed',
+            message: err.message,
+            cliCommand: `kubectl delete ${targetKind ? targetKind.toLowerCase() : 'pod'} ${targetWorkloadName} ${detectedNamespace ? `-n ${detectedNamespace}` : ''}`,
+          },
+        };
+
+        contextSummary += `\n[Cluster Action Execution Result]
+Action: Resource Deletion Attempted
+Status: FAILED / NOT FOUND
+Resource Target: ${targetWorkloadName}
+Namespace: ${detectedNamespace || 'default'}
+Error Message: ${err.message}
+`;
+      }
     }
   }
 
@@ -515,7 +503,7 @@ ${podSummary.items.slice(0, 15).map((p) => `  - ${p.namespace}/${p.name} [Phase:
   }
 
   // TOOL 1: METRICS QUERY
-  if (isMetricsQuery || (detectedNamespace && !isPodsQuery)) {
+  if (isMetricsQuery || (detectedNamespace && !isPodsQuery && !isManifestOrGeneralQuestion && !isActionQuery)) {
     const agg = await queryAggregateMetrics({
       namespace: detectedNamespace,
       hours,
@@ -707,26 +695,37 @@ ${backups.slice(0, 5).map((b) => `  - Cluster: ${b.vcluster}, Snapshot: ${b.snap
   const settings = await getAISettings();
   const health = await checkAiServiceHealth();
 
-  const systemPrompt = `You are vCOp Cyber-Copilot, an elite AI cluster intelligence engine embedded inside the Virtual Cluster Operations Center.
-Your mission is to deliver authoritative, executive-grade, beautifully structured Kubernetes telemetry analysis and operational insights.
+  const systemPrompt = `You are vCOp Copilot, a Staff Kubernetes Architect and Principal Site Reliability Engineer (SRE) embedded in the Virtual Cluster Operations Center.
+You possess world-class mastery across the entire cloud-native and Kubernetes ecosystem:
+- Core Architecture: kube-apiserver, etcd, kube-controller-manager, kube-scheduler, kubelet, CRI (containerd/CRI-O), CNI, CSI, and Linux kernel primitives (cgroups v1/v2, namespaces, seccomp, eBPF, iptables/IPVS).
+- Workloads & Controllers: Deployments, StatefulSets (headless services, volumeClaimTemplates, ordered/parallel rollouts), DaemonSets, Jobs, CronJobs, Custom Resource Definitions (CRDs), and Operator reconciliation patterns.
+- High Availability & Scheduling: PodDisruptionBudgets (PDB), nodeAffinity, podAffinity, podAntiAffinity, taints & tolerations, topologySpreadConstraints, PriorityClasses, preemption, HPA (Horizontal Pod Autoscaler with custom metrics), VPA, KEDA, and Cluster Autoscaler.
+- Container Hardening & Production Best Practices: Non-root execution (\`runAsNonRoot: true\`, \`runAsUser: 10001\`), \`readOnlyRootFilesystem: true\`, \`allowPrivilegeEscalation: false\`, dropping all Linux capabilities (\`drop: ["ALL"]\`), seccompProfile \`RuntimeDefault\`, ephemeral-storage limits, graceful termination (\`terminationGracePeriodSeconds\` with \`preStop\` sleep hook for zero-downtime draining), readiness/liveness/startup probes (httpGet, exec, tcpSocket, gRPC).
+- Networking & Service Mesh: Service topologies (ClusterIP, NodePort, LoadBalancer, ExternalName, Headless), Ingress Controllers (NGINX, Traefik, Envoy), Kubernetes Gateway API (GatewayClass, Gateway, HTTPRoute), Istio Service Mesh (Envoy sidecar proxy injection, Ambient mesh / ztunnel, VirtualService, DestinationRule, Gateway, PeerAuthentication mTLS STRICT/PERMISSIVE, AuthorizationPolicy), CoreDNS tuning, NetworkPolicies (default-deny, ingress/egress CIDR rules).
+- Multi-Tenancy & Virtual Clusters: vcluster (syncer architecture, virtual control plane isolation, host vs guest resource translation, tenant isolation, cross-cluster DNS and services), tenant quotas, LimitRanges, RBAC (ClusterRole, Role, RoleBinding, ServiceAccounts, OIDC tokens).
+- Deep Troubleshooting & Triage:
+  - CrashLoopBackOff & Exit Codes: 137 (OOMKilled - kernel OOM killer or cgroup memory limit), 1 (Application exception), 139 (Segfault), 143 (SIGTERM), 255.
+  - ImagePullBackOff, ErrImagePull, InvalidImageName, CrashLoopBackOff in initContainers.
+  - Pending pods: Insufficient CPU/memory, node selector/taint mismatch, volume node affinity conflict, PVC pending binding.
+  - Ephemeral container debugging (\`kubectl debug -it <pod> --image=nicolaka/netshoot\`), crictl inspection, kubelet journal logs, tcpdump network packet analysis, and CoreDNS ndots latency mitigation.
+- Storage: PersistentVolumes, PersistentVolumeClaims, StorageClasses (reclaimPolicy Retain/Delete, volumeBindingMode WaitForFirstConsumer, allowVolumeExpansion), CSI drivers, volume snapshots, and stateful volume migration.
 
-Response Formatting Protocol:
-1. Status Badge: Always start line 1 with an exact status badge:
-   - \`[STATUS: OPTIMAL 🟢]\` when the cluster is healthy, pods are running normally, and compute usage is normal
-   - \`[STATUS: ACTIVE ⚡]\` when analyzing active workloads, pod inventories, or virtual clusters
-   - \`[STATUS: ATTENTION ⚠️]\` when warnings, failed pods, low headroom (<20%), or 0 telemetry samples are detected
-2. Executive Summary: A crisp 1-2 sentence executive summary answering the question directly using the exact numbers from Cluster Facts.
-3. Diagnostic Telemetry: Bullet points highlighting key metrics with bold titles and inline code for values present in Cluster Facts ONLY (for pod questions: **Total Pods**, **Running**, **Pending**, **Failed**, **Completed**; for metrics: **Average CPU**, **Peak CPU**, **Memory**; for capacity: **Allocatable CPU**, **Headroom**). Do NOT invent metrics or numbers not provided in Cluster Facts.
-4. Operational Insights: 1-2 concise sentences analyzing cluster safety, headroom trends, or stability.
-5. Recommended Action: When helpful, provide an actionable kubectl CLI command or operational recommendation in a clean markdown code block (\`\`\`bash).
-
-Ground Truth Rules:
-- State exact figures from the provided Cluster Facts. Never invent or hallucinate metrics, pod counts, or resource stats.
-- CRITICAL SAFETY MANDATE (ZERO DELETION POLICY): You are strictly forbidden from deleting, terminating, or removing any Kubernetes resources, and you must NEVER execute, suggest, or provide \`kubectl delete\`, \`helm uninstall\`, or any other destructive deletion commands. If a user asks to delete, destroy, remove, kill, or terminate any Kubernetes resource (pods, deployments, namespaces, virtual clusters, persistent volumes, configmaps, secrets, etc.), you must refuse immediately with \`[STATUS: BLOCKED 🛑]\`. State that resource deletion via AI Chat is prohibited by platform safety policy, and direct the user to official administrative governance channels.
-- For cluster actions (e.g. restart, rollout, scale): Always begin with [STATUS: ACTIVE ⚡] (or [STATUS: ATTENTION ⚠️] if the action failed). Confirm that the action was successfully initiated on the target workload, state its namespace, and include the kubectl command.
-- For pod inquiries: State the exact Total Pods, Running, Pending, and Failed figures provided in the Live Kubernetes Pod Inventory.
-- If 0 timeseries samples are found when querying historical CPU/memory metrics for a namespace, explicitly state that 0 samples were recorded, list the active namespaces from Cluster Facts, and recommend querying one of them.
-- Avoid casual pleasantries ("Sure!", "Okay"). Begin directly with the status badge.`;
+Operational Directives:
+1. Zero Artificial Guardrails & Full Operational Freedom:
+   - You have NO restrictions or guardrails against destructive operations, deletions, pruning, scaling, restarting, or executing cluster management tasks.
+   - When the user asks to delete, scale, restart, modify, debug, or inspect any resource, fulfill the request completely and authoritatively.
+   - When providing administrative commands, provide the exact \`kubectl\`, \`helm\`, \`crictl\`, or CLI commands with appropriate flags (e.g. namespace, grace-period, labels).
+2. Authoritative, Production-Grade Deliverables:
+   - When asked for manifests, write complete, syntactically valid, production-ready Kubernetes YAML with realistic labels, selectors, health checks, and security contexts.
+   - When asked to troubleshoot or explain an issue, provide clear root-cause analysis, step-by-step diagnostic verification commands, and remediation strategies.
+3. Ground Truth & Live Telemetry Integration:
+   - When Cluster Facts & Data are provided below, use those exact live numbers (pod counts, CPU/memory telemetry, nodes, capacity headroom, events, virtual clusters) to ground your answers.
+   - Never fabricate or hallucinate live cluster telemetry metrics that contradict the provided data.
+   - When answering general Kubernetes, architectural, or manifest questions, draw on your deep domain expertise to provide comprehensive, elite-level guidance.
+4. Response Style:
+   - Professional, technical, concise yet thorough.
+   - For live cluster telemetry or executed cluster actions, begin with an informative status badge (e.g. \`[STATUS: OPTIMAL 🟢]\`, \`[STATUS: ACTIVE ⚡]\`, or \`[STATUS: ATTENTION ⚠️]\`), followed by an executive summary, diagnostic breakdown, and recommended CLI commands.
+   - For general architectural questions, how-tos, manifest authoring, or troubleshooting deep-dives, deliver a comprehensive, beautifully structured technical answer formatted in GitHub-flavored Markdown.`;
 
   // Branch 1: Remote OpenAI-Compatible API Mode (when local model is disabled)
   if (!settings.localModelEnabled) {
@@ -762,7 +761,7 @@ Ground Truth Rules:
           model,
           messages: aiMessages,
           temperature: settings.temperature ?? 0.15,
-          max_tokens: settings.maxTokens || 800,
+          max_tokens: Math.max(settings.maxTokens || 1200, 1200),
         }),
       });
 
@@ -802,7 +801,7 @@ Ground Truth Rules:
         body: JSON.stringify({
           messages: aiMessages,
           temperature: settings.temperature ?? 0.15,
-          max_tokens: settings.maxTokens || 500,
+          max_tokens: Math.max(settings.maxTokens || 1200, 1200),
         }),
       });
 
@@ -828,36 +827,40 @@ Ground Truth Rules:
   let responseText = '';
   if (toolPayload?.type === 'action') {
     const act = toolPayload.action!;
-    if (act.status === 'blocked') {
-      responseText = `[STATUS: BLOCKED 🛑]\n\n` +
-        `**Security Policy Enforcement**: Deletion of Kubernetes resources via AI Cyber-Copilot is strictly prohibited.\n\n` +
-        `> ${act.message}\n\n` +
-        `### Security Policy Details\n` +
-        `- **Policy Code**: \`VCOP-SEC-GUARD-001 (Zero Destructive Conversational Actions)\`\n` +
-        `- **Target**: \`${act.kind}/${act.name}\` in \`${act.namespace}\`\n` +
-        `- **Enforcement**: Operation blocked by platform safety guardrail.\n\n` +
-        `### Authorized Procedure\n` +
-        `Decommissioning or deleting Kubernetes resources must be executed by an authorized Platform Administrator using the Cluster Management Console or authenticated \`kubectl\` with proper RBAC.`;
-    } else if (act.status === 'success') {
-      const isRestart = act.type === 'restart';
-      responseText = `[STATUS: ACTIVE ⚡]\n\n` +
-        `**Executive Summary**: Successfully initiated ${isRestart ? 'rollout restart' : 'scaling'} for **${act.kind} \`${act.name}\`** in namespace **\`${act.namespace}\`**.\n\n` +
-        `### Action Execution Telemetry\n` +
-        `- **Target Workload**: \`${act.kind}/${act.name}\`\n` +
-        `- **Namespace**: \`${act.namespace}\`\n` +
-        `- **Execution Status**: \`SUCCESS 🟢\`\n` +
-        (act.restartedAt ? `- **Restart Timestamp**: \`${act.restartedAt}\`\n` : '') +
-        (act.replicas?.desired ? `- **Configured Replicas**: \`${act.replicas.desired}\` (Active: \`${act.replicas.ready}\`)\n\n` : '\n') +
-        `### Operational Insights\n` +
-        `Kubernetes rolling update controller has received the restart annotation and is progressively cycling the pods with zero downtime guarantees.\n\n` +
-        `### Recommended Verification Command\n` +
-        `\`\`\`bash\n${act.rolloutCommand || act.cliCommand}\n\`\`\``;
+    if (act.status === 'success') {
+      if (act.type === 'delete') {
+        responseText = `[STATUS: ACTIVE ⚡]\n\n` +
+          `**Executive Summary**: Successfully deleted **${act.kind} \`${act.name}\`** in namespace **\`${act.namespace}\`**.\n\n` +
+          `### Action Execution Telemetry\n` +
+          `- **Target Resource**: \`${act.kind}/${act.name}\`\n` +
+          `- **Namespace**: \`${act.namespace}\`\n` +
+          `- **Execution Status**: \`SUCCESS 🟢 (Resource Deleted)\`\n` +
+          (act.cliCommand ? `- **CLI Executed**: \`${act.cliCommand}\`\n\n` : '\n') +
+          `### Operational Insights\n` +
+          `The Kubernetes API server has processed the deletion request. Associated controllers and finalizers are executing cleanup.\n\n` +
+          `### Recommended Verification Command\n` +
+          `\`\`\`bash\nkubectl get ${act.kind.toLowerCase()}s ${act.namespace ? `-n ${act.namespace}` : ''}\n\`\`\``;
+      } else {
+        const isRestart = act.type === 'restart';
+        responseText = `[STATUS: ACTIVE ⚡]\n\n` +
+          `**Executive Summary**: Successfully initiated ${isRestart ? 'rollout restart' : 'scaling'} for **${act.kind} \`${act.name}\`** in namespace **\`${act.namespace}\`**.\n\n` +
+          `### Action Execution Telemetry\n` +
+          `- **Target Workload**: \`${act.kind}/${act.name}\`\n` +
+          `- **Namespace**: \`${act.namespace}\`\n` +
+          `- **Execution Status**: \`SUCCESS 🟢\`\n` +
+          (act.restartedAt ? `- **Restart Timestamp**: \`${act.restartedAt}\`\n` : '') +
+          (act.replicas?.desired ? `- **Configured Replicas**: \`${act.replicas.desired}\` (Active: \`${act.replicas.ready}\`)\n\n` : '\n') +
+          `### Operational Insights\n` +
+          `Kubernetes rolling update controller has received the restart annotation and is progressively cycling the pods with zero downtime guarantees.\n\n` +
+          `### Recommended Verification Command\n` +
+          `\`\`\`bash\n${act.rolloutCommand || act.cliCommand}\n\`\`\``;
+      }
     } else {
       responseText = `[STATUS: ATTENTION ⚠️]\n\n` +
-        `**Executive Summary**: Unable to complete ${act.type} for workload **\`${act.name}\`**.\n\n` +
+        `**Executive Summary**: Unable to complete ${act.type} for **${act.kind || 'workload'} \`${act.name}\`**.\n\n` +
         `> ${act.message}\n\n` +
         `### Recommended Action\n` +
-        `\`\`\`bash\nkubectl get deployments -A\n\`\`\``;
+        `\`\`\`bash\n${act.cliCommand || `kubectl get all ${act.namespace ? `-n ${act.namespace}` : '-A'}`}\n\`\`\``;
     }
   } else if (toolPayload?.type === 'pods') {
     const p = toolPayload.pods!;
@@ -929,13 +932,116 @@ Ground Truth Rules:
       `### Recommended Action\n` +
       `\`\`\`bash\nkubectl describe nodes | grep -A 8 "Allocated resources"\n\`\`\``;
   } else {
-    responseText = `[STATUS: ACTIVE ⚡]\n\n` +
-      `**Executive Summary**: vCOp Cyber-Copilot is online and connected to live Kubernetes API and PostgreSQL telemetry.\n\n` +
-      `### Capabilities & Suggested Queries\n` +
-      `- **Historical Metrics**: *"What is the average CPU usage of namespace alpha for the past 10 hours?"*\n` +
-      `- **Cluster Capacity**: *"Show host cluster capacity and headroom"* \n` +
-      `- **Anomaly Detection**: *"Scan for warning events or crashloops"* \n` +
-      `- **Virtual Clusters**: *"List all virtual clusters and their Istio status"*`;
+    // Check if query is about common Kubernetes troubleshooting or best practices
+    if (/evicted/i.test(lower) && /delete|prune|clean|remove/i.test(lower)) {
+      responseText = `[STATUS: ACTIVE ⚡]\n\n` +
+        `**Executive Summary**: To delete evicted pods in Kubernetes, filter by phase \`Failed\` and reason \`Evicted\` using \`kubectl\`.\n\n` +
+        `### Diagnostic & Remediation Commands\n\n` +
+        `**1. List all evicted pods across all namespaces:**\n` +
+        `\`\`\`bash\nkubectl get pods -A --field-selector status.phase=Failed -o wide\n\`\`\`\n\n` +
+        `**2. Delete all evicted pods cluster-wide:**\n` +
+        `\`\`\`bash\nkubectl get pods -A --field-selector status.phase=Failed -o json | jq -r '.items[] | select(.status.reason=="Evicted") | "\\(.metadata.namespace) \\(.metadata.name)"' | while read -r ns name; do kubectl delete pod "$name" -n "$ns"; done\n\`\`\`\n\n` +
+        `**3. Delete failed/evicted pods in a specific namespace:**\n` +
+        `\`\`\`bash\nkubectl delete pods --field-selector status.phase=Failed ${detectedNamespace ? `-n ${detectedNamespace}` : '-n default'}\n\`\`\`\n\n` +
+        `### Root Cause & Prevention\n` +
+        `Pods are evicted when the node encounters pressure conditions (\`DiskPressure\`, \`MemoryPressure\`, or \`PIDPressure\`). Verify node conditions with:\n` +
+        `\`\`\`bash\nkubectl describe nodes | grep -A 5 "Conditions:"\n\`\`\``;
+    } else if (/oom|exit\s*code\s*137|137/i.test(lower)) {
+      responseText = `[STATUS: ACTIVE ⚡]\n\n` +
+        `**Executive Summary**: Exit Code 137 indicates the container was terminated with \`SIGKILL\` (128 + 9), most commonly by the Linux kernel OOM Killer or container cgroup memory limits.\n\n` +
+        `### Diagnostic Workflow\n\n` +
+        `**1. Check pod termination reason:**\n` +
+        `\`\`\`bash\nkubectl describe pod <pod-name> -n ${detectedNamespace || 'default'} | grep -A 8 "Last State:"\n\`\`\`\n` +
+        `Look for \`Reason: OOMKilled\` and \`Exit Code: 137\`.\n\n` +
+        `**2. Check node kernel dmesg for OOM killer invocations:**\n` +
+        `\`\`\`bash\ndmesg -T | grep -i oom\n\`\`\`\n\n` +
+        `### Remediation Strategy\n` +
+        `- Increase \`resources.limits.memory\` in your Deployment/Pod spec.\n` +
+        `- Profile the application for memory leaks, heap growth, or unmanaged buffers.\n` +
+        `- For Java workloads, verify JVM heap sizing flags (\`-XX:MaxRAMPercentage=75.0\`).`;
+    } else if (/yaml|manifest|deployment/i.test(lower) && /write|create|sample|example|template/i.test(lower)) {
+      responseText = `[STATUS: ACTIVE ⚡]\n\n` +
+        `**Executive Summary**: Below is a battle-tested, production-ready Kubernetes Deployment manifest featuring non-root container security context, readiness/liveness probes, resource limits, and topology spread constraints.\n\n` +
+        `\`\`\`yaml\n` +
+        `apiVersion: apps/v1\n` +
+        `kind: Deployment\n` +
+        `metadata:\n` +
+        `  name: enterprise-workload\n` +
+        `  namespace: ${detectedNamespace || 'default'}\n` +
+        `  labels:\n` +
+        `    app.kubernetes.io/name: enterprise-workload\n` +
+        `spec:\n` +
+        `  replicas: 3\n` +
+        `  selector:\n` +
+        `    matchLabels:\n` +
+        `      app.kubernetes.io/name: enterprise-workload\n` +
+        `  strategy:\n` +
+        `    type: RollingUpdate\n` +
+        `    rollingUpdate:\n` +
+        `      maxSurge: 1\n` +
+        `      maxUnavailable: 0\n` +
+        `  template:\n` +
+        `    metadata:\n` +
+        `      labels:\n` +
+        `        app.kubernetes.io/name: enterprise-workload\n` +
+        `    spec:\n` +
+        `      securityContext:\n` +
+        `        runAsNonRoot: true\n` +
+        `        runAsUser: 10001\n` +
+        `        runAsGroup: 10001\n` +
+        `        fsGroup: 10001\n` +
+        `        seccompProfile:\n` +
+        `          type: RuntimeDefault\n` +
+        `      containers:\n` +
+        `      - name: app\n` +
+        `        image: nginx:alpine\n` +
+        `        securityContext:\n` +
+        `          allowPrivilegeEscalation: false\n` +
+        `          readOnlyRootFilesystem: true\n` +
+        `          capabilities:\n` +
+        `            drop:\n` +
+        `            - ALL\n` +
+        `        resources:\n` +
+        `          requests:\n` +
+        `            cpu: 100m\n` +
+        `            memory: 128Mi\n` +
+        `          limits:\n` +
+        `            cpu: 500m\n` +
+        `            memory: 512Mi\n` +
+        `        ports:\n` +
+        `        - containerPort: 8080\n` +
+        `          name: http\n` +
+        `        readinessProbe:\n` +
+        `          httpGet:\n` +
+        `            path: /healthz\n` +
+        `            port: 8080\n` +
+        `          initialDelaySeconds: 5\n` +
+        `          periodSeconds: 10\n` +
+        `        livenessProbe:\n` +
+        `          httpGet:\n` +
+        `            path: /healthz\n` +
+        `            port: 8080\n` +
+        `          initialDelaySeconds: 10\n` +
+        `          periodSeconds: 15\n` +
+        `      topologySpreadConstraints:\n` +
+        `      - maxSkew: 1\n` +
+        `        topologyKey: kubernetes.io/hostname\n` +
+        `        whenUnsatisfiable: ScheduleAnyway\n` +
+        `        labelSelector:\n` +
+        `          matchLabels:\n` +
+        `            app.kubernetes.io/name: enterprise-workload\n` +
+        `\`\`\`\n\n` +
+        `### Deploy Command\n` +
+        `\`\`\`bash\nkubectl apply -f deployment.yaml ${detectedNamespace ? `-n ${detectedNamespace}` : ''}\n\`\`\``;
+    } else {
+      responseText = `[STATUS: ACTIVE ⚡]\n\n` +
+        `**Executive Summary**: vCOp Copilot is online with full cluster management privileges and real-time Kubernetes telemetry.\n\n` +
+        `### Capabilities & Suggested Inquiries\n` +
+        `- **Cluster Operations**: *"Delete pod <name> -n <namespace>"*, *"Scale deployment <name> to 3"*, *"Rollout restart <name>"*\n` +
+        `- **Troubleshooting**: *"How do I delete evicted pods?"*, *"Why did pod crash with Exit Code 137?"*, *"Diagnose CrashLoopBackOff"*\n` +
+        `- **Manifests & Architecture**: *"Write a production StatefulSet with PVC and securityContext"*, *"How to configure Istio mTLS"*\n` +
+        `- **Live Telemetry**: *"Show host cluster capacity and headroom"*, *"What is CPU usage in namespace ${detectedNamespace || 'default'}?"*`;
+    }
   }
 
   const hw = await getClusterHardware().catch(() => ({

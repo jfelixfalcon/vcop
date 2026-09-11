@@ -1,0 +1,11 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { DocsView } from '../components/DocsView';
+const user = Astro.locals.user;
+---
+
+<Layout title="Documentation & RBAC - vCluster Operations Center" description="Comprehensive documentation, architecture guides, and Role-Based Access Control matrix for vCOp">
+  <div class="space-y-6">
+    <DocsView client:load currentUser={user} />
+  </div>
+</Layout>

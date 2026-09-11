@@ -1,0 +1,949 @@
+import React, { useState, useEffect } from 'react';
+import {
+  ShieldCheck,
+  Layers,
+  Server,
+  Globe,
+  Database,
+  Gauge,
+  Package,
+  HardDrive,
+  Terminal,
+  Search,
+  Copy,
+  Check,
+  Lock,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  ExternalLink,
+  ChevronRight,
+  Sliders,
+  Cpu,
+  Zap,
+  RefreshCw,
+  Users,
+  UserCheck,
+  Eye,
+  Shield,
+  Activity,
+  BookOpen,
+  ArrowUpRight,
+  Info,
+  Code2,
+} from 'lucide-react';
+import type { UserSession } from '../lib/types';
+
+interface Props {
+  currentUser?: UserSession | null;
+}
+
+interface RbacRow {
+  op: string;
+  category: string;
+  description: string;
+  admin: boolean;
+  dev: boolean;
+  viewer: boolean;
+}
+
+const RBAC_DATA: RbacRow[] = [
+  {
+    op: 'View Cluster Topology & Status',
+    category: 'Telemetry & Observability',
+    description: 'Inspect live fleet status, pod inventory, events, resource metrics, and ingress endpoints.',
+    admin: true,
+    dev: true,
+    viewer: true,
+  },
+  {
+    op: 'Download / View Kubeconfig',
+    category: 'Access & Connectivity',
+    description: 'Download direct guest kubeconfig or copy interactive CLI connection commands.',
+    admin: true,
+    dev: true,
+    viewer: true,
+  },
+  {
+    op: 'Deploy Applications from Catalog',
+    category: 'App Store & Catalog',
+    description: 'Deploy, configure, and manage Helm-based application stacks (databases, ingress, observability).',
+    admin: true,
+    dev: true,
+    viewer: false,
+  },
+  {
+    op: 'Dynamic Quota & Limit Adjustments',
+    category: 'Resource Governance',
+    description: 'Dynamically scale CPU/Memory limits, storage quotas, and container LimitRange policies.',
+    admin: true,
+    dev: true,
+    viewer: false,
+  },
+  {
+    op: 'Sleep / Wake Operations',
+    category: 'Cost Optimization',
+    description: 'Hibernate active cluster compute to 0 replicas to eliminate idle host cluster compute costs.',
+    admin: true,
+    dev: true,
+    viewer: false,
+  },
+  {
+    op: 'Kubernetes Distro Engine Upgrades',
+    category: 'Cluster Lifecycle',
+    description: 'Perform rolling zero-downtime upgrades of the vCluster syncer engine and guest Kubernetes version.',
+    admin: true,
+    dev: true,
+    viewer: false,
+  },
+  {
+    op: 'Update RBAC & Access Delegation',
+    category: 'Identity & Access',
+    description: 'Grant or revoke cluster-level permissions for specific enterprise IdP groups and user emails.',
+    admin: true,
+    dev: true,
+    viewer: false,
+  },
+  {
+    op: 'Disaster Recovery Snapshots & Restore',
+    category: 'Disaster Recovery',
+    description: 'Trigger on-demand etcd snapshots, configure schedules, and perform point-in-time restores.',
+    admin: true,
+    dev: true,
+    viewer: false,
+  },
+  {
+    op: 'Teardown / Delete Virtual Cluster',
+    category: 'Destructive Lifecycle',
+    description: 'Permanently decommission virtual cluster resources and clean up underlying persistent volumes.',
+    admin: true,
+    dev: false,
+    viewer: false,
+  },
+  {
+    op: 'Manage Registries, Baselines & AI',
+    category: 'Platform Administration',
+    description: 'Configure corporate OCI registries, cluster baselines, global OIDC policies, and Gemma 3 AI copilot.',
+    admin: true,
+    dev: false,
+    viewer: false,
+  },
+];
+
+export const DocsView: React.FC<Props> = ({ currentUser }) => {
+  const [activeTab, setActiveTab] = useState<string>('rbac');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [copiedSnippets, setCopiedSnippets] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (hash) {
+        setActiveTab(hash);
+        const element = document.getElementById(hash);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
+    };
+
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  const switchSection = (sectionId: string) => {
+    setActiveTab(sectionId);
+    window.history.replaceState(null, '', `#${sectionId}`);
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const copyToClipboard = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedSnippets((prev) => ({ ...prev, [id]: true }));
+    setTimeout(() => {
+      setCopiedSnippets((prev) => ({ ...prev, [id]: false }));
+    }, 2000);
+  };
+
+  const filteredRbac = RBAC_DATA.filter((row) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      row.op.toLowerCase().includes(q) ||
+      row.category.toLowerCase().includes(q) ||
+      row.description.toLowerCase().includes(q)
+    );
+  });
+
+  const navItems = [
+    { id: 'rbac', label: 'RBAC Matrix', icon: ShieldCheck, badge: 'Matrix' },
+    { id: 'architecture', label: 'Architecture', icon: Layers },
+    { id: 'lifecycle', label: 'Cluster Lifecycle', icon: Server },
+    { id: 'networking', label: 'Networking & Istio', icon: Globe },
+    { id: 'dr', label: 'Disaster Recovery', icon: Database },
+    { id: 'capacity', label: 'Capacity Engine', icon: Gauge },
+    { id: 'apps', label: 'App Store', icon: Package },
+    { id: 'airgap', label: 'Air-Gap & Security', icon: HardDrive },
+    { id: 'cli', label: 'CLI & API Quickstart', icon: Terminal },
+  ];
+
+  return (
+    <div className="space-y-8 pb-16">
+      {/* Hero Header */}
+      <div className="relative overflow-hidden rounded-3xl bg-cyber-900/80 border border-cyber-700/80 p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-bl from-cyan-500/10 via-blue-600/5 to-transparent rounded-full blur-3xl pointer-events-none"></div>
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-mono font-medium">
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>vCOp Documentation & Reference</span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+              vCluster Operations Center
+            </h1>
+            <p className="text-sm text-slate-400 max-w-2xl">
+              Enterprise documentation for virtual cluster provisioning, multi-tenant RBAC policies,
+              isolated networking, zero-downtime lifecycle management, and air-gapped operations.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <a
+              href="#rbac"
+              onClick={() => switchSection('rbac')}
+              className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-2 transition-all font-mono"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>View RBAC Matrix</span>
+            </a>
+            <a
+              href="/"
+              className="px-4 py-2 bg-cyber-800 hover:bg-cyber-750 text-slate-200 border border-cyber-700 rounded-xl text-xs font-medium font-mono flex items-center gap-2 transition-colors"
+            >
+              <ArrowUpRight className="w-4 h-4 text-cyan-400" />
+              <span>Fleet Dashboard</span>
+            </a>
+          </div>
+        </div>
+
+        {/* Quick Search & Pill Navigation */}
+        <div className="mt-8 pt-6 border-t border-cyber-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search documentation, roles, operations, or commands..."
+              className="w-full pl-10 pr-4 py-2 bg-cyber-950/80 border border-cyber-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/80 font-mono"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-2 lg:pb-0 font-mono text-xs">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => switchSection(item.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-sm font-semibold'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-800/60 border border-transparent'
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Main Grid: Sticky Sidebar + Content Area */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Sticky Desktop Navigation Rail */}
+        <aside className="hidden lg:block lg:col-span-3 space-y-4">
+          <div className="sticky top-24 space-y-3 bg-cyber-900/60 border border-cyber-800/80 rounded-2xl p-4 backdrop-blur-md">
+            <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider px-2 font-semibold flex items-center justify-between">
+              <span>Table of Contents</span>
+              <span className="text-[10px] text-cyan-400">9 Topics</span>
+            </div>
+            <nav className="space-y-1">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => switchSection(item.id)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-mono transition-all text-left cursor-pointer ${
+                      isActive
+                        ? 'bg-gradient-to-r from-cyan-500/15 to-blue-500/10 text-cyan-300 border border-cyan-500/30 font-semibold'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-cyber-800/40 border border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Icon className={`w-4 h-4 ${isActive ? 'text-cyan-400' : 'text-slate-500'}`} />
+                      <span>{item.label}</span>
+                    </div>
+                    {item.badge && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] bg-cyan-950 border border-cyan-800 text-cyan-300 font-bold">
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+
+            <div className="pt-4 mt-4 border-t border-cyber-800/80 px-2 space-y-2">
+              <div className="text-[11px] font-mono text-slate-400">Current Session</div>
+              <div className="flex items-center justify-between text-xs font-mono bg-cyber-950 p-2 rounded-lg border border-cyber-800">
+                <span className="text-slate-300 truncate max-w-[110px]">
+                  {currentUser?.username || 'Guest'}
+                </span>
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
+                    currentUser?.role === 'admin'
+                      ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                      : currentUser?.role === 'developers' || currentUser?.role === 'developer'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                  }`}
+                >
+                  {currentUser?.role || 'Viewer'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        {/* Content Stream */}
+        <div className="lg:col-span-9 space-y-12 min-w-0">
+          {/* SECTION 1: Role-Based Access Control (RBAC) Matrix */}
+          <section id="rbac" className="scroll-mt-24 space-y-6">
+            <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-300 shadow-sm">
+                  <ShieldCheck className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                    Role-Based Access Control (RBAC) Matrix
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Enforced multi-tenant personas and operation permission matrix across UI & API boundaries
+                  </p>
+                </div>
+              </div>
+              <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                Enforced in Middleware & Webhooks
+              </span>
+            </div>
+
+            {/* Persona Breakdown Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Platform Admin */}
+              <div className="bg-cyber-900/90 border border-purple-500/30 rounded-2xl p-5 shadow-sm relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                    Platform Admin
+                  </span>
+                  <Shield className="w-4 h-4 text-purple-400" />
+                </div>
+                <h3 className="text-sm font-bold text-white mb-1">Central Infrastructure Team</h3>
+                <p className="text-xs text-slate-400 leading-relaxed mb-4">
+                  Full unrestricted control across host Kubernetes nodes, operator reconcilers, global sizing tiers, OIDC policies, and cluster destruction.
+                </p>
+                <div className="text-[11px] font-mono text-slate-300 space-y-1 bg-cyber-950 p-2.5 rounded-xl border border-cyber-800">
+                  <div className="text-purple-300 font-semibold mb-1">Key Privileges:</div>
+                  <div>• Permanent cluster teardown</div>
+                  <div>• Version & Baseline registry</div>
+                  <div>• Host capacity bypass</div>
+                  <div>• Global AI Copilot model tuning</div>
+                </div>
+              </div>
+
+              {/* Developer Persona */}
+              <div className="bg-cyber-900/90 border border-amber-500/30 rounded-2xl p-5 shadow-sm relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    Developer Persona
+                  </span>
+                  <UserCheck className="w-4 h-4 text-amber-400" />
+                </div>
+                <h3 className="text-sm font-bold text-white mb-1">Engineering & Product Teams</h3>
+                <p className="text-xs text-slate-400 leading-relaxed mb-4">
+                  Self-service autonomy to provision virtual clusters, adjust quotas, deploy App Store workloads, trigger backups, and perform engine upgrades.
+                </p>
+                <div className="text-[11px] font-mono text-slate-300 space-y-1 bg-cyber-950 p-2.5 rounded-xl border border-cyber-800">
+                  <div className="text-amber-300 font-semibold mb-1">Guarded Autonomy:</div>
+                  <div>• 1-Click Cluster Provisioning</div>
+                  <div>• Sleep / Wake cost saving</div>
+                  <div>• DR snapshotting & rollback</div>
+                  <div><span className="text-rose-400 font-semibold">✗ Cannot delete clusters</span></div>
+                </div>
+              </div>
+
+              {/* Viewer Persona */}
+              <div className="bg-cyber-900/90 border border-cyan-500/30 rounded-2xl p-5 shadow-sm relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                    Viewer Persona
+                  </span>
+                  <Eye className="w-4 h-4 text-cyan-400" />
+                </div>
+                <h3 className="text-sm font-bold text-white mb-1">QA, Security & Stakeholders</h3>
+                <p className="text-xs text-slate-400 leading-relaxed mb-4">
+                  Read-only visibility into fleet health, real-time workload telemetry, audit logs, and kubeconfig retrieval for debugging and inspection.
+                </p>
+                <div className="text-[11px] font-mono text-slate-300 space-y-1 bg-cyber-950 p-2.5 rounded-xl border border-cyber-800">
+                  <div className="text-cyan-300 font-semibold mb-1">Observability Only:</div>
+                  <div>• Fleet & Pod telemetry</div>
+                  <div>• Sparklines & metrics</div>
+                  <div>• Kubeconfig inspection</div>
+                  <div><span className="text-rose-400 font-semibold">✗ All mutations blocked</span></div>
+                </div>
+              </div>
+            </div>
+
+            {/* The Consolidated RBAC Matrix Table */}
+            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2 font-mono">
+                  <Lock className="w-4 h-4 text-cyan-400" />
+                  Operation & Persona Entitlement Matrix
+                </h3>
+                <span className="text-[11px] font-mono text-slate-400">
+                  Showing {filteredRbac.length} of {RBAC_DATA.length} operations
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left font-mono text-xs">
+                  <thead>
+                    <tr className="border-b border-cyber-800 text-slate-400">
+                      <th className="pb-3 font-medium">Action / Operation</th>
+                      <th className="pb-3 font-medium hidden md:table-cell">Category</th>
+                      <th className="pb-3 font-medium text-purple-400">Platform Admin</th>
+                      <th className="pb-3 font-medium text-amber-400">Developer Persona</th>
+                      <th className="pb-3 font-medium text-cyan-400">Viewer Persona</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-cyber-800/40">
+                    {filteredRbac.map((row, idx) => (
+                      <tr key={idx} className="hover:bg-cyber-800/30 transition-colors">
+                        <td className="py-3 font-sans">
+                          <div className="font-semibold text-slate-200">{row.op}</div>
+                          <div className="text-[11px] text-slate-400 font-normal mt-0.5 max-w-sm">
+                            {row.description}
+                          </div>
+                        </td>
+                        <td className="py-3 hidden md:table-cell">
+                          <span className="px-2 py-0.5 rounded bg-cyber-950 border border-cyber-800 text-[10px] text-slate-400">
+                            {row.category}
+                          </span>
+                        </td>
+                        <td className="py-3">
+                          <span className="inline-flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Allowed</span>
+                          </span>
+                        </td>
+                        <td className="py-3">
+                          {row.dev ? (
+                            <span className="inline-flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Allowed</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-rose-400 bg-rose-500/10 px-2 py-1 rounded-md border border-rose-500/20">
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Restricted</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3">
+                          {row.viewer ? (
+                            <span className="inline-flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Allowed</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-rose-400 bg-rose-500/10 px-2 py-1 rounded-md border border-rose-500/20">
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Restricted</span>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Security Enforcement Mechanics Callout */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
+                <div className="flex items-center gap-2 text-cyan-400 font-mono text-xs font-bold">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Cluster Deletion Protection Rule</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Virtual cluster deletion (<code className="text-cyan-300 bg-cyber-900 px-1 py-0.5 rounded">DELETE /api/vclusters/:name</code>) is
+                  strictly reserved for Platform Administrators. Developers attempting teardown receive an immediate
+                  <code className="text-rose-400 bg-cyber-900 px-1 py-0.5 rounded ml-1">403 Forbidden</code> response and an audit security event is logged.
+                </p>
+              </div>
+
+              <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
+                <div className="flex items-center gap-2 text-purple-400 font-mono text-xs font-bold">
+                  <Users className="w-4 h-4" />
+                  <span>Enterprise OIDC & GitOps Group Claims</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Enterprise SSO users authenticate via OIDC PKCE. The operator dynamically maps IdP groups to personas using annotations:
+                  <code className="text-purple-300 bg-cyber-900 px-1 py-0.5 rounded ml-1">vops.gitops.io/allowed-groups</code> and
+                  <code className="text-cyan-300 bg-cyber-900 px-1 py-0.5 rounded ml-1">vops.gitops.io/owner</code>.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* SECTION 2: Architecture & Overview */}
+          <section id="architecture" className="scroll-mt-24 space-y-6">
+            <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-300 shadow-sm">
+                  <Layers className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight">
+                    Architecture & Operator Engine
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    High-performance controller-runtime operator coupled with Astro SSR Operations Center
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6 space-y-4">
+              <p className="text-xs text-slate-300 leading-relaxed">
+                vCOp is an enterprise-grade Virtual Cluster Management Platform and Internal Developer Platform (IDP). It provisions
+                and operates multi-tenant virtual clusters using <strong>vCluster OSS v0.36</strong>, high-availability 3-node etcd,
+                intra-cluster CoreDNS, isolated metrics-servers, and automatic Istio ingress gateway reconciliation.
+              </p>
+
+              {/* Architecture Diagram Code Block */}
+              <div className="relative bg-cyber-950 p-4 rounded-xl border border-cyber-800 font-mono text-[11px] text-cyan-300 overflow-x-auto">
+                <pre>{`┌────────────────────────────────────────────────────────┐
+│               Operations Center UI (Astro SSR)         │
+│   - Dark-mode Cybernetic Glassmorphism Aesthetic       │
+│   - 1-Click Provisioning Wizard & Fleet Dashboard      │
+│   - Instant Kubeconfig & Live Workload Telemetry       │
+└───────────────────────────┬────────────────────────────┘
+                            │ REST / CRD Mutations
+                            ▼
+┌──────────────────────────────────────────────────────────────────────────────────────────┐
+│                             Kubernetes Host Cluster (Control Plane)                      │
+│                                                                                          │
+│  ┌────────────────────────────────────────────────────────────────────────────────────┐  │
+│  │                    vCOp Kubernetes Operator (Controller-Runtime)                   │  │
+│  │   - Custom Resource: VirtualCluster (vops.gitops.io/v1alpha1)                      │  │
+│  │   - Admission Webhook: Safe Minor Version Upgrades & Schema Validation             │  │
+│  │   - Finalizer (vops.gitops.io/finalizer): Graceful Teardown & Retention Cleanup    │  │
+│  └──────────────────────────────────────┬─────────────────────────────────────────────┘  │
+│                                         │ Reconciles StatefulSets, Deployments, Secrets  │
+│                                         ▼                                                │
+│  ┌────────────────────────────────────────────────────────────────────────────────────┐  │
+│  │                   Tenant Virtual Cluster (vCluster OSS v0.36)                      │  │
+│  │   - High Availability: 3-Node Dedicated Quorum etcd (Port 2379 / 2380)             │  │
+│  │   - Virtual Kubernetes Syncer: Pod, Ingress, Secret & CRD synchronization          │  │
+│  │   - Isolated Add-ons: CoreDNS intra-cluster DNS + Metrics-Server for HPA           │  │
+│  │   - Ingress Entrypoint: Istio IngressGateway (Port 80 -> 443 TLS Redirect)         │  │
+│  └────────────────────────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────────────────┘`}</pre>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-1">
+                  <div className="text-cyan-400 font-bold text-xs font-mono">1. Zero External DB</div>
+                  <p className="text-[11px] text-slate-400">
+                    All state resides inside native Kubernetes CustomResources, ConfigMaps, and Secrets.
+                  </p>
+                </div>
+                <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-1">
+                  <div className="text-purple-400 font-bold text-xs font-mono">2. 3-Node HA etcd</div>
+                  <p className="text-[11px] text-slate-400">
+                    Dedicated StatefulSet with automated headless peer discovery and quorum health gating.
+                  </p>
+                </div>
+                <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-1">
+                  <div className="text-emerald-400 font-bold text-xs font-mono">3. GitOps Native</div>
+                  <p className="text-[11px] text-slate-400">
+                    Declarative <code className="text-slate-300 font-mono">VirtualCluster</code> CRs designed for ArgoCD and Flux with zero drift fighting.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* SECTION 3: Virtual Cluster Lifecycle */}
+          <section id="lifecycle" className="scroll-mt-24 space-y-6">
+            <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300 shadow-sm">
+                  <Server className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight">
+                    Cluster Lifecycle & Day-2 Operations
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Provisioning wizard, sleep/wake hibernation, dynamic quotas, and rolling engine upgrades
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 space-y-3">
+                <div className="flex items-center gap-2 text-cyan-400 font-mono text-xs font-bold">
+                  <Zap className="w-4 h-4" />
+                  <span>Cost-Saving Sleep & Wake Hibernation</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Developers can sleep non-production clusters over nights or weekends. The operator scales workloads to 0 while
+                  preserving all disk volumes, CRDs, and configurations. Waking the cluster restores all pods within seconds.
+                </p>
+                <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800 font-mono text-[11px] text-slate-300">
+                  <span className="text-slate-500 block mb-1">PATCH API COMMAND</span>
+                  <code>curl -X PATCH /api/vclusters/dev-team/sleep</code>
+                </div>
+              </div>
+
+              <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 space-y-3">
+                <div className="flex items-center gap-2 text-emerald-400 font-mono text-xs font-bold">
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Rolling Engine & Distro Upgrades</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Perform zero-downtime rolling upgrades of the Kubernetes API server and vCluster syncer engine.
+                  Pre-flight admission webhooks ensure safe minor version transitions and automatically take etcd backup snapshots.
+                </p>
+                <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800 font-mono text-[11px] text-slate-300">
+                  <span className="text-slate-500 block mb-1">SUPPORTED DISTROS</span>
+                  <span className="text-emerald-300">vCluster OSS v0.36 • K8s v1.30.x, v1.31.x, v1.32.x</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* SECTION 4: Networking & Istio */}
+          <section id="networking" className="scroll-mt-24 space-y-6">
+            <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-300 shadow-sm">
+                  <Globe className="w-5 h-5 text-cyan-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight">
+                    Networking & Ingress (Istio Engine)
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Automated in-cluster Istio Gateway, cert-manager TLS mirroring, and HTTP-to-HTTPS redirect
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6 space-y-4">
+              <p className="text-xs text-slate-300 leading-relaxed">
+                When you enable Istio ingress on a virtual cluster, the operator's <code className="text-cyan-300">IstioReconciler</code> executes
+                a complete in-cluster networking rollout without requiring manual Helm deployments:
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
+                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
+                  <span className="text-cyan-400 font-bold block">1. Fail-Closed Cert-Manager Check</span>
+                  <p className="text-slate-400 font-sans text-[11px]">
+                    Verifies that the target <code className="text-slate-300">ClusterIssuer</code> exists on the host cluster before proceeding,
+                    preventing broken endpoints.
+                  </p>
+                </div>
+                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
+                  <span className="text-purple-400 font-bold block">2. Automatic TLS Secret Mirroring</span>
+                  <p className="text-slate-400 font-sans text-[11px]">
+                    Certificates issued on the host cluster are securely mirrored into the guest <code className="text-slate-300">istio-system</code> namespace.
+                  </p>
+                </div>
+                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
+                  <span className="text-emerald-400 font-bold block">3. In-Cluster istiod Control Plane</span>
+                  <p className="text-slate-400 font-sans text-[11px]">
+                    Deploys 1 replica for standard clusters, or automatically scales to 3 replicas for high availability (HA) clusters.
+                  </p>
+                </div>
+                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
+                  <span className="text-amber-400 font-bold block">4. Envoy Ingress Gateway & Redirect</span>
+                  <p className="text-slate-400 font-sans text-[11px]">
+                    Terminates port 80 and issues strict 301 redirects to HTTPS 443, routing tenant traffic to internal services.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* SECTION 5: Disaster Recovery */}
+          <section id="dr" className="scroll-mt-24 space-y-6">
+            <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-300 shadow-sm">
+                  <Database className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight">
+                    Disaster Recovery (DR) & Backup Engine
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Point-in-time etcd snapshots, isolated backup PVCs, and rolling restore sequencing
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-1.5">
+                  <div className="text-amber-400 font-bold text-xs font-mono">Automated Schedules</div>
+                  <p className="text-xs text-slate-400">
+                    CronJobs take daily, weekly, or custom scheduled snapshots with automatic retention pruning (default: 7 snapshots).
+                  </p>
+                </div>
+                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-1.5">
+                  <div className="text-cyan-400 font-bold text-xs font-mono">Dedicated Storage Isolation</div>
+                  <p className="text-xs text-slate-400">
+                    Snapshots are written to an isolated PVC (<code className="text-slate-300 font-mono">&lt;cluster&gt;-etcd-backups</code>) completely decoupled from active runtime storage.
+                  </p>
+                </div>
+                <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-1.5">
+                  <div className="text-emerald-400 font-bold text-xs font-mono">Point-in-Time Restore</div>
+                  <p className="text-xs text-slate-400">
+                    An <code className="text-slate-300 font-mono">etcd-restore-init</code> container executes <code className="text-slate-300 font-mono">etcdutl snapshot restore</code> with strict Raft log invariance.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* SECTION 6: Capacity & Headroom Engine */}
+          <section id="capacity" className="scroll-mt-24 space-y-6">
+            <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-300 shadow-sm">
+                  <Gauge className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight">
+                    Host Capacity & Overallocation Prevention
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Real-time host node discovery and deterministic admission overallocation guards
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6 space-y-3">
+              <p className="text-xs text-slate-300 leading-relaxed">
+                vCOp continuously discovers physical node allocatable metrics for CPU cores, RAM, and Ephemeral Storage across all host nodes.
+                Admission webhooks calculate cumulative tenant requests and block cluster provisioning or quota expansions if physical headroom would be breached.
+              </p>
+              <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 flex items-center justify-between gap-4 font-mono text-xs">
+                <div>
+                  <span className="text-purple-300 font-bold block">Capacity Condition & Events</span>
+                  <span className="text-slate-400 text-[11px]">Operator maintains Condition: <code className="text-slate-200">CapacityAvailable</code></span>
+                </div>
+                <a
+                  href="/capacity"
+                  className="px-3 py-1.5 rounded-lg bg-cyber-800 hover:bg-cyber-750 text-cyan-400 text-xs font-mono border border-cyber-700"
+                >
+                  View Capacity Dashboard &rarr;
+                </a>
+              </div>
+            </div>
+          </section>
+
+          {/* SECTION 7: App Store */}
+          <section id="apps" className="scroll-mt-24 space-y-6">
+            <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-300 shadow-sm">
+                  <Package className="w-5 h-5 text-cyan-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight">
+                    App Store Workload Catalog
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Curated 1-click cloud-native application stacks with multi-tenant isolation
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6 space-y-3">
+              <p className="text-xs text-slate-300 leading-relaxed">
+                The built-in App Store catalog allows Platform Admins to curate pre-configured Helm charts and applications (databases, message queues,
+                monitoring agents, and dev tools). Developers can deploy these stacks into their virtual clusters with a single click.
+              </p>
+              <div className="flex items-center gap-3">
+                <a
+                  href="/apps"
+                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold text-xs font-mono shadow-sm"
+                >
+                  Browse App Store Catalog &rarr;
+                </a>
+              </div>
+            </div>
+          </section>
+
+          {/* SECTION 8: Air-Gap & Security */}
+          <section id="airgap" className="scroll-mt-24 space-y-6">
+            <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300 shadow-sm">
+                  <HardDrive className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight">
+                    Air-Gap & Sovereign Deployment
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    100% disconnected architecture, self-hosted fonts/icons, and offline Gemma 3 inference
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-6 space-y-4">
+              <p className="text-xs text-slate-300 leading-relaxed">
+                vCOp is designed for strictly isolated, sovereign, and classified environments. External CDN requests and outbound dependencies are eliminated:
+              </p>
+
+              <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 font-mono text-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Single-Command Airgap Packager:</span>
+                  <button
+                    onClick={() => copyToClipboard('pack', 'make airgap-pack')}
+                    className="flex items-center gap-1 text-cyan-400 hover:text-cyan-300"
+                  >
+                    {copiedSnippets['pack'] ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedSnippets['pack'] ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+                <code className="text-cyan-300 block bg-cyber-900 p-2.5 rounded-lg border border-cyber-800">
+                  make airgap-pack
+                </code>
+              </div>
+            </div>
+          </section>
+
+          {/* SECTION 9: CLI & API Quickstart */}
+          <section id="cli" className="scroll-mt-24 space-y-6">
+            <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-300 shadow-sm">
+                  <Terminal className="w-5 h-5 text-cyan-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight">
+                    CLI & REST API Reference
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Quick connection snippets, kubectl context configuration, and automation endpoints
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Kubeconfig snippet */}
+              <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-bold text-white flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-cyan-400" />
+                    Connect via vCluster CLI
+                  </span>
+                  <button
+                    onClick={() => copyToClipboard('cli-connect', 'vcluster connect <cluster-name> --namespace vcop-system')}
+                    className="flex items-center gap-1 text-xs font-mono text-cyan-400 hover:text-cyan-300"
+                  >
+                    {copiedSnippets['cli-connect'] ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedSnippets['cli-connect'] ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+                <div className="bg-cyber-950 p-3 rounded-xl border border-cyber-800 font-mono text-xs text-cyan-300">
+                  <code>vcluster connect &lt;cluster-name&gt; --namespace vcop-system</code>
+                </div>
+              </div>
+
+              {/* REST API Endpoints Table */}
+              <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5">
+                <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider mb-3">
+                  Core REST API Endpoints
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left font-mono text-xs">
+                    <thead>
+                      <tr className="border-b border-cyber-800 text-slate-400">
+                        <th className="pb-2">Method</th>
+                        <th className="pb-2">Endpoint</th>
+                        <th className="pb-2">Min Role</th>
+                        <th className="pb-2">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-cyber-800/40 text-[11px]">
+                      <tr>
+                        <td className="py-2 text-emerald-400 font-bold">GET</td>
+                        <td className="py-2 text-slate-200">/api/vclusters</td>
+                        <td className="py-2 text-cyan-400">Viewer</td>
+                        <td className="py-2 text-slate-400">List all virtual clusters in fleet with metrics</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 text-cyan-400 font-bold">POST</td>
+                        <td className="py-2 text-slate-200">/api/vclusters</td>
+                        <td className="py-2 text-amber-400">Developer</td>
+                        <td className="py-2 text-slate-400">Provision a new tenant virtual cluster</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 text-purple-400 font-bold">PATCH</td>
+                        <td className="py-2 text-slate-200">/api/vclusters/:name/sleep</td>
+                        <td className="py-2 text-amber-400">Developer</td>
+                        <td className="py-2 text-slate-400">Toggle sleep / wake state for cluster</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 text-rose-400 font-bold">DELETE</td>
+                        <td className="py-2 text-slate-200">/api/vclusters/:name</td>
+                        <td className="py-2 text-purple-400 font-bold">Platform Admin</td>
+                        <td className="py-2 text-slate-400">Permanently delete virtual cluster and PVCs</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+};

@@ -35,6 +35,7 @@ const isOidcActive = pathname.startsWith('/admin/oidc');
 const isAiActive = pathname.startsWith('/admin/ai');
 const isBaselinesActive = pathname.startsWith('/admin/baselines');
 const isProvisionActive = pathname.startsWith('/new');
+const isDocsActive = pathname.startsWith('/docs');
 
 // Breadcrumb resolution
 let currentSection = 'Fleet Overview';
@@ -60,6 +61,8 @@ if (pathname.startsWith('/clusters/')) {
   currentSection = 'Cluster Baselines';
 } else if (isProvisionActive) {
   currentSection = 'Provision Cluster';
+} else if (isDocsActive) {
+  currentSection = 'Documentation';
 }
 ---
 

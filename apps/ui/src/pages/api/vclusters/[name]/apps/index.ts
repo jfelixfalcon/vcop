@@ -78,10 +78,10 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
   }
   try {
     const body = await request.json();
-    const { apps, namespace, action } = body;
+    const { apps, namespace, action, targetNamespace } = body;
 
     if (action === 'sync') {
-      const synced = await syncClusterApps(name, namespace);
+      const synced = await syncClusterApps(name, cluster.namespace);
       await recordAuditLog({
         action: 'CLUSTER_APP_SYNC',
         category: 'APP',
@@ -118,7 +118,10 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
       );
     }
 
-    const updatedApps = await installAppsToCluster(name, apps, user, namespace);
+    // Determine target in-cluster guest namespace: targetNamespace or (if namespace != cluster.namespace) namespace
+    const guestNs = targetNamespace || (namespace && namespace !== cluster.namespace ? namespace : undefined);
+
+    const updatedApps = await installAppsToCluster(name, apps, user, cluster.namespace, guestNs);
 
     await recordAuditLog({
       action: 'CLUSTER_APP_INSTALL',

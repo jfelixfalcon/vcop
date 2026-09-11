@@ -397,24 +397,42 @@ export async function listVirtualClusters(): Promise<VirtualCluster[]> {
 export async function getVirtualCluster(name: string, namespace?: string): Promise<VirtualCluster | null> {
   try {
     let targetNs = namespace;
-    if (!targetNs) {
-      const all = await listVirtualClusters();
-      const match = all.find((c) => c.name === name);
-      targetNs = match ? match.namespace : 'default';
-    }
-    const res = await k8sRequest<any>(`/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`);
-    if (res.statusCode === 200 && res.data) {
-      const cluster = mapK8sResourceToVirtualCluster(res.data);
-      try {
-        const cmRes = await k8sRequest<any>(`/api/v1/namespaces/${targetNs}/configmaps/${name}-config`);
-        if (cmRes.statusCode === 200 && cmRes.data?.data?.['vcluster.yaml']) {
-          cluster.compiledConfig = cmRes.data.data['vcluster.yaml'];
+    if (targetNs) {
+      const res = await k8sRequest<any>(`/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`);
+      if (res.statusCode === 200 && res.data) {
+        const cluster = mapK8sResourceToVirtualCluster(res.data);
+        try {
+          const cmRes = await k8sRequest<any>(`/api/v1/namespaces/${targetNs}/configmaps/${name}-config`);
+          if (cmRes.statusCode === 200 && cmRes.data?.data?.['vcluster.yaml']) {
+            cluster.compiledConfig = cmRes.data.data['vcluster.yaml'];
+          }
+        } catch {
+          // Fallback gracefully if ConfigMap is still provisioning
         }
-      } catch {
-        // Fallback gracefully if ConfigMap is still provisioning
+        return cluster;
       }
-      return cluster;
     }
+
+    // Fallback: If targetNs was omitted or the cluster was not found in targetNs, search across all namespaces
+    const all = await listVirtualClusters();
+    const match = all.find((c) => c.name === name);
+    if (match) {
+      targetNs = match.namespace;
+      const res = await k8sRequest<any>(`/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${name}`);
+      if (res.statusCode === 200 && res.data) {
+        const cluster = mapK8sResourceToVirtualCluster(res.data);
+        try {
+          const cmRes = await k8sRequest<any>(`/api/v1/namespaces/${targetNs}/configmaps/${name}-config`);
+          if (cmRes.statusCode === 200 && cmRes.data?.data?.['vcluster.yaml']) {
+            cluster.compiledConfig = cmRes.data.data['vcluster.yaml'];
+          }
+        } catch {
+          // Fallback gracefully if ConfigMap is still provisioning
+        }
+        return cluster;
+      }
+    }
+
     return null;
   } catch {
     return null;
@@ -2564,6 +2582,15 @@ export interface WorkloadScaleResult {
   cliCommand: string;
 }
 
+export interface WorkloadDeleteResult {
+  success: boolean;
+  kind: string;
+  name: string;
+  namespace: string;
+  message: string;
+  cliCommand: string;
+}
+
 export interface DeploymentSummary {
   name: string;
   namespace: string;
@@ -2862,6 +2889,123 @@ export async function scaleWorkload(
     previousReplicas,
     newReplicas: replicas,
     cliCommand: `kubectl scale ${found.kind.toLowerCase()} ${targetName} --replicas=${replicas} -n ${targetNs}`,
+  };
+}
+
+export async function deleteWorkload(
+  name: string,
+  namespace?: string,
+  kind?: string
+): Promise<WorkloadDeleteResult> {
+  let targetKind = kind;
+  let targetNs = namespace;
+  let targetName = name;
+
+  // If kind was not explicitly provided or was generic, discover from live workloads
+  if (!targetKind || targetKind.toLowerCase() === 'workload' || targetKind.toLowerCase() === 'resource') {
+    const found = await findWorkload(name, namespace);
+    if (found) {
+      targetKind = found.kind;
+      targetNs = found.namespace;
+      targetName = found.name;
+    }
+  }
+
+  // Sensible default kind
+  if (!targetKind) {
+    targetKind = 'Pod';
+  }
+  if (!targetNs && targetKind.toLowerCase() !== 'namespace') {
+    targetNs = 'default';
+  }
+
+  let deleteUrl = '';
+  let cliCommand = '';
+  const lowerKind = targetKind.toLowerCase();
+
+  switch (lowerKind) {
+    case 'pod':
+    case 'pods':
+      targetKind = 'Pod';
+      deleteUrl = `/api/v1/namespaces/${targetNs}/pods/${targetName}`;
+      cliCommand = `kubectl delete pod ${targetName} -n ${targetNs}`;
+      break;
+    case 'deployment':
+    case 'deploy':
+    case 'deployments':
+      targetKind = 'Deployment';
+      deleteUrl = `/apis/apps/v1/namespaces/${targetNs}/deployments/${targetName}`;
+      cliCommand = `kubectl delete deployment ${targetName} -n ${targetNs}`;
+      break;
+    case 'statefulset':
+    case 'sts':
+    case 'statefulsets':
+      targetKind = 'StatefulSet';
+      deleteUrl = `/apis/apps/v1/namespaces/${targetNs}/statefulsets/${targetName}`;
+      cliCommand = `kubectl delete statefulset ${targetName} -n ${targetNs}`;
+      break;
+    case 'daemonset':
+    case 'ds':
+    case 'daemonsets':
+      targetKind = 'DaemonSet';
+      deleteUrl = `/apis/apps/v1/namespaces/${targetNs}/daemonsets/${targetName}`;
+      cliCommand = `kubectl delete daemonset ${targetName} -n ${targetNs}`;
+      break;
+    case 'service':
+    case 'svc':
+    case 'services':
+      targetKind = 'Service';
+      deleteUrl = `/api/v1/namespaces/${targetNs}/services/${targetName}`;
+      cliCommand = `kubectl delete svc ${targetName} -n ${targetNs}`;
+      break;
+    case 'configmap':
+    case 'cm':
+    case 'configmaps':
+      targetKind = 'ConfigMap';
+      deleteUrl = `/api/v1/namespaces/${targetNs}/configmaps/${targetName}`;
+      cliCommand = `kubectl delete configmap ${targetName} -n ${targetNs}`;
+      break;
+    case 'secret':
+    case 'secrets':
+      targetKind = 'Secret';
+      deleteUrl = `/api/v1/namespaces/${targetNs}/secrets/${targetName}`;
+      cliCommand = `kubectl delete secret ${targetName} -n ${targetNs}`;
+      break;
+    case 'namespace':
+    case 'ns':
+    case 'namespaces':
+      targetKind = 'Namespace';
+      targetNs = targetName;
+      deleteUrl = `/api/v1/namespaces/${targetName}`;
+      cliCommand = `kubectl delete namespace ${targetName}`;
+      break;
+    case 'virtualcluster':
+    case 'vcluster':
+    case 'virtualclusters':
+    case 'vclusters':
+      targetKind = 'VirtualCluster';
+      deleteUrl = `/apis/vops.gitops.io/v1alpha1/namespaces/${targetNs}/virtualclusters/${targetName}`;
+      cliCommand = `kubectl delete virtualcluster ${targetName} -n ${targetNs}`;
+      break;
+    default:
+      targetKind = 'Pod';
+      deleteUrl = `/api/v1/namespaces/${targetNs}/pods/${targetName}`;
+      cliCommand = `kubectl delete pod ${targetName} -n ${targetNs}`;
+      break;
+  }
+
+  const res = await k8sRequest<any>(deleteUrl, 'DELETE');
+  if (res.statusCode >= 400 && res.statusCode !== 404) {
+    throw new Error(`Failed to delete ${targetKind} '${targetName}': HTTP ${res.statusCode}${res.data?.message ? ` (${res.data.message})` : ''}`);
+  }
+
+  return {
+    success: true,
+    kind: targetKind,
+    name: targetName,
+    namespace: targetNs || 'default',
+    message: `Successfully deleted ${targetKind} '${targetName}'${targetNs ? ` in namespace '${targetNs}'` : ''}.`,
+    cliCommand,
   };
 }
 

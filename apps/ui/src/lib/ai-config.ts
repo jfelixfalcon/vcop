@@ -25,7 +25,7 @@ export const DEFAULT_AI_SETTINGS: AISettingsConfig = {
   remoteModel: process.env.AI_REMOTE_MODEL || DEFAULT_REMOTE_MODEL,
   remoteApiKey: process.env.AI_API_KEY || '',
   temperature: 0.15,
-  maxTokens: 800,
+  maxTokens: 1200,
   updatedAt: new Date().toISOString(),
 };
 

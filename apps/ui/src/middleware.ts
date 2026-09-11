@@ -27,6 +27,7 @@ const PUBLIC_PATHS = [
   '/api/ai/config',
   '/api/ai/test',
   '/healthz',
+  '/docs',
 ];
 
 export const onRequest = defineMiddleware(async (context, next) => {
