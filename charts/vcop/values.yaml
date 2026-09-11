@@ -223,5 +223,25 @@ ai:
       effect: "NoSchedule"
   affinity: {}
 
-
-
+# In-Cluster Private OCI-Compliant Artifact & Container Registry (OCI Distribution Spec v1.1)
+registry:
+  enabled: true
+  image:
+    repository: docker.io/library/registry
+    tag: "2.8.3"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5000
+    nodePort: null
+  persistence:
+    enabled: true
+    storageClass: "standard"
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

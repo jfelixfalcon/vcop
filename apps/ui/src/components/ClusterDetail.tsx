@@ -43,11 +43,13 @@ import {
   Settings,
   Network,
   ChevronDown,
+  RotateCcw,
 } from 'lucide-react';
 import type { VirtualCluster, ClusterCondition, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition, K8sEvent } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
 import { ModalPortal } from './ModalPortal';
 import { MetricSparkline } from './MetricSparkline';
+import { AppRollbackModal } from './AppRollbackModal';
 import { KubeconfigModal } from './KubeconfigModal';
 import { UpgradeModal } from './UpgradeModal';
 import { DeleteModal } from './DeleteModal';
@@ -232,6 +234,8 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [installAppTab, setInstallAppTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>('catalog');
   const [catalog, setCatalog] = useState<AppStoreCatalog | null>(null);
   const [inspectedApp, setInspectedApp] = useState<InstalledApp | null>(null);
+  const [rollbackTargetApp, setRollbackTargetApp] = useState<InstalledApp | null>(null);
+  const [isRollbackModalOpen, setIsRollbackModalOpen] = useState(false);
   const [syncingApps, setSyncingApps] = useState<boolean>(false);
   const [events, setEvents] = useState<K8sEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState<boolean>(false);
@@ -2401,6 +2405,20 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                       </button>
                     )}
 
+                    {canManage && (
+                      <button
+                        onClick={() => {
+                          setRollbackTargetApp(app);
+                          setIsRollbackModalOpen(true);
+                        }}
+                        className="px-2.5 py-1.5 bg-cyber-950 hover:bg-cyber-800 text-amber-400 border border-cyber-800 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+                        title="Rollback or redeploy to a specific GitOps version"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Rollback</span>
+                      </button>
+                    )}
+
                     <button
                       onClick={() => setInspectedApp(app)}
                       className="px-3 py-1.5 bg-cyber-950 hover:bg-cyber-800 text-slate-200 border border-cyber-800 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
@@ -2775,6 +2793,22 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
           </div>
         </div>
       </ModalPortal>
+      )}
+
+      {/* App Rollback Modal */}
+      {rollbackTargetApp && cluster && (
+        <AppRollbackModal
+          clusterName={cluster.name}
+          app={rollbackTargetApp}
+          isOpen={isRollbackModalOpen && Boolean(rollbackTargetApp)}
+          onClose={() => {
+            setIsRollbackModalOpen(false);
+            setRollbackTargetApp(null);
+          }}
+          onRollbackComplete={async () => {
+            await fetchCluster();
+          }}
+        />
       )}
     </div>
   );

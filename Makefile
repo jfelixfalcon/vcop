@@ -15,6 +15,7 @@ UI_IMG ?= vops/vc-operations-center:v$(VERSION)
 DR_RUNNER_IMG ?= vops/etcd-dr-runner:v$(VERSION)
 AI_IMG ?= vops/vc-ai:v$(VERSION)
 METRICS_DB_IMG ?= postgres:16-alpine
+REGISTRY_IMG ?= registry:2.8.3
 
 # Air-gap Packaging Variables
 AIRGAP_DIST_DIR ?= dist/airgap
@@ -92,6 +93,7 @@ kind-load: ## Cache and load built Docker images directly into Kind cluster
 	kind load docker-image $(DR_RUNNER_IMG) --name $(KIND_CLUSTER)
 	kind load docker-image $(AI_IMG) --name $(KIND_CLUSTER)
 	kind load docker-image $(METRICS_DB_IMG) --name $(KIND_CLUSTER)
+	kind load docker-image $(REGISTRY_IMG) --name $(KIND_CLUSTER)
 	@echo "=== Container images cached in Kind containerd! ==="
 
 ##@ Helm Chart Management
@@ -138,9 +140,11 @@ deploy: deploy-crds deploy-rbac deploy-presets ## Deploy entire vCOp stack via r
 	kubectl apply -f $(DEPLOY_DIR)/operator.yaml
 	kubectl apply -f $(DEPLOY_DIR)/ui.yaml
 	kubectl apply -f $(DEPLOY_DIR)/ai.yaml
+	kubectl apply -f $(DEPLOY_DIR)/registry.yaml
 
 .PHONY: undeploy
 undeploy: ## Remove vCOp operator and UI from cluster
+	kubectl delete -f $(DEPLOY_DIR)/registry.yaml --ignore-not-found
 	kubectl delete -f $(DEPLOY_DIR)/ai.yaml --ignore-not-found
 	kubectl delete -f $(DEPLOY_DIR)/ui.yaml --ignore-not-found
 	kubectl delete -f $(DEPLOY_DIR)/operator.yaml --ignore-not-found
@@ -185,6 +189,8 @@ airgap-manifests: ## Stage air-gap manifests and all-in-one deployment YAML
 	cat $(DEPLOY_DIR)/ui.yaml >> $(AIRGAP_DIST_DIR)/manifests/vcop-install-all-in-one.yaml
 	@echo "---" >> $(AIRGAP_DIST_DIR)/manifests/vcop-install-all-in-one.yaml
 	cat $(DEPLOY_DIR)/ai.yaml >> $(AIRGAP_DIST_DIR)/manifests/vcop-install-all-in-one.yaml
+	@echo "---" >> $(AIRGAP_DIST_DIR)/manifests/vcop-install-all-in-one.yaml
+	cat $(DEPLOY_DIR)/registry.yaml >> $(AIRGAP_DIST_DIR)/manifests/vcop-install-all-in-one.yaml
 
 .PHONY: airgap-charts
 airgap-charts: ## Package Helm charts for offline airgap installation
@@ -206,11 +212,11 @@ airgap-images: ## Export Docker container images into air-gap archive
 	@echo "=== Saving Container Images for Air-Gap ==="
 	mkdir -p $(AIRGAP_DIST_DIR)/images
 ifeq ($(AIRGAP_INCLUDE_AI), true)
-	@echo "Exporting full image set (Operator, UI, DR Runner, AI Engine, PostgreSQL)..."
-	docker save $(OPERATOR_IMG) $(UI_IMG) $(DR_RUNNER_IMG) $(AI_IMG) $(METRICS_DB_IMG) | gzip -c > $(AIRGAP_DIST_DIR)/images/vcop-airgap-images-v$(VERSION).tar.gz
+	@echo "Exporting full image set (Operator, UI, DR Runner, AI Engine, PostgreSQL, Registry)..."
+	docker save $(OPERATOR_IMG) $(UI_IMG) $(DR_RUNNER_IMG) $(AI_IMG) $(METRICS_DB_IMG) $(REGISTRY_IMG) | gzip -c > $(AIRGAP_DIST_DIR)/images/vcop-airgap-images-v$(VERSION).tar.gz
 else
-	@echo "Exporting core image set (Operator, UI, DR Runner, PostgreSQL)..."
-	docker save $(OPERATOR_IMG) $(UI_IMG) $(DR_RUNNER_IMG) $(METRICS_DB_IMG) | gzip -c > $(AIRGAP_DIST_DIR)/images/vcop-airgap-images-v$(VERSION).tar.gz
+	@echo "Exporting core image set (Operator, UI, DR Runner, PostgreSQL, Registry)..."
+	docker save $(OPERATOR_IMG) $(UI_IMG) $(DR_RUNNER_IMG) $(METRICS_DB_IMG) $(REGISTRY_IMG) | gzip -c > $(AIRGAP_DIST_DIR)/images/vcop-airgap-images-v$(VERSION).tar.gz
 endif
 	@echo "Images saved to $(AIRGAP_DIST_DIR)/images/vcop-airgap-images-v$(VERSION).tar.gz"
 

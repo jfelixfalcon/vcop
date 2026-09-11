@@ -1,0 +1,20 @@
+{{- if .Values.registry.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vcop.fullname" . }}-registry
+  labels:
+    {{- include "vcop.labels" . | nindent 4 }}
+    app.kubernetes.io/component: oci-registry
+spec:
+  type: {{ .Values.registry.service.type | default "ClusterIP" }}
+  selector:
+    {{- include "vcop.registry.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: registry
+      port: {{ .Values.registry.service.port | default 5000 }}
+      targetPort: {{ .Values.registry.service.port | default 5000 }}
+      {{- if and (eq .Values.registry.service.type "NodePort") .Values.registry.service.nodePort }}
+      nodePort: {{ .Values.registry.service.nodePort }}
+      {{- end }}
+{{- end }}

@@ -30,9 +30,20 @@ import {
   Upload,
   Download,
   AlertOctagon,
+  GitCommit,
+  GitBranch,
+  History,
+  RotateCcw,
+  ShieldCheck,
+  Server,
+  SlidersVertical,
 } from 'lucide-react';
-import type { AppDefinition, AppGroup, AppCategory, AppStoreCatalog, UserSession, VirtualCluster } from '../lib/types';
+import type { AppDefinition, AppGroup, AppCategory, AppStoreCatalog, UserSession, VirtualCluster, AppRevisionSnapshot } from '../lib/types';
 import { ModalPortal } from './ModalPortal';
+import { AppVCSModal } from './AppVCSModal';
+import { GroupVCSModal } from './GroupVCSModal';
+import { GlobalVCSModal } from './GlobalVCSModal';
+import { OCIRegistryModal } from './OCIRegistryModal';
 
 interface Props {
   currentUser?: UserSession | null;
@@ -93,16 +104,28 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
   const [helmValues, setHelmValues] = useState('');
   const [hasManifests, setHasManifests] = useState(false);
   const [manifestsContent, setManifestsContent] = useState('');
+  const [appCommitMessage, setAppCommitMessage] = useState('');
 
-  // Add Group Form state
+  // Add/Edit Group Form state
   const [groupId, setGroupId] = useState('');
   const [groupName, setGroupName] = useState('');
   const [groupDesc, setGroupDesc] = useState('');
+  const [groupVersion, setGroupVersion] = useState('1.0.0');
+  const [groupCommitMessage, setGroupCommitMessage] = useState('');
   const [groupAppIds, setGroupAppIds] = useState<string[]>([]);
+  const [groupAppVersions, setGroupAppVersions] = useState<Record<string, string>>({});
 
   const isAdmin = currentUser?.role === 'admin';
   const isDeveloper = currentUser?.role === 'developers' || currentUser?.role === 'developer';
   const canDeployApps = isAdmin || isDeveloper;
+
+  // VCS & OCI Modals state
+  const [vcsApp, setVcsApp] = useState<AppDefinition | null>(null);
+  const [isAppVCSOpen, setIsAppVCSOpen] = useState(false);
+  const [vcsGroup, setVcsGroup] = useState<AppGroup | null>(null);
+  const [isGroupVCSOpen, setIsGroupVCSOpen] = useState(false);
+  const [isGlobalVCSOpen, setIsGlobalVCSOpen] = useState(false);
+  const [isOCIRegistryOpen, setIsOCIRegistryOpen] = useState(false);
 
   // Deploy to Cluster Modal state
   const [deployTargetApp, setDeployTargetApp] = useState<AppDefinition | null>(null);
@@ -112,6 +135,8 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
   const [selectedTargetCluster, setSelectedTargetCluster] = useState<string>('');
   const [deployCustomValues, setDeployCustomValues] = useState<string>('');
   const [deployNamespace, setDeployNamespace] = useState<string>('default');
+  const [deploySelectedVersion, setDeploySelectedVersion] = useState<string>('latest');
+  const [deployAppRevisions, setDeployAppRevisions] = useState<AppRevisionSnapshot[]>([]);
   const [deploying, setDeploying] = useState(false);
   const [deploySuccessMessage, setDeploySuccessMessage] = useState<string | null>(null);
   const [deployError, setDeployError] = useState<string | null>(null);
@@ -228,15 +253,25 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
     }
   };
 
-  const openDeployModal = (app: AppDefinition) => {
+  const openDeployModal = async (app: AppDefinition) => {
     setDeployTargetApp(app);
     setDeployTargetGroup(null);
     setDeployCustomValues(app.helm?.values || '');
     setDeployNamespace(app.helm?.namespace || 'default');
     setDeploySuccessMessage(null);
     setDeployError(null);
+    setDeploySelectedVersion('latest');
+    setDeployAppRevisions([]);
     setIsDeployModalOpen(true);
     fetchClusters();
+
+    try {
+      const res = await fetch(`/api/appstore/vcs/apps/${app.id}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDeployAppRevisions(data.data.revisions || []);
+      }
+    } catch {}
   };
 
   const openDeployGroupModal = (group: AppGroup) => {
@@ -271,14 +306,31 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
           hostNamespace,
           targetNamespace: inClusterNamespace,
           namespace: hostNamespace,
-          apps: [{ appId: deployTargetApp.id, customValues: deployCustomValues, targetNamespace: inClusterNamespace }],
+          apps: [{
+            appId: deployTargetApp.id,
+            version: deploySelectedVersion !== 'latest' ? deploySelectedVersion : undefined,
+            customValues: deployCustomValues,
+            targetNamespace: inClusterNamespace,
+          }],
         };
       } else if (deployTargetGroup) {
+        const memberApps = (deployTargetGroup.apps && deployTargetGroup.apps.length > 0)
+          ? deployTargetGroup.apps.map((item) => ({
+              appId: item.appId,
+              version: item.version,
+              customValues: item.customValues,
+              targetNamespace: item.targetNamespace || inClusterNamespace,
+            }))
+          : deployTargetGroup.appIds.map((id) => ({
+              appId: id,
+              targetNamespace: inClusterNamespace,
+            }));
+
         payload = {
           hostNamespace,
           targetNamespace: inClusterNamespace,
           namespace: hostNamespace,
-          apps: deployTargetGroup.appIds.map((id) => ({ appId: id, targetNamespace: inClusterNamespace })),
+          apps: memberApps,
         };
       } else {
         return;
@@ -349,6 +401,7 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
     setHelmValues('# Custom Helm Values\n');
     setHasManifests(false);
     setManifestsContent('');
+    setAppCommitMessage('');
     setActiveModal('add-app');
   };
 
@@ -370,6 +423,7 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
     setHelmValues(app.helm?.values || '');
     setHasManifests(Boolean(app.manifests));
     setManifestsContent(app.manifests || '');
+    setAppCommitMessage('');
     setActiveModal('edit-app');
   };
 
@@ -378,12 +432,75 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
     setActiveModal('inspect-app');
   };
 
+  const handleUseChartFromRegistry = (chartRef: string) => {
+    setIsOCIRegistryOpen(false);
+    let clean = chartRef;
+    let repo = '';
+    let name = '';
+    let ver = '';
+
+    if (clean.includes(':')) {
+      const parts = clean.split(':');
+      ver = parts.pop() || '';
+      clean = parts.join(':');
+    }
+    const lastSlash = clean.lastIndexOf('/');
+    if (lastSlash !== -1) {
+      repo = clean.substring(0, lastSlash);
+      name = clean.substring(lastSlash + 1);
+    } else {
+      name = clean;
+    }
+
+    const formattedName = name.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+    setError(null);
+    setSelectedApp(null);
+    setAppId(formattedName);
+    setAppName(name.charAt(0).toUpperCase() + name.slice(1));
+    setAppDesc(`OCI Helm Chart from registry: ${chartRef}`);
+    setAppCategory('Developer Tools');
+    setAppVersion(ver || '1.0.0');
+    setAppGroup('');
+    setHasHelm(true);
+    setHelmRepo(repo || 'oci://vcop-registry.vcop-system.svc:5000/charts');
+    setHelmName(name);
+    setHelmRelease(formattedName);
+    setHelmVersion(ver);
+    setHelmNamespace('default');
+    setHelmValues('# Custom Helm Values\n');
+    setHasManifests(false);
+    setManifestsContent('');
+    setAppCommitMessage(`Imported from OCI Registry: ${chartRef}`);
+    setActiveModal('add-app');
+  };
+
   const openAddGroupModal = () => {
     setError(null);
     setGroupId('');
     setGroupName('');
     setGroupDesc('');
+    setGroupVersion('1.0.0');
+    setGroupCommitMessage('');
     setGroupAppIds([]);
+    setGroupAppVersions({});
+    setActiveModal('add-group');
+  };
+
+  const openEditGroupModal = (group: AppGroup) => {
+    setError(null);
+    setGroupId(group.id);
+    setGroupName(group.name);
+    setGroupDesc(group.description);
+    setGroupVersion(group.version || '1.0.0');
+    setGroupCommitMessage('');
+    setGroupAppIds(group.appIds || []);
+    const versionsMap: Record<string, string> = {};
+    if (group.apps) {
+      for (const a of group.apps) {
+        if (a.version) versionsMap[a.appId] = a.version;
+      }
+    }
+    setGroupAppVersions(versionsMap);
     setActiveModal('add-group');
   };
 
@@ -424,7 +541,10 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
       const res = await fetch('/api/appstore/apps', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          commitMessage: appCommitMessage.trim() || undefined,
+        }),
       });
 
       const data = await res.json();
@@ -469,12 +589,23 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
         throw new Error('Group ID and Name are required');
       }
 
-      const payload: AppGroup = {
+      const appsArray = groupAppIds.map((id) => {
+        const catalogApp = (catalog?.apps || []).find((a) => a.id === id);
+        return {
+          appId: id,
+          version: groupAppVersions[id] || catalogApp?.version || '1.0.0',
+        };
+      });
+
+      const payload: AppGroup & { commitMessage?: string } = {
         id: groupId.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-'),
         name: groupName.trim(),
         description: groupDesc.trim(),
+        version: groupVersion.trim() || '1.0.0',
         icon: 'Layers',
         appIds: groupAppIds,
+        apps: appsArray,
+        commitMessage: groupCommitMessage.trim() || undefined,
       };
 
       const res = await fetch('/api/appstore/groups', {
@@ -550,6 +681,24 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            onClick={() => setIsOCIRegistryOpen(true)}
+            className="px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 text-xs font-mono rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
+            title="Inspect In-Cluster OCI Compliant Registry & Artifacts"
+          >
+            <Server className="w-3.5 h-3.5 text-emerald-400" />
+            <span>OCI Registry</span>
+          </button>
+
+          <button
+            onClick={() => setIsGlobalVCSOpen(true)}
+            className="px-3 py-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 hover:text-purple-200 border border-purple-500/30 text-xs font-mono rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
+            title="View Platform GitOps Version Control Log & Revisions"
+          >
+            <GitBranch className="w-3.5 h-3.5 text-purple-400" />
+            <span>GitOps VCS Log</span>
+          </button>
+
           <button
             onClick={handleExportYaml}
             className="px-3 py-2 bg-cyber-900 hover:bg-cyber-850 text-slate-300 hover:text-white border border-cyber-700 text-xs font-mono rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
@@ -665,24 +814,55 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
                         <h4 className="text-xs font-bold text-white group-hover:text-purple-300 transition-colors">
                           {group.name}
                         </h4>
-                        <span className="text-[10px] font-mono text-purple-400/90 font-semibold">
-                          {group.appIds.length} Application{group.appIds.length !== 1 ? 's' : ''} Bundled
-                        </span>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[10px] font-mono text-purple-300 font-semibold px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-800">
+                            v{group.version || '1.0.0'}
+                          </span>
+                          <span className="text-[10px] font-mono text-purple-400/90 font-semibold">
+                            {group.appIds.length} App{group.appIds.length !== 1 ? 's' : ''} Bundled
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    {isAdmin && (
+                    <div className="flex items-center gap-1">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDeleteGroup(group);
+                          setVcsGroup(group);
+                          setIsGroupVCSOpen(true);
                         }}
-                        className="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors"
-                        title="Delete Group"
+                        className="p-1 text-slate-400 hover:text-purple-300 rounded hover:bg-purple-950/60 transition-colors"
+                        title="Group Version History & App Matrix"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <History className="w-3.5 h-3.5" />
                       </button>
-                    )}
+
+                      {isAdmin && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEditGroupModal(group);
+                            }}
+                            className="p-1 text-slate-400 hover:text-white rounded hover:bg-cyber-800 transition-colors"
+                            title="Edit Group"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteGroup(group);
+                            }}
+                            className="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors"
+                            title="Delete Group"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   <p className="text-[11px] text-slate-400 mt-2 line-clamp-2">
@@ -691,14 +871,25 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
 
                   <div className="mt-3 pt-2.5 border-t border-cyber-800 flex items-center justify-between gap-2">
                     <div className="flex flex-wrap gap-1.5 items-center">
-                      {group.appIds.map((id) => (
-                        <span
-                          key={id}
-                          className="px-2 py-0.5 bg-cyber-950 rounded border border-cyber-800 font-mono text-[10px] text-slate-300"
-                        >
-                          {id}
-                        </span>
-                      ))}
+                      {(group.apps && group.apps.length > 0) ? (
+                        group.apps.map((item) => (
+                          <span
+                            key={item.appId}
+                            className="px-2 py-0.5 bg-cyber-950 rounded border border-cyber-800 font-mono text-[10px] text-slate-300"
+                          >
+                            {item.appId} <span className="text-purple-400 font-bold">v{item.version || 'latest'}</span>
+                          </span>
+                        ))
+                      ) : (
+                        group.appIds.map((id) => (
+                          <span
+                            key={id}
+                            className="px-2 py-0.5 bg-cyber-950 rounded border border-cyber-800 font-mono text-[10px] text-slate-300"
+                          >
+                            {id}
+                          </span>
+                        ))
+                      )}
                     </div>
 
                     {canDeployApps && (
@@ -951,6 +1142,18 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
                       <span>Inspect</span>
                     </button>
 
+                    <button
+                      onClick={() => {
+                        setVcsApp(app);
+                        setIsAppVCSOpen(true);
+                      }}
+                      className="px-2.5 py-1.5 bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-800/80 text-xs font-semibold rounded-xl flex items-center gap-1 transition-all"
+                      title="Inspect Revisions, Visual Diffs & Rollback"
+                    >
+                      <History className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>History</span>
+                    </button>
+
                     {canDeployApps && (
                       <button
                         onClick={() => openDeployModal(app)}
@@ -1103,17 +1306,34 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
 
             <div className="mt-5 pt-4 border-t border-cyber-800 flex items-center justify-between">
               {canDeployApps ? (
-                <button
-                  onClick={() => {
-                    const app = selectedApp;
-                    setActiveModal(null);
-                    if (app) openDeployModal(app);
-                  }}
-                  className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all"
-                >
-                  <Zap className="w-4 h-4" />
-                  <span>Deploy to Virtual Cluster...</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const app = selectedApp;
+                      setActiveModal(null);
+                      if (app) {
+                        setVcsApp(app);
+                        setIsAppVCSOpen(true);
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-800/80 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
+                  >
+                    <History className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Version History & Rollback</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const app = selectedApp;
+                      setActiveModal(null);
+                      if (app) openDeployModal(app);
+                    }}
+                    className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all"
+                  >
+                    <Zap className="w-4 h-4" />
+                    <span>Deploy to Virtual Cluster...</span>
+                  </button>
+                </div>
               ) : <div />}
 
               <button
@@ -1377,6 +1597,20 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
                 )}
               </div>
 
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider font-mono mb-1.5 flex items-center justify-between">
+                  <span>GitOps Commit Message / Change Note (Optional)</span>
+                  <span className="text-[10px] text-cyan-400 font-mono">Immutable VCS Revision</span>
+                </label>
+                <input
+                  type="text"
+                  value={appCommitMessage}
+                  onChange={(e) => setAppCommitMessage(e.target.value)}
+                  placeholder={activeModal === 'add-app' ? 'Initial commit of application' : 'e.g. Bumped Helm chart to 1.4.0 and configured resource limits'}
+                  className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3.5 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-cyan-400 font-mono"
+                />
+              </div>
+
               <div className="pt-3 border-t border-cyber-800 flex justify-end gap-2.5">
                 <button
                   type="button"
@@ -1433,18 +1667,35 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
             )}
 
             <form onSubmit={handleSaveGroup} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Group ID (Slug) *
-                </label>
-                <input
-                  type="text"
-                  value={groupId}
-                  onChange={(e) => setGroupId(e.target.value)}
-                  placeholder="e.g. security-pack"
-                  required
-                  className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-purple-400 font-mono"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Group ID (Slug) *
+                  </label>
+                  <input
+                    type="text"
+                    value={groupId}
+                    onChange={(e) => setGroupId(e.target.value)}
+                    placeholder="e.g. security-pack"
+                    required
+                    className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-purple-400 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center justify-between">
+                    <span>Group Version *</span>
+                    <span className="text-[10px] text-purple-400 font-mono">VCS Matrix</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={groupVersion}
+                    onChange={(e) => setGroupVersion(e.target.value)}
+                    placeholder="1.0.0"
+                    required
+                    className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-purple-400 font-mono"
+                  />
+                </div>
               </div>
 
               <div>
@@ -1475,37 +1726,73 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-2">
-                  Select Member Applications ({groupAppIds.length} selected)
+                <label className="block text-xs font-medium text-slate-300 mb-2 flex items-center justify-between">
+                  <span>Select Member Applications & Pinned Versions ({groupAppIds.length} selected)</span>
+                  <span className="text-[10px] text-slate-500 font-mono">Pin App Versions</span>
                 </label>
-                <div className="max-h-48 overflow-y-auto space-y-1.5 p-2 bg-cyber-950 rounded-xl border border-cyber-800">
+                <div className="max-h-56 overflow-y-auto space-y-1.5 p-2 bg-cyber-950 rounded-xl border border-cyber-800">
                   {apps.map((app) => {
                     const isChecked = groupAppIds.includes(app.id);
                     return (
-                      <label
+                      <div
                         key={app.id}
                         className="flex items-center justify-between p-2 rounded-lg hover:bg-cyber-900 cursor-pointer text-xs"
                       >
-                        <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
                           <input
                             type="checkbox"
                             checked={isChecked}
                             onChange={(e) => {
                               if (e.target.checked) {
                                 setGroupAppIds([...groupAppIds, app.id]);
+                                if (!groupAppVersions[app.id]) {
+                                  setGroupAppVersions({ ...groupAppVersions, [app.id]: app.version });
+                                }
                               } else {
                                 setGroupAppIds(groupAppIds.filter((id) => id !== app.id));
                               }
                             }}
-                            className="rounded border-cyber-700 bg-cyber-900 text-purple-500 focus:ring-purple-500 w-4 h-4"
+                            className="rounded border-cyber-700 bg-cyber-900 text-purple-500 focus:ring-purple-500 w-4 h-4 shrink-0"
                           />
-                          <span className="text-white font-medium">{app.name}</span>
+                          <span className="text-white font-medium truncate">{app.name}</span>
+                        </label>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isChecked && (
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] font-mono text-slate-500">Pin:</span>
+                              <input
+                                type="text"
+                                value={groupAppVersions[app.id] ?? app.version}
+                                onChange={(e) => {
+                                  setGroupAppVersions({ ...groupAppVersions, [app.id]: e.target.value });
+                                }}
+                                placeholder={app.version}
+                                title="Pinned Version for this Group Pack"
+                                className="w-16 bg-cyber-900 border border-cyber-700 rounded px-1.5 py-0.5 text-[10px] font-mono text-purple-300 focus:outline-none focus:border-purple-400"
+                              />
+                            </div>
+                          )}
+                          <span className="text-[10px] font-mono text-slate-500 hidden sm:inline">{app.category}</span>
                         </div>
-                        <span className="text-[10px] font-mono text-slate-500">{app.category}</span>
-                      </label>
+                      </div>
                     );
                   })}
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider font-mono mb-1.5 flex items-center justify-between">
+                  <span>GitOps Commit Message / Change Note (Optional)</span>
+                  <span className="text-[10px] text-purple-400 font-mono">Group VCS Snapshot</span>
+                </label>
+                <input
+                  type="text"
+                  value={groupCommitMessage}
+                  onChange={(e) => setGroupCommitMessage(e.target.value)}
+                  placeholder="e.g. Updated Prometheus to v2.45 in monitoring pack"
+                  className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3.5 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-purple-400 font-mono"
+                />
               </div>
 
               <div className="pt-3 border-t border-cyber-800 flex justify-end gap-2.5">
@@ -1626,6 +1913,47 @@ export const AppStoreView: React.FC<Props> = ({ currentUser }) => {
                     </div>
                   )}
                 </div>
+
+                {deployTargetApp && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono flex items-center gap-1.5">
+                        <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
+                        Deploy Version / Revision
+                      </label>
+                      {deployAppRevisions.length > 0 && (
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          {deployAppRevisions.length} revision{deployAppRevisions.length === 1 ? '' : 's'} available
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      value={deploySelectedVersion}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDeploySelectedVersion(val);
+                        if (val === 'latest') {
+                          setDeployCustomValues(deployTargetApp.helm?.values || '');
+                        } else {
+                          const rev = deployAppRevisions.find((r) => r.version === val || r.revisionId === val);
+                          if (rev && rev.helmValues !== undefined) {
+                            setDeployCustomValues(rev.helmValues);
+                          }
+                        }
+                      }}
+                      className="w-full bg-cyber-950 border border-cyber-700 rounded-xl px-3.5 py-2.5 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500 transition-colors"
+                    >
+                      <option value="latest">
+                        Latest Active Version (v{deployTargetApp.version || '1.0.0'})
+                      </option>
+                      {deployAppRevisions.map((rev) => (
+                        <option key={rev.revisionId} value={rev.version}>
+                          {rev.version} {rev.isWorkingVersion ? '★ [Known Working]' : ''} — {rev.message || 'Revision ' + rev.revisionId.slice(0, 8)} ({new Date(rev.timestamp).toLocaleDateString()})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {deployTargetApp?.helm && (
                   <>
@@ -1942,6 +2270,60 @@ appStore:
         </div>
       </ModalPortal>
       )}
+
+      {/* VCS: App Version Control Modal */}
+      <AppVCSModal
+        app={vcsApp}
+        isOpen={isAppVCSOpen && Boolean(vcsApp)}
+        onClose={() => {
+          setIsAppVCSOpen(false);
+          setVcsApp(null);
+        }}
+        onRollbackSuccess={fetchCatalog}
+        isAdmin={isAdmin}
+      />
+
+      {/* VCS: Group Version Control Modal */}
+      <GroupVCSModal
+        group={vcsGroup}
+        catalogApps={catalog?.apps || []}
+        isOpen={isGroupVCSOpen && Boolean(vcsGroup)}
+        onClose={() => {
+          setIsGroupVCSOpen(false);
+          setVcsGroup(null);
+        }}
+        onRollbackSuccess={fetchCatalog}
+        isAdmin={isAdmin}
+      />
+
+      {/* VCS: Platform-Wide GitOps Commit History Modal */}
+      <GlobalVCSModal
+        isOpen={isGlobalVCSOpen}
+        onClose={() => setIsGlobalVCSOpen(false)}
+        onSelectEntity={(type, id) => {
+          setIsGlobalVCSOpen(false);
+          if (type === 'app') {
+            const foundApp = catalog?.apps?.find((a) => a.id === id);
+            if (foundApp) {
+              setVcsApp(foundApp);
+              setIsAppVCSOpen(true);
+            }
+          } else if (type === 'group') {
+            const foundGroup = catalog?.groups?.find((g) => g.id === id);
+            if (foundGroup) {
+              setVcsGroup(foundGroup);
+              setIsGroupVCSOpen(true);
+            }
+          }
+        }}
+      />
+
+      {/* OCI Registry Browser Modal */}
+      <OCIRegistryModal
+        isOpen={isOCIRegistryOpen}
+        onClose={() => setIsOCIRegistryOpen(false)}
+        onUseChart={handleUseChartFromRegistry}
+      />
     </div>
   );
 };

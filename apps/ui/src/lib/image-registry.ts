@@ -154,6 +154,15 @@ export const CANONICAL_IMAGES: CanonicalImageItem[] = [
     repository: 'library/postgres',
     tag: '16-alpine',
   },
+  {
+    component: 'oci-registry',
+    category: 'platform',
+    role: 'Embedded OCI v1.1 artifact & container repository (charts, images, wasm)',
+    defaultImage: 'docker.io/library/registry:2.8.3',
+    registry: 'docker.io',
+    repository: 'library/registry',
+    tag: '2.8.3',
+  },
 ];
 
 export const DEFAULT_IMAGE_CONFIG: ImageRegistryConfig = {

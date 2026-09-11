@@ -1,6 +1,13 @@
 import YAML from 'yaml';
-import type { AppDefinition, AppGroup, AppStoreCatalog } from './types';
+import type { AppDefinition, AppGroup, AppStoreCatalog, VCSChangeType } from './types';
 import { k8sRequest } from './k8s-client';
+import {
+  recordAppCommit,
+  recordGroupCommit,
+  getAppRevisionById,
+  getGroupRevisionById,
+  normalizeGroupApps,
+} from './catalog-vcs';
 
 const CATALOG_CONFIGMAP_NAME = 'vcop-appstore-catalog';
 const CATALOG_NAMESPACE = 'vcop-system';
@@ -214,13 +221,32 @@ export async function importAppStoreCatalog(input: string | any): Promise<AppSto
   };
 
   await saveEntireCatalog(newCatalog);
+
+  // Record VCS revisions for imported apps and groups
+  for (const app of normalizedApps) {
+    try {
+      await recordAppCommit(app, 'Manifest Import', `Imported ${app.name} v${app.version}`, 'import');
+    } catch {}
+  }
+  for (const group of normalizedGroups) {
+    try {
+      await recordGroupCommit(group, 'Manifest Import', `Imported group ${group.name}`, 'import', normalizedApps);
+    } catch {}
+  }
+
   return newCatalog;
 }
 
 /**
  * Adds or updates an application definition in the App Store catalog.
+ * Automatically records a VCS version commit snapshot and diff.
  */
-export async function saveAppDefinition(app: AppDefinition): Promise<AppStoreCatalog> {
+export async function saveAppDefinition(
+  app: AppDefinition,
+  author = 'Platform Operator',
+  commitMessage?: string,
+  changeType?: VCSChangeType
+): Promise<AppStoreCatalog> {
   const catalog = await getAppStoreCatalog();
   const existingIdx = catalog.apps.findIndex((a) => a.id === app.id);
 
@@ -237,7 +263,52 @@ export async function saveAppDefinition(app: AppDefinition): Promise<AppStoreCat
   }
 
   await saveEntireCatalog(catalog);
+
+  try {
+    await recordAppCommit(
+      updatedApp,
+      author,
+      commitMessage,
+      changeType || (existingIdx >= 0 ? 'update' : 'create')
+    );
+  } catch (e) {
+    console.warn('Could not record app VCS commit:', e);
+  }
+
   return catalog;
+}
+
+/**
+ * Rolls back an application definition in the catalog to a specific historical revision snapshot.
+ */
+export async function rollbackAppDefinition(
+  appId: string,
+  revisionId: string,
+  author = 'Platform Operator'
+): Promise<AppStoreCatalog> {
+  const snapshot = await getAppRevisionById(appId, revisionId);
+  if (!snapshot) {
+    throw new Error(`Revision ${revisionId} for application ${appId} not found`);
+  }
+
+  const restoredApp: AppDefinition = {
+    id: snapshot.appId,
+    name: snapshot.name,
+    description: snapshot.description,
+    category: snapshot.category,
+    version: snapshot.version,
+    helm: snapshot.helm ? JSON.parse(JSON.stringify(snapshot.helm)) : undefined,
+    manifests: snapshot.manifests,
+    group: snapshot.group,
+    updatedAt: new Date().toISOString(),
+  };
+
+  return await saveAppDefinition(
+    restoredApp,
+    author,
+    `Rollback to revision #${snapshot.revisionNumber} (v${snapshot.version})`,
+    'rollback'
+  );
 }
 
 /**
@@ -250,6 +321,9 @@ export async function deleteAppDefinition(appId: string): Promise<AppStoreCatalo
   // Remove app from any groups it belongs to
   for (const group of catalog.groups) {
     group.appIds = group.appIds.filter((id) => id !== appId);
+    if (group.apps) {
+      group.apps = group.apps.filter((a) => a.appId !== appId);
+    }
   }
 
   await saveEntireCatalog(catalog);
@@ -258,19 +332,82 @@ export async function deleteAppDefinition(appId: string): Promise<AppStoreCatalo
 
 /**
  * Adds or updates an application group in the App Store catalog.
+ * Automatically synchronizes appIds with pinned apps array and records a VCS group revision.
  */
-export async function saveAppGroup(group: AppGroup): Promise<AppStoreCatalog> {
+export async function saveAppGroup(
+  group: AppGroup,
+  author = 'Platform Operator',
+  commitMessage?: string,
+  changeType?: VCSChangeType
+): Promise<AppStoreCatalog> {
   const catalog = await getAppStoreCatalog();
   const existingIdx = catalog.groups.findIndex((g) => g.id === group.id);
 
+  // Synchronize appIds and apps array with pinned versions
+  const normalizedApps = normalizeGroupApps(group, catalog.apps);
+  const appIds = normalizedApps.map((a) => a.appId);
+
+  const updatedGroup: AppGroup = {
+    ...group,
+    appIds,
+    apps: normalizedApps,
+    version: group.version || (existingIdx >= 0 ? catalog.groups[existingIdx].version || '1.0.0' : '1.0.0'),
+    updatedAt: new Date().toISOString(),
+  };
+
   if (existingIdx >= 0) {
-    catalog.groups[existingIdx] = group;
+    catalog.groups[existingIdx] = updatedGroup;
   } else {
-    catalog.groups.push(group);
+    catalog.groups.push(updatedGroup);
   }
 
   await saveEntireCatalog(catalog);
+
+  try {
+    await recordGroupCommit(
+      updatedGroup,
+      author,
+      commitMessage,
+      changeType || (existingIdx >= 0 ? 'update' : 'create'),
+      catalog.apps
+    );
+  } catch (e) {
+    console.warn('Could not record group VCS commit:', e);
+  }
+
   return catalog;
+}
+
+/**
+ * Rolls back an application group in the catalog to a specific historical revision snapshot.
+ */
+export async function rollbackAppGroup(
+  groupId: string,
+  revisionId: string,
+  author = 'Platform Operator'
+): Promise<AppStoreCatalog> {
+  const snapshot = await getGroupRevisionById(groupId, revisionId);
+  if (!snapshot) {
+    throw new Error(`Revision ${revisionId} for group ${groupId} not found`);
+  }
+
+  const restoredGroup: AppGroup = {
+    id: snapshot.groupId,
+    name: snapshot.name,
+    description: snapshot.description,
+    version: snapshot.version,
+    icon: snapshot.icon,
+    appIds: snapshot.apps.map((a) => a.appId),
+    apps: snapshot.apps,
+    updatedAt: new Date().toISOString(),
+  };
+
+  return await saveAppGroup(
+    restoredGroup,
+    author,
+    `Rollback group to revision #${snapshot.revisionNumber} (v${snapshot.version})`,
+    'rollback'
+  );
 }
 
 /**

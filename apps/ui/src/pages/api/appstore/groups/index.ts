@@ -34,7 +34,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
     body.appIds = Array.isArray(body.appIds) ? body.appIds : [];
 
-    const catalog = await saveAppGroup(body);
+    const author = user?.email || user?.username || 'Platform Operator';
+    const commitMessage = (body as any).commitMessage;
+
+    const catalog = await saveAppGroup(body, author, commitMessage);
     const saved = catalog.groups.find((g) => g.id === body.id);
 
     return new Response(JSON.stringify({ success: true, data: saved }), {

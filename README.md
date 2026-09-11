@@ -140,6 +140,23 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 - **Single-Command Airgap Packager:** `make airgap-pack` packages all container images (`vc-operator`, `vc-operations-center`, `etcd-dr-runner`, `vc-ai`, `postgres:16-alpine`), Helm charts, manifests, and loader scripts into a portable, verifiable `.tar.gz` bundle with cryptographic `SHA256SUMS`.
 - **Automated Air-Gap Loader & Installer:** Dedicated scripts (`load-images.sh` and `install.sh`) supporting direct node runtime loading (Docker, Podman, nerdctl, containerd) and automated retagging/pushing to private corporate registries (Harbor, Nexus, Artifactory).
 
+### 13. Enterprise App Catalog & Built-In GitOps Version Control System (VCS)
+- **Eliminate External GitOps & ArgoCD / GitLab Dependencies:** vCOp replaces the need for external GitOps engines or code repositories to track catalog releases and manifest changes. vCOp acts as the single pane of glass for fleet operations, catalog curation, and tenant application lifecycles.
+- **Full Revision History for Apps & Groups:** Every mutation to an application (Helm repo, chart version, inline YAML manifests, default values) or Application Group (version bump, app membership, version pin matrices) produces an immutable revision commit with cryptographic revision IDs, semantic version tagging, commit authoring, and audit logs.
+- **Visual Line-by-Line Colored Diffing:** Interactive modal showing side-by-side or unified diffs for Helm values and Kubernetes manifests with green (+) addition and red (-) removal highlighting between any two revisions.
+- **Group App Version Matrices:** Pin exact semantic versions of applications inside an Application Group. Track changes when individual apps within the group are upgraded, added, or removed.
+- **Working Version Tagging (Golden Baseline):** Mark any revision as a verified "Known Working Version" (★) to ensure mission-critical baseline stability.
+- **One-Click Fallback / Rollback:**
+  - **Catalog-Level Rollback:** Instantly restore any past version of an application or group back to active status in the catalog.
+  - **Cluster-Level Rollback:** Directly in the Cluster Details dashboard, view deployed application revision history, diff against the active deployment, and roll back running workloads to a previous known working state in one click.
+
+### 14. Dedicated Embedded OCI Artifact & Helm Chart Registry Pod (`vcop-registry`)
+- **Native OCI Distribution Spec v1.1:** Fully compliant OCI repository hosted directly within the `vcop-system` namespace on port 5000 (`vcop-registry.vcop-system.svc:5000`).
+- **Store Containers, Helm Charts & OCI Artifacts:** Host private container images, `oci://` Helm packages, and arbitrary artifacts (Wasm, configuration bundles, ORAS artifacts) completely on-premise and air-gapped.
+- **Persistent Storage & Zero-Configuration Deployment:** Backed by a dedicated 20Gi PVC (`vcop-registry-data`) with delete enabled, CORS support, and automatic deployment via the main `charts/vcop` Helm chart or `deploy/registry.yaml`.
+- **Integrated OCI Repository Explorer UI:** In the Operations Center, inspect available repositories, tags, digests, and generated push/pull CLI commands for Helm, Docker/Podman, and ORAS.
+- **1-Click "Deploy Chart as App":** Browse charts hosted in the internal OCI registry and instantly generate an App Store definition with a single click.
+
 ---
 
 ## Helm Deployment & Platform Installation
@@ -149,7 +166,7 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 > [!IMPORTANT]
 > **No, you only need to deploy `charts/vcop`.**
 >
-> When you deploy the `vcop` Helm chart onto your host Kubernetes cluster, it installs the **vCOp Operator**, the **Operations Center UI**, and the **Metrics DB**. The operator then **natively reconciles, provisions, and manages ingress entrypoints (Gateway API or Istio) directly inside each virtual cluster**.
+> When you deploy the `vcop` Helm chart onto your host Kubernetes cluster, it installs the **vCOp Operator**, the **Operations Center UI**, the **Metrics DB**, and the **Embedded OCI Registry (`vcop-registry`)**. The operator then **natively reconciles, provisions, and manages ingress entrypoints (Gateway API or Istio) directly inside each virtual cluster**.
 >
 > You **do not** need to install `vcluster-istio` manually. The standalone [`charts/vcluster-istio`](charts/vcluster-istio) chart is provided as an optional reference/fallback package for teams wishing to deploy the opinionated Istio entrypoint stack manually or via GitOps (ArgoCD/Flux) on clusters without the vCOp operator.
 

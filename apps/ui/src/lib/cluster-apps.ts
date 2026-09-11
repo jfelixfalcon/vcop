@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { InstalledApp, VirtualCluster, UserSession, AppDefinition } from './types';
 import { getAppStoreCatalog } from './appstore';
+import { getAppRevisionById, getAppRevisions } from './catalog-vcs';
 import { k8sRequest, getVirtualCluster, getKubeconfig, compactInstalledAppsForAnnotation, sanitizeAnnotations } from './k8s-client';
 
 const execFileAsync = promisify(execFile);
@@ -265,7 +266,13 @@ export async function getInstalledApps(clusterName: string, namespace?: string):
  */
 export async function installAppsToCluster(
   clusterName: string,
-  appRequests: Array<{ appId: string; customValues?: string; targetNamespace?: string }>,
+  appRequests: Array<{
+    appId: string;
+    version?: string;
+    revisionId?: string;
+    customValues?: string;
+    targetNamespace?: string;
+  }>,
   user?: UserSession | null,
   namespace?: string,
   targetGuestNamespace?: string
@@ -304,20 +311,42 @@ export async function installAppsToCluster(
       continue;
     }
 
-    const customValues = req.customValues !== undefined ? req.customValues : catalogApp.helm?.values;
-    const appGuestNs = req.targetNamespace || targetGuestNamespace || catalogApp.helm?.namespace || 'default';
+    // Check if a specific version or revision snapshot was requested
+    let appVersion = catalogApp.version;
+    let helmSpec = catalogApp.helm ? JSON.parse(JSON.stringify(catalogApp.helm)) : undefined;
+    let manifestsSpec = catalogApp.manifests;
+
+    if (req.revisionId) {
+      const rev = await getAppRevisionById(req.appId, req.revisionId);
+      if (rev) {
+        appVersion = rev.version;
+        helmSpec = rev.helm ? JSON.parse(JSON.stringify(rev.helm)) : undefined;
+        manifestsSpec = rev.manifests;
+      }
+    } else if (req.version && req.version !== catalogApp.version) {
+      const revs = await getAppRevisions(req.appId);
+      const rev = revs.find((r) => r.version === req.version);
+      if (rev) {
+        appVersion = rev.version;
+        helmSpec = rev.helm ? JSON.parse(JSON.stringify(rev.helm)) : undefined;
+        manifestsSpec = rev.manifests;
+      }
+    }
+
+    const customValues = req.customValues !== undefined ? req.customValues : helmSpec?.values;
+    const appGuestNs = req.targetNamespace || targetGuestNamespace || helmSpec?.namespace || 'default';
 
     const installed: InstalledApp = {
       appId: catalogApp.id,
       name: catalogApp.name,
-      version: catalogApp.version,
+      version: appVersion,
       category: catalogApp.category,
       installedAt: now,
       installedBy: installerName,
       status: 'Installing',
       customValues,
-      helm: catalogApp.helm ? { ...catalogApp.helm, values: customValues, namespace: appGuestNs } : undefined,
-      manifests: catalogApp.manifests,
+      helm: helmSpec ? { ...helmSpec, values: customValues, namespace: appGuestNs } : undefined,
+      manifests: manifestsSpec,
     };
 
     // Execute actual deployment to the guest cluster
@@ -496,4 +525,29 @@ export async function syncClusterApps(
   }
 
   return updatedApps;
+}
+
+/**
+ * Rolls back an installed cluster application to a specific catalog revision or version.
+ */
+export async function rollbackClusterApp(
+  clusterName: string,
+  appId: string,
+  revisionId?: string,
+  targetVersion?: string,
+  user?: UserSession | null,
+  namespace?: string,
+  customValues?: string
+): Promise<InstalledApp[]> {
+  return await installAppsToCluster(
+    clusterName,
+    [{
+      appId,
+      revisionId,
+      version: targetVersion,
+      customValues,
+    }],
+    user,
+    namespace
+  );
 }

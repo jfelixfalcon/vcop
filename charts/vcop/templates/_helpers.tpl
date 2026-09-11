@@ -96,3 +96,12 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: inference-engine
 {{- end }}
 
+{{/*
+OCI Registry selector labels
+*/}}
+{{- define "vcop.registry.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "vcop.name" . }}-registry
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: oci-registry
+{{- end }}
+

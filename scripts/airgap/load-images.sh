@@ -171,6 +171,8 @@ DEFAULT_IMAGES=(
   "vops/vc-operations-center"
   "vops/vc-ai"
   "postgres:16-alpine"
+  "registry:2.8.3"
+  "registry"
 )
 
 # If LOADED_IMAGES is empty (some docker versions output format differs), find local images

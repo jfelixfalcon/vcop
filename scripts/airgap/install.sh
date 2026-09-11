@@ -210,6 +210,11 @@ else
     echo "[+] Deploying Embedded AI Engine (Gemma 3)..."
     apply_manifest "${MANIFESTS_DIR}/ai.yaml"
   fi
+
+  if [[ -f "${MANIFESTS_DIR}/registry.yaml" ]]; then
+    echo "[+] Deploying Embedded OCI Registry..."
+    apply_manifest "${MANIFESTS_DIR}/registry.yaml"
+  fi
 fi
 
 # Wait for core deployments

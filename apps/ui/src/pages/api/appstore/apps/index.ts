@@ -35,7 +35,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
     body.version = body.version || '1.0.0';
 
-    const catalog = await saveAppDefinition(body);
+    const author = user?.email || user?.username || 'Platform Operator';
+    const commitMessage = (body as any).commitMessage;
+
+    const catalog = await saveAppDefinition(body, author, commitMessage);
     const saved = catalog.apps.find((a) => a.id === body.id);
 
     return new Response(JSON.stringify({ success: true, data: saved }), {

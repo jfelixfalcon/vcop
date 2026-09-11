@@ -351,17 +351,106 @@ export interface AppDefinition {
   updatedAt?: string;
 }
 
+export interface GroupAppItem {
+  appId: string;
+  version?: string;
+  customValues?: string;
+  targetNamespace?: string;
+}
+
 export interface AppGroup {
   id: string;
   name: string;
   description: string;
+  version?: string;
   icon?: string;
   appIds: string[];
+  apps?: GroupAppItem[];
+  updatedAt?: string;
 }
 
 export interface AppStoreCatalog {
   apps: AppDefinition[];
   groups: AppGroup[];
+  updatedAt: string;
+}
+
+export type VCSChangeType = 'create' | 'update' | 'rollback' | 'import' | 'tag';
+
+export interface DiffLine {
+  type: 'added' | 'removed' | 'unchanged';
+  line: string;
+  oldLineNumber?: number;
+  newLineNumber?: number;
+}
+
+export interface AppRevisionSnapshot {
+  id: string;
+  revisionNumber: number;
+  appId: string;
+  version: string;
+  name: string;
+  category: AppCategory;
+  description: string;
+  timestamp: string;
+  author: string;
+  commitMessage: string;
+  changeType: VCSChangeType;
+  tags?: string[];
+  isWorkingVersion?: boolean;
+  helm?: HelmChartSpec;
+  manifests?: string;
+  group?: string;
+  diffSummary?: {
+    helmVersionChanged?: { from?: string; to?: string };
+    manifestsModified?: boolean;
+    manifestsLinesAdded?: number;
+    manifestsLinesRemoved?: number;
+    valuesModified?: boolean;
+    valuesLinesAdded?: number;
+    valuesLinesRemoved?: number;
+    fieldChanges?: string[];
+  };
+}
+
+export interface GroupRevisionSnapshot {
+  id: string;
+  revisionNumber: number;
+  groupId: string;
+  version: string;
+  name: string;
+  description: string;
+  icon?: string;
+  timestamp: string;
+  author: string;
+  commitMessage: string;
+  changeType: VCSChangeType;
+  tags?: string[];
+  isWorkingVersion?: boolean;
+  apps: GroupAppItem[];
+  diffSummary?: {
+    appsAdded?: string[];
+    appsRemoved?: string[];
+    appsVersionChanged?: Array<{ appId: string; from: string; to: string }>;
+  };
+}
+
+export interface GlobalVCSCommit {
+  id: string;
+  timestamp: string;
+  author: string;
+  entityType: 'app' | 'group' | 'catalog';
+  entityId: string;
+  entityName: string;
+  version: string;
+  commitMessage: string;
+  changeType: VCSChangeType;
+}
+
+export interface CatalogVCSStore {
+  appRevisions: Record<string, AppRevisionSnapshot[]>;
+  groupRevisions: Record<string, GroupRevisionSnapshot[]>;
+  globalCommits: GlobalVCSCommit[];
   updatedAt: string;
 }
 

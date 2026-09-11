@@ -47,6 +47,7 @@ vcop-airgap-bundle-v1.4.1/
 │   ├── operator.yaml                # vCOp Kubernetes Operator
 │   ├── ui.yaml                      # Operations Center Dashboard
 │   ├── ai.yaml                      # Embedded Gemma 3 Inference Engine (Universal Hardware)
+│   ├── registry.yaml                # Embedded OCI Artifact & Helm Chart Registry
 │   └── vcop-install-all-in-one.yaml # Concatenated all-in-one manifest
 ├── images/
 │   └── vcop-airgap-images-v1.4.1.tar.gz # Saved container images:
@@ -55,6 +56,7 @@ vcop-airgap-bundle-v1.4.1/
 │                                        #   - vops/etcd-dr-runner:v1.4.1
 │                                        #   - vops/vc-ai:v1.4.1
 │                                        #   - postgres:16-alpine
+│                                        #   - registry:2.8.3
 └── scripts/
     ├── load-images.sh               # Image loader and private registry pusher
     └── install.sh                   # Cluster installer (Helm & kubectl)
