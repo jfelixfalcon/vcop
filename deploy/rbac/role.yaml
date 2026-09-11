@@ -235,6 +235,7 @@ rules:
       - services
       - namespaces
       - nodes
+      - events
     verbs:
       - create
       - delete
@@ -242,6 +243,14 @@ rules:
       - list
       - patch
       - update
+      - watch
+  - apiGroups:
+      - events.k8s.io
+    resources:
+      - events
+    verbs:
+      - get
+      - list
       - watch
   - apiGroups:
       - metrics.k8s.io

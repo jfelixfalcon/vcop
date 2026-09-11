@@ -513,6 +513,7 @@ export interface ClusterMetricsResponse {
 }
 
 export interface K8sEvent {
+  name?: string;
   type: 'Normal' | 'Warning';
   reason: string;
   message: string;
@@ -520,6 +521,12 @@ export interface K8sEvent {
   firstTimestamp?: string;
   lastTimestamp?: string;
   source?: { component?: string };
+  sourceComponent?: string;
+  involvedObject?: {
+    kind?: string;
+    name?: string;
+    namespace?: string;
+  };
 }
 
 export interface VClusterCapacityItem {

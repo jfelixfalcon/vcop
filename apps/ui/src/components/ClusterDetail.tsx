@@ -1429,8 +1429,8 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Activity className="w-4 h-4 text-cyan-400" />
                 Cluster Lifecycle & Operator Event Logs
-                <span className="text-[10px] font-mono text-slate-400 bg-cyber-950 px-2 py-0.5 rounded border border-cyber-800">
-                  Real-time Status Events
+                <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800 font-semibold">
+                  {events.length > 0 ? `Live Stream (${events.length})` : 'Reconciliation Audit'}
                 </span>
               </h3>
               <button
@@ -1444,61 +1444,95 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               </button>
             </div>
 
-            {events.length === 0 ? (
-              <div className="p-6 text-center text-slate-500 font-mono text-xs bg-cyber-950/40 rounded-xl border border-cyber-800/60">
-                No recent operator events recorded for this virtual cluster.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs font-mono">
-                  <thead>
-                    <tr className="border-b border-cyber-800 text-slate-400 text-[10px] uppercase">
-                      <th className="pb-2 font-semibold">Type</th>
-                      <th className="pb-2 font-semibold">Reason</th>
-                      <th className="pb-2 font-semibold">Message</th>
-                      <th className="pb-2 font-semibold">Component</th>
-                      <th className="pb-2 font-semibold text-right">Age / Count</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-cyber-800/50 text-slate-300">
-                    {events.map((ev, idx) => {
-                      const isWarn = ev.type === 'Warning';
-                      return (
-                        <tr key={ev.name || idx} className="hover:bg-cyber-800/30 transition-colors">
-                          <td className="py-2.5 pr-3 whitespace-nowrap">
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
-                                isWarn
-                                  ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                                  : 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                              }`}
-                            >
-                              {isWarn ? <AlertTriangle className="w-2.5 h-2.5" /> : <CheckCircle2 className="w-2.5 h-2.5" />}
-                              {ev.type}
-                            </span>
-                          </td>
-                          <td className="py-2.5 pr-3 font-semibold text-white whitespace-nowrap">
-                            {ev.reason}
-                          </td>
-                          <td className="py-2.5 pr-3 font-sans text-xs text-slate-300 max-w-md break-words">
-                            {ev.message}
-                          </td>
-                          <td className="py-2.5 pr-3 text-slate-400 whitespace-nowrap text-[11px]">
-                            {ev.sourceComponent || 'vc-operator'}
-                          </td>
-                          <td className="py-2.5 text-right text-slate-400 whitespace-nowrap text-[10px]">
-                            <div>{ev.lastTimestamp ? new Date(ev.lastTimestamp).toLocaleTimeString() : 'now'}</div>
-                            {ev.count && ev.count > 1 && (
-                              <div className="text-cyan-400 font-semibold">(x{ev.count})</div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {(() => {
+              const displayEvents = events.length > 0 ? events : (cluster.status.conditions || []).map((cond) => ({
+                name: `${cluster.name}-${cond.type}`,
+                type: (cond.status === 'False' && cond.type !== 'Sleeping' ? 'Warning' : 'Normal') as 'Normal' | 'Warning',
+                reason: cond.reason || cond.type,
+                message: cond.message || `${cond.type} reconciled to ${cond.status}`,
+                count: 1,
+                lastTimestamp: cond.lastTransitionTime,
+                sourceComponent: 'virtualcluster-controller',
+                involvedObject: {
+                  kind: 'VirtualCluster',
+                  name: cluster.name,
+                  namespace: cluster.namespace,
+                },
+              }));
+
+              if (displayEvents.length === 0) {
+                return (
+                  <div className="p-6 text-center text-slate-500 font-mono text-xs bg-cyber-950/40 rounded-xl border border-cyber-800/60">
+                    No recent operator events recorded for this virtual cluster.
+                  </div>
+                );
+              }
+
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="border-b border-cyber-800 text-slate-400 text-[10px] uppercase">
+                        <th className="pb-2 font-semibold">Type</th>
+                        <th className="pb-2 font-semibold">Reason</th>
+                        <th className="pb-2 font-semibold">Message</th>
+                        <th className="pb-2 font-semibold">Involved Object</th>
+                        <th className="pb-2 font-semibold">Component</th>
+                        <th className="pb-2 font-semibold text-right">Age / Count</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-cyber-800/50 text-slate-300">
+                      {displayEvents.map((ev, idx) => {
+                        const isWarn = ev.type === 'Warning';
+                        return (
+                          <tr key={ev.name || idx} className="hover:bg-cyber-800/30 transition-colors">
+                            <td className="py-2.5 pr-3 whitespace-nowrap">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  isWarn
+                                    ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                                    : 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                }`}
+                              >
+                                {isWarn ? <AlertTriangle className="w-2.5 h-2.5" /> : <CheckCircle2 className="w-2.5 h-2.5" />}
+                                {ev.type}
+                              </span>
+                            </td>
+                            <td className="py-2.5 pr-3 font-semibold text-white whitespace-nowrap">
+                              {ev.reason}
+                            </td>
+                            <td className="py-2.5 pr-3 font-sans text-xs text-slate-300 max-w-md break-words">
+                              {ev.message}
+                            </td>
+                            <td className="py-2.5 pr-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
+                              {ev.involvedObject ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyber-950 border border-cyber-800 text-slate-300">
+                                  <span className="text-slate-500">{ev.involvedObject.kind || 'Resource'}/</span>
+                                  <span className="text-white font-semibold truncate max-w-[150px]" title={ev.involvedObject.name}>
+                                    {ev.involvedObject.name || cluster.name}
+                                  </span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">{cluster.name}</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 pr-3 text-slate-400 whitespace-nowrap text-[11px]">
+                              {ev.sourceComponent || ev.source?.component || 'vc-operator'}
+                            </td>
+                            <td className="py-2.5 text-right text-slate-400 whitespace-nowrap text-[10px]">
+                              <div>{ev.lastTimestamp ? new Date(ev.lastTimestamp).toLocaleTimeString() : 'now'}</div>
+                              {ev.count && ev.count > 1 && (
+                                <div className="text-cyan-400 font-semibold">(x{ev.count})</div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

@@ -442,17 +442,26 @@ export async function getVirtualCluster(name: string, namespace?: string): Promi
 export async function getVirtualClusterEvents(namespace: string, name: string): Promise<K8sEvent[]> {
   try {
     const res = await k8sRequest<any>(
-      `/api/v1/namespaces/${encodeURIComponent(namespace)}/events?fieldSelector=involvedObject.name=${encodeURIComponent(name)}`
+      `/api/v1/namespaces/${encodeURIComponent(namespace)}/events`
     );
-    if (res.statusCode === 200 && res.data?.items) {
+    if (res.statusCode === 200 && Array.isArray(res.data?.items)) {
       return res.data.items.map((it: any) => ({
-        type: it.type || 'Normal',
+        name: it.metadata?.name,
+        type: (it.type === 'Warning' ? 'Warning' : 'Normal') as 'Normal' | 'Warning',
         reason: it.reason || '',
         message: it.message || '',
         count: it.count || 1,
         firstTimestamp: it.firstTimestamp,
         lastTimestamp: it.lastTimestamp || it.eventTime || it.metadata?.creationTimestamp,
         source: it.source,
+        sourceComponent: it.reportingComponent || it.source?.component || 'vc-operator',
+        involvedObject: it.involvedObject
+          ? {
+              kind: it.involvedObject.kind,
+              name: it.involvedObject.name,
+              namespace: it.involvedObject.namespace,
+            }
+          : undefined,
       })).sort((a: any, b: any) => new Date(b.lastTimestamp || 0).getTime() - new Date(a.lastTimestamp || 0).getTime());
     }
   } catch (err) {
