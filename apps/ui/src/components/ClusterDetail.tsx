@@ -42,6 +42,7 @@ import {
   Globe,
   Settings,
   Network,
+  ChevronDown,
 } from 'lucide-react';
 import type { VirtualCluster, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition, K8sEvent } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
@@ -108,6 +109,29 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [syncingApps, setSyncingApps] = useState<boolean>(false);
   const [events, setEvents] = useState<K8sEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState<boolean>(false);
+  const [actionsOpen, setActionsOpen] = useState<boolean>(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (actionsRef.current && !actionsRef.current.contains(event.target as Node)) {
+        setActionsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActionsOpen(false);
+      }
+    };
+    if (actionsOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [actionsOpen]);
 
   const openKubeconfigModal = (tab: 'admin' | 'oidc' | 'endpoint' | 'settings' = 'admin') => {
     setKubeconfigInitialTab(tab);
@@ -290,7 +314,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         </div>
 
         {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 relative">
           <button
             onClick={() => openKubeconfigModal('admin')}
             className="px-3.5 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-xs rounded-xl shadow-glow-sm flex items-center gap-1.5 transition-all"
@@ -308,53 +332,181 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                     ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold shadow-glow-sm'
                     : 'bg-cyber-800 hover:bg-cyber-750 text-indigo-300 border border-indigo-500/30'
                 }`}
+                title={isSleeping ? 'Wake Up Virtual Cluster' : 'Put Virtual Cluster to Sleep'}
               >
                 {isSleeping ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
                 {isSleeping ? 'Wake Up' : 'Sleep'}
               </button>
 
-              <button
-                onClick={() => setActiveModal('group')}
-                className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
-                title="Manage Cluster Groups"
-              >
-                <FolderGit2 className="w-3.5 h-3.5" />
-                Groups
-              </button>
+              {/* Actions Dropdown */}
+              <div className="relative" ref={actionsRef}>
+                <button
+                  type="button"
+                  onClick={() => setActionsOpen(!actionsOpen)}
+                  aria-expanded={actionsOpen}
+                  className={`px-3.5 py-2 text-xs font-semibold rounded-xl border flex items-center gap-1.5 transition-all ${
+                    actionsOpen
+                      ? 'bg-cyber-750 text-white border-cyan-500/60 shadow-glow-sm'
+                      : 'bg-cyber-800 hover:bg-cyber-750 text-slate-200 border-cyber-700/80 hover:border-slate-500'
+                  }`}
+                  title="More Cluster Management Actions"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Actions</span>
+                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${actionsOpen ? 'rotate-180 text-cyan-400' : ''}`} />
+                </button>
 
-              <button
-                onClick={() => setActiveModal('quota')}
-                className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-emerald-300 border border-emerald-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                Adjust Quotas
-              </button>
+                {actionsOpen && (
+                  <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-cyber-950/95 backdrop-blur-2xl border border-cyber-700/80 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150 divide-y divide-cyber-800/80">
+                    {/* Control Plane & Distro */}
+                    <div className="pb-1.5">
+                      <span className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-slate-500 block">Control Plane</span>
+                      <button
+                        onClick={() => {
+                          setActionsOpen(false);
+                          setActiveModal('upgrade');
+                        }}
+                        className="w-full flex items-center justify-between px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <ArrowUpCircle className="w-4 h-4 text-purple-400 shrink-0" />
+                          <div>
+                            <div className="font-semibold">Upgrade Engine</div>
+                            <div className="text-[10px] text-slate-400 font-mono">Distro & components</div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-mono bg-purple-500/10 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30">
+                          {k8sVer}
+                        </span>
+                      </button>
+                    </div>
 
-              <button
-                onClick={() => setActiveModal('rbac')}
-                className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
-                title="Manage Cluster Ownership, Groups & User RBAC Delegation"
-              >
-                <Users className="w-3.5 h-3.5" />
-                Access & RBAC
-              </button>
+                    {/* Ingress & Networking */}
+                    <div className="py-1.5">
+                      <span className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-slate-500 block">Ingress & Gateways</span>
+                      <button
+                        onClick={() => {
+                          setActionsOpen(false);
+                          setActiveModal('gateway-api');
+                        }}
+                        className="w-full flex items-center justify-between px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Globe className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <div>
+                            <div className="font-semibold">Gateway API</div>
+                            <div className="text-[10px] text-slate-400 font-mono">Envoy HTTPRoutes & TLS</div>
+                          </div>
+                        </div>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                          cluster.spec.components?.gatewayAPI?.enabled
+                            ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                            : 'bg-cyber-800 text-slate-500 border-cyber-700'
+                        }`}>
+                          {cluster.spec.components?.gatewayAPI?.enabled ? 'Active' : 'Off'}
+                        </span>
+                      </button>
 
-              <button
-                onClick={() => setActiveModal('istio')}
-                className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-cyan-300 border border-cyan-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
-                title="Manage Opinionated Istio Ingress Entrypoint & TLS Certificates"
-              >
-                <Globe className="w-3.5 h-3.5" />
-                Ingress & Istio
-              </button>
+                      <button
+                        onClick={() => {
+                          setActionsOpen(false);
+                          setActiveModal('istio');
+                        }}
+                        className="w-full flex items-center justify-between px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors text-left mt-0.5"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Layers className="w-4 h-4 text-cyan-400 shrink-0" />
+                          <div>
+                            <div className="font-semibold">Istio Service Mesh</div>
+                            <div className="text-[10px] text-slate-400 font-mono">mTLS & VirtualService</div>
+                          </div>
+                        </div>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                          cluster.spec.components?.istio?.enabled
+                            ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
+                            : 'bg-cyber-800 text-slate-500 border-cyber-700'
+                        }`}>
+                          {cluster.spec.components?.istio?.enabled ? 'Active' : 'Off'}
+                        </span>
+                      </button>
+                    </div>
 
-              <button
-                onClick={() => setActiveModal('upgrade')}
-                className="px-3.5 py-2 bg-cyber-800 hover:bg-cyber-750 text-purple-300 border border-purple-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all"
-              >
-                <ArrowUpCircle className="w-3.5 h-3.5" />
-                Upgrade Engine
-              </button>
+                    {/* Governance & Policies */}
+                    <div className="py-1.5">
+                      <span className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-slate-500 block">Governance & Policies</span>
+                      <button
+                        onClick={() => {
+                          setActionsOpen(false);
+                          setActiveModal('group');
+                        }}
+                        className="w-full flex items-center justify-between px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <FolderGit2 className="w-4 h-4 text-indigo-400 shrink-0" />
+                          <div>
+                            <div className="font-semibold">Cluster Groups</div>
+                            <div className="text-[10px] text-slate-400 font-mono">Labels & organization</div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/30">
+                          {clusterGroups.length}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setActionsOpen(false);
+                          setActiveModal('quota');
+                        }}
+                        className="w-full flex items-center justify-between px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors text-left mt-0.5"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Gauge className="w-4 h-4 text-teal-400 shrink-0" />
+                          <div>
+                            <div className="font-semibold">Resource Quotas</div>
+                            <div className="text-[10px] text-slate-400 font-mono">CPU, Memory & Storage</div>
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setActionsOpen(false);
+                          setActiveModal('rbac');
+                        }}
+                        className="w-full flex items-center justify-between px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-cyber-900 rounded-xl transition-colors text-left mt-0.5"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Users className="w-4 h-4 text-blue-400 shrink-0" />
+                          <div>
+                            <div className="font-semibold">Access & RBAC</div>
+                            <div className="text-[10px] text-slate-400 font-mono">Ownership & bindings</div>
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* Danger Zone (Admin Only) */}
+                    {isAdmin && (
+                      <div className="pt-1.5">
+                        <button
+                          onClick={() => {
+                            setActionsOpen(false);
+                            setActiveModal('delete');
+                          }}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-2 text-xs text-rose-400 hover:text-rose-200 hover:bg-rose-500/20 rounded-xl transition-colors text-left"
+                        >
+                          <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
+                          <div>
+                            <div className="font-semibold">Teardown Cluster</div>
+                            <div className="text-[10px] text-rose-300/70 font-mono">Permanently delete cluster</div>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {isAdmin && (
                 <button
@@ -483,7 +635,19 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         </div>
 
         <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-4 backdrop-blur-sm">
-          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Kubernetes API Level</span>
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Kubernetes API Level</span>
+            {canManage && (
+              <button
+                onClick={() => setActiveModal('upgrade')}
+                className="text-[10px] font-mono text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
+                title="Upgrade Kubernetes or vCluster Engine"
+              >
+                <ArrowUpCircle className="w-3 h-3" />
+                Upgrade
+              </button>
+            )}
+          </div>
           <p className="font-mono text-base font-bold text-white mt-1">{k8sVer}</p>
           <span className="inline-block mt-1 text-[10px] text-cyber-accent font-mono">
             K8s Distro Native Syncer
