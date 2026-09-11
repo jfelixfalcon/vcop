@@ -44,7 +44,7 @@ import {
   Network,
   ChevronDown,
 } from 'lucide-react';
-import type { VirtualCluster, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition, K8sEvent } from '../lib/types';
+import type { VirtualCluster, ClusterCondition, UserSession, InstalledApp, AppStoreCatalog, AppGroup, AppDefinition, K8sEvent } from '../lib/types';
 import { StatusBadge } from './StatusBadge';
 import { ModalPortal } from './ModalPortal';
 import { MetricSparkline } from './MetricSparkline';
@@ -91,6 +91,132 @@ function calculatePercent(used?: string, hard?: string): number {
   return Math.min(Math.max(pct, 0), 100);
 }
 
+function getConditionMeta(cond: ClusterCondition) {
+  const isSleepingCond = cond.type === 'Sleeping';
+  const isNominal = isSleepingCond ? cond.status === 'False' : cond.status === 'True';
+  const isDegraded = isSleepingCond ? false : cond.status === 'False';
+
+  switch (cond.type) {
+    case 'ControlPlaneReady':
+      return {
+        label: 'Control Plane',
+        category: 'Compute',
+        icon: Cpu,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'Ready',
+      };
+    case 'GatewayAPIReady':
+      return {
+        label: 'Gateway API',
+        category: 'Network',
+        icon: Globe,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'Active',
+      };
+    case 'IstioReady':
+      return {
+        label: 'Istio Mesh',
+        category: 'Network',
+        icon: Layers,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'Active',
+      };
+    case 'EtcdReady':
+      return {
+        label: 'etcd Quorum',
+        category: 'Storage',
+        icon: Database,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'QuorumReady',
+      };
+    case 'AddonsReady':
+      return {
+        label: 'Core Addons',
+        category: 'Core Stack',
+        icon: Package,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'Configured',
+      };
+    case 'QuotaReady':
+      return {
+        label: 'Resource Quotas',
+        category: 'Governance',
+        icon: Gauge,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'Enforced',
+      };
+    case 'RBACReady':
+      return {
+        label: 'Guest RBAC',
+        category: 'Security',
+        icon: Users,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'Reconciled',
+      };
+    case 'KubeconfigGenerated':
+      return {
+        label: 'Kubeconfig',
+        category: 'Security',
+        icon: Terminal,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'Generated',
+      };
+    case 'CapacityAvailable':
+      return {
+        label: 'Host Capacity',
+        category: 'Compute',
+        icon: HardDrive,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'Allocated',
+      };
+    case 'DisasterRecoveryReady':
+      return {
+        label: 'Disaster Recovery',
+        category: 'Backup & DR',
+        icon: ShieldCheck,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'Configured',
+      };
+    case 'CertificateReady':
+      return {
+        label: 'TLS Certificates',
+        category: 'Security',
+        icon: Lock,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || 'Issued',
+      };
+    case 'Sleeping':
+      return {
+        label: 'Power State',
+        category: 'Lifecycle',
+        icon: cond.status === 'True' ? Moon : Sun,
+        isNominal: true,
+        isDegraded: false,
+        displayReason: cond.status === 'True' ? 'Sleeping' : 'Awake & Active',
+      };
+    default:
+      return {
+        label: cond.type.replace(/Ready$|Generated$|Configured$/, '') || cond.type,
+        category: 'Subsystem',
+        icon: Activity,
+        isNominal,
+        isDegraded,
+        displayReason: cond.reason || cond.status,
+      };
+  }
+}
+
 interface Props {
   clusterName: string;
   currentUser?: UserSession | null;
@@ -111,6 +237,8 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [eventsLoading, setEventsLoading] = useState<boolean>(false);
   const [actionsOpen, setActionsOpen] = useState<boolean>(false);
   const actionsRef = useRef<HTMLDivElement>(null);
+  const [selectedConditionType, setSelectedConditionType] = useState<string | null>(null);
+  const [conditionViewMode, setConditionViewMode] = useState<'matrix' | 'table'>('matrix');
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -993,41 +1121,307 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             )}
           </div>
 
-          {/* Condition Timeline */}
-          <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5">
-            <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-cyber-accent" />
-              Reconciliation Conditions & Readiness
-            </h3>
-            <div className="space-y-3">
-              {cluster.status.conditions?.map((cond) => (
-                <div
-                  key={cond.type}
-                  className="flex items-center justify-between p-3 bg-cyber-950/70 border border-cyber-800 rounded-xl"
-                >
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2
-                      className={`w-4 h-4 ${
-                        cond.status === 'True' ? 'text-emerald-400' : 'text-amber-400 animate-pulse'
-                      }`}
-                    />
+          {/* Subsystem Reconciliation & Readiness Matrix */}
+          {(() => {
+            const conditions = cluster.status.conditions || [];
+            const totalConditions = conditions.length;
+            const passingConditions = conditions.filter((c) => {
+              if (c.type === 'Sleeping') return true;
+              return c.status === 'True';
+            }).length;
+            const isAllNominal = totalConditions > 0 && passingConditions === totalConditions;
+            const selectedCond = conditions.find((c) => c.type === selectedConditionType);
+
+            return (
+              <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 backdrop-blur-sm">
+                {/* Header HUD */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                      <Activity className="w-4 h-4" />
+                    </div>
                     <div>
-                      <div className="font-mono text-xs font-bold text-white flex items-center gap-2">
-                        {cond.type}
-                        <span className="text-[10px] font-normal text-slate-400 bg-cyber-900 px-2 py-0.5 rounded border border-cyber-800">
-                          {cond.reason}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-bold text-white font-mono">
+                          Reconciliation & Subsystem Readiness
+                        </h3>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border flex items-center gap-1.5 ${
+                            isAllNominal
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-[0_0_10px_rgba(52,211,153,0.15)]'
+                              : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isAllNominal
+                                ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)] animate-pulse'
+                                : 'bg-amber-400'
+                            }`}
+                          />
+                          {passingConditions}/{totalConditions} Subsystems Nominal
                         </span>
                       </div>
-                      <p className="text-xs text-slate-400 mt-0.5">{cond.message}</p>
                     </div>
                   </div>
-                  <span className="text-[10px] font-mono text-slate-500">
-                    {new Date(cond.lastTransitionTime).toLocaleTimeString()}
-                  </span>
+
+                  {/* Circuit Scanner & View Toggle */}
+                  <div className="flex items-center gap-3 self-start sm:self-auto">
+                    {/* Miniature Segmented Circuit Bar */}
+                    {totalConditions > 0 && (
+                      <div
+                        className="hidden md:flex items-center gap-1 h-2 px-1.5 py-0.5 bg-cyber-950 rounded-full border border-cyber-800"
+                        title={`${passingConditions} of ${totalConditions} subsystems passing`}
+                      >
+                        {conditions.map((c, i) => {
+                          const meta = getConditionMeta(c);
+                          return (
+                            <div
+                              key={c.type || i}
+                              className={`w-2 h-1 rounded-full transition-all duration-300 ${
+                                meta.isNominal
+                                  ? 'bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.8)]'
+                                  : meta.isDegraded
+                                  ? 'bg-rose-500 animate-pulse'
+                                  : 'bg-amber-400'
+                              }`}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* View Mode Toggle */}
+                    <div className="flex items-center bg-cyber-950 rounded-xl border border-cyber-800 p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setConditionViewMode('matrix')}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1.5 transition-all ${
+                          conditionViewMode === 'matrix'
+                            ? 'bg-cyber-800 text-cyan-300 shadow-sm border border-cyber-700 font-semibold'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="Matrix Bento Grid View"
+                      >
+                        <Layers className="w-3 h-3" />
+                        <span>Matrix</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConditionViewMode('table')}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-mono flex items-center gap-1.5 transition-all ${
+                          conditionViewMode === 'table'
+                            ? 'bg-cyber-800 text-cyan-300 shadow-sm border border-cyber-700 font-semibold'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="Detailed Timeline List View"
+                      >
+                        <Clock className="w-3 h-3" />
+                        <span>Timeline</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
+
+                {conditions.length === 0 ? (
+                  <div className="p-6 text-center text-slate-500 font-mono text-xs bg-cyber-950/40 rounded-xl border border-cyber-800/60">
+                    No active reconciliation conditions reported by the operator.
+                  </div>
+                ) : conditionViewMode === 'matrix' ? (
+                  <div className="space-y-3">
+                    {/* 2026 Micro-Bento Matrix Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
+                      {conditions.map((cond) => {
+                        const meta = getConditionMeta(cond);
+                        const isSelected = selectedConditionType === cond.type;
+                        const Icon = meta.icon;
+                        return (
+                          <button
+                            key={cond.type}
+                            type="button"
+                            onClick={() => setSelectedConditionType(isSelected ? null : cond.type)}
+                            className={`group relative p-3 rounded-xl border transition-all duration-200 text-left flex flex-col justify-between overflow-hidden ${
+                              isSelected
+                                ? 'bg-cyber-900 border-cyan-400 shadow-[0_0_16px_rgba(6,182,212,0.25)] ring-1 ring-cyan-500/50'
+                                : meta.isNominal
+                                ? 'bg-cyber-950/70 hover:bg-cyber-900/90 border-cyber-800/80 hover:border-cyan-500/40 hover:shadow-glow-sm'
+                                : 'bg-amber-950/30 border-amber-500/50 hover:border-amber-400'
+                            }`}
+                          >
+                            {/* Neon Hairline Edge */}
+                            <div
+                              className={`absolute top-0 left-0 right-0 h-[2px] transition-all duration-300 ${
+                                isSelected
+                                  ? 'bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500 opacity-100'
+                                  : meta.isNominal
+                                  ? 'bg-emerald-500/30 group-hover:bg-emerald-400 group-hover:opacity-100 opacity-50'
+                                  : 'bg-amber-400 opacity-100'
+                              }`}
+                            />
+
+                            {/* Top Domain & Status Beacon */}
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`w-2 h-2 rounded-full shrink-0 transition-all ${
+                                    meta.isNominal
+                                      ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]'
+                                      : meta.isDegraded
+                                      ? 'bg-rose-400 animate-ping shadow-[0_0_8px_rgba(244,63,94,0.8)]'
+                                      : 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]'
+                                  }`}
+                                />
+                                <span className="text-[9px] font-mono uppercase tracking-wider text-slate-400 group-hover:text-slate-300">
+                                  {meta.category}
+                                </span>
+                              </div>
+                              <Icon
+                                className={`w-3.5 h-3.5 transition-colors ${
+                                  isSelected ? 'text-cyan-400' : 'text-slate-400 group-hover:text-cyan-300'
+                                }`}
+                              />
+                            </div>
+
+                            {/* Subsystem Name & K8s Condition Type */}
+                            <div className="mb-2.5">
+                              <div className="text-xs font-bold text-white group-hover:text-cyan-200 transition-colors font-mono truncate">
+                                {meta.label}
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-400 truncate mt-0.5">
+                                {cond.type}
+                              </div>
+                            </div>
+
+                            {/* Status Pill & Transition Time */}
+                            <div className="flex items-center justify-between pt-2 border-t border-cyber-800/60 text-[10px] font-mono">
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${
+                                  meta.isNominal
+                                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                                    : meta.isDegraded
+                                    ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+                                    : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                                }`}
+                              >
+                                {meta.displayReason}
+                              </span>
+                              <span className="text-slate-400 text-[10px]">
+                                {new Date(cond.lastTransitionTime).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Telemetry Inspector Console */}
+                    <div className="p-3.5 rounded-xl bg-cyber-950/90 border border-cyber-800/90 backdrop-blur-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                      {selectedCond ? (
+                        <>
+                          <div className="flex items-start sm:items-center gap-3">
+                            <div className="p-2 rounded-lg bg-cyber-900 border border-cyber-750 shrink-0">
+                              {(() => {
+                                const SIcon = getConditionMeta(selectedCond).icon;
+                                return <SIcon className="w-4 h-4 text-cyan-400" />;
+                              })()}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono font-bold text-white">{selectedCond.type}</span>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyber-900 text-slate-300 border border-cyber-700">
+                                  Reason: {selectedCond.reason}
+                                </span>
+                                <span className="text-[10px] font-mono text-emerald-400">
+                                  ● Status: {selectedCond.status}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-300 mt-1 font-sans">
+                                {selectedCond.message || 'Subsystem is reconciled and operating within specifications.'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto text-[11px] font-mono text-slate-400">
+                            <span>
+                              Transitioned: {new Date(selectedCond.lastTransitionTime).toLocaleTimeString()}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedConditionType(null)}
+                              className="text-slate-400 hover:text-white p-1 hover:bg-cyber-800 rounded transition-colors"
+                              title="Deselect"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex items-center justify-between w-full">
+                          <div className="flex items-center gap-2.5 text-slate-300">
+                            <Sparkles className="w-4 h-4 text-cyber-accent shrink-0" />
+                            <span>
+                              <strong className="text-white">Active Reconciler Telemetry:</strong> All{' '}
+                              {conditions.length} subsystems are monitored by the GitOps operator loop. Click any
+                              capsule above to inspect diagnostic messages.
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-mono text-slate-400 hidden md:inline shrink-0">
+                            Live Control Loop Active
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* Timeline List View */
+                  <div className="space-y-2">
+                    {conditions.map((cond) => {
+                      const meta = getConditionMeta(cond);
+                      const Icon = meta.icon;
+                      return (
+                        <div
+                          key={cond.type}
+                          className="flex items-center justify-between p-3 bg-cyber-950/70 border border-cyber-800/80 rounded-xl hover:bg-cyber-900/40 transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="p-1.5 rounded-lg bg-cyber-900 border border-cyber-800 text-slate-300">
+                              <Icon className="w-3.5 h-3.5 text-cyan-400" />
+                            </div>
+                            <div>
+                              <div className="font-mono text-xs font-bold text-white flex items-center gap-2">
+                                {meta.label}
+                                <span className="text-[10px] font-mono text-slate-400 font-normal">
+                                  ({cond.type})
+                                </span>
+                                <span
+                                  className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                                    meta.isNominal
+                                      ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                                      : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                                  }`}
+                                >
+                                  {cond.reason}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-400 mt-0.5">{cond.message}</p>
+                            </div>
+                          </div>
+                          <div className="text-right text-[10px] font-mono text-slate-400">
+                            <div>{new Date(cond.lastTransitionTime).toLocaleTimeString()}</div>
+                            <span className={meta.isNominal ? 'text-emerald-400' : 'text-amber-400'}>
+                              ● {cond.status}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Cluster Lifecycle & Operator Event Logs */}
           <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5">
