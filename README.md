@@ -75,7 +75,90 @@ vCOp v1.5 unifies multi-tenant Kubernetes management under the generalized conce
 
 #### How to Provision:
 - **In the Operations Center UI (`/new`):** In Step 1 of the Provisioning Wizard, choose between **Virtual Cluster (vCluster)** and **Namespaced Cluster (Host)** using the prominent architecture cards at the top of the form. For namespaced clusters, optionally specify multiple target host namespaces.
-- **Via Declarative GitOps / YAML:** Set `spec.clusterType: "namespaced"` or `spec.clusterType: "vcluster"` (default).
+- **Via Declarative GitOps / YAML:** Set `spec.clusterType: "vcluster"` (default) or `spec.clusterType: "namespaced"`.
+
+##### Option A: Virtual Cluster (`clusterType: vcluster` — Default)
+Provisions a dedicated virtual control plane, private API server, dedicated HA etcd quorum, embedded add-ons, gateway ingress, and DR backups:
+
+```yaml
+apiVersion: vops.gitops.io/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: team-prod
+  namespace: team-prod
+  annotations:
+    vops.gitops.io/owner: "devops-core@internal.corp"
+    vops.gitops.io/allowed-groups: "developers,platform-admins"
+spec:
+  clusterName: team-prod
+  clusterType: vcluster                # 'vcluster' (default) or 'namespaced'
+  sizePreset: medium                   # Predefined compute & memory quota tier (small | normal | medium | large | ha)
+  highAvailability: true               # Deploys 3-node HA etcd and 3-replica ingress proxy
+  
+  # Virtual Control Plane & Backing Store
+  vclusterVersion: "0.36.0"
+  kubernetesVersion: "v1.31.0"
+  etcdVersion: "3.6.8-0"
+  etcdStorageClass: "fast-ssd"         # Optional dedicated storage tier for etcd
+  
+  # Embedded Addons & Ingress Entrypoints
+  components:
+    coreDNS:
+      enabled: true
+      version: "v1.11.3"
+    metricsServer:
+      enabled: true
+      version: "v0.7.2"
+    gatewayAPI:
+      enabled: true
+      gatewayClassName: "eg"
+      hosts:
+        - "team-prod.apps.example.com"
+    # istio:                           # Seamlessly toggleable alternative to gatewayAPI
+    #   enabled: false
+    #   version: "1.24.2"
+    #   certificateIssuer: "vcluster-ca-issuer"
+
+  # Disaster Recovery & etcd Snapshots
+  disasterRecovery:
+    enabled: true
+    schedule: daily                    # daily | weekly | monthly | custom | disabled
+    retentionCount: 7
+    storageSize: 10Gi
+    
+  # Workload Governance Policies (Enforced inside virtual cluster & on host)
+  policies:
+    resourceQuota:
+      enabled: true
+      pods: "25"
+      requestsCPU: "4"
+      limitsCPU: "8"
+      requestsMemory: "8Gi"
+      limitsMemory: "16Gi"
+      requestsStorage: "25Gi"
+      services: "25"
+      persistentVolumeClaims: "10"
+    limitRange:
+      enabled: true
+      defaultCPU: "500m"
+      defaultMemory: "512Mi"
+      defaultRequestCPU: "50m"
+      defaultRequestMemory: "64Mi"
+
+  # Host Synchronization
+  sync:
+    pods: true
+    services: true
+    ingresses: true
+
+  # Cost Optimization & Lifecycle
+  lifecycle:
+    autoSleep: true                    # Automatically hibernates inactive workloads
+    ttlHours: 72                       # Auto-teardown after 72 hours (0 = disable)
+```
+
+##### Option B: Host Namespaced Cluster (`clusterType: namespaced`)
+Deploys directly onto the shared host cluster across one or more target namespaces with zero control-plane or etcd overhead, while enforcing identical quotas, limit ranges, and lifecycle controls:
 
 ```yaml
 apiVersion: vops.gitops.io/v1alpha1
@@ -83,24 +166,44 @@ kind: VirtualCluster
 metadata:
   name: team-service
   namespace: team-service
+  annotations:
+    vops.gitops.io/owner: "devops-core@internal.corp"
+    vops.gitops.io/allowed-groups: "developers,platform-admins"
 spec:
   clusterName: team-service
-  clusterType: namespaced              # 'namespaced' (host native) or 'vcluster' (default)
-  namespaces:                          # Optional: manage multiple target host namespaces
+  clusterType: namespaced              # 'namespaced' (host native)
+  namespaces:                          # One or more managed target host namespaces
     - team-service
     - team-service-staging
   sizePreset: medium                   # Predefined compute & memory quota tier
+  
+  # Workload Governance Policies (Enforced across ALL managed host namespaces)
   policies:
     resourceQuota:
       enabled: true
       pods: "25"
       requestsCPU: "4"
+      limitsCPU: "8"
       requestsMemory: "8Gi"
+      limitsMemory: "16Gi"
+      requestsStorage: "25Gi"
+      services: "25"
+      persistentVolumeClaims: "10"
     limitRange:
       enabled: true
+      defaultCPU: "500m"
+      defaultMemory: "512Mi"
       defaultRequestCPU: "50m"
       defaultRequestMemory: "64Mi"
+
+  # Cost Optimization & Lifecycle (Scales Deployments/StatefulSets in target namespaces)
+  lifecycle:
+    autoSleep: true                    # Scales tenant workloads to 0 when sleeping
+    ttlHours: 72
 ```
+
+> [!NOTE]
+> For namespaced clusters, control-plane fields (`vclusterVersion`, `etcdVersion`, `components`, `disasterRecovery`, `sync`) are automatically bypassed by the operator because tenant workloads run natively on the host cluster without a virtual syncer or etcd daemon. See the [Custom Resource Definition Specification](#custom-resource-definition-virtualcluster) below for the complete field compatibility matrix.
 
 ### 1. vCluster OSS v0.36 Unified Engine
 - Generates and enforces the unified `vcluster.yaml` schema introduced in v0.36.x.
@@ -489,7 +592,10 @@ Platform administrators can register new Istio versions dynamically without rest
 
 ##### Method B: Via Custom Resource Manifest (CRD / GitOps)
 
-If you manage virtual clusters declaratively using Argo CD, Flux, or `kubectl`, specify the `version` field directly under `spec.components.istio`:
+If you manage clusters declaratively using Argo CD, Flux, or `kubectl`, specify the `version` field directly under `spec.components.istio`:
+
+> [!TIP]
+> **Targeted Manifest Excerpt:** The snippet below highlights only the Istio configuration block (`spec.components.istio`). For the complete, all-in-one manifest, see the [Custom Resource Definition Specification](#custom-resource-definition-specification-virtualcluster) section below.
 
 ```yaml
 apiVersion: vops.gitops.io/v1alpha1
@@ -499,6 +605,7 @@ metadata:
   namespace: default
 spec:
   clusterName: team-prod
+  clusterType: vcluster
   highAvailability: true # Automatically provisions 3 gateways and 3 istiod pods
   components:
     istio:
@@ -824,6 +931,10 @@ In the **Operations Center UI Provisioning Wizard**:
 3. Finish the wizard. The operator initializes the new cluster StatefulSet mounting the snapshot, bootstrapping the new cluster pre-populated with all tenant workloads.
 
 Declarative YAML configuration:
+
+> [!TIP]
+> **Targeted Manifest Excerpt:** The snippet below highlights only the Disaster Recovery configuration block (`spec.disasterRecovery`). For the complete, all-in-one manifest, see the [Custom Resource Definition Specification](#custom-resource-definition-specification-virtualcluster) section below.
+
 ```yaml
 apiVersion: vops.gitops.io/v1alpha1
 kind: VirtualCluster
@@ -832,6 +943,7 @@ metadata:
   namespace: default
 spec:
   clusterName: team-sandbox-clone
+  clusterType: vcluster
   disasterRecovery:
     enabled: true
     schedule: daily
@@ -963,32 +1075,48 @@ make deploy
 
 ---
 
-## Custom Resource Definition (`VirtualCluster`)
+## Custom Resource Definition Specification (`VirtualCluster`)
 
-Example configuration with Opinionated Core Stack (CoreDNS, Metrics-Server, Istio Entrypoint, Cert-Manager TLS, and Disaster Recovery):
+The `VirtualCluster` custom resource (`vops.gitops.io/v1alpha1`) is the core declarative API of vCOp. Through the `spec.clusterType` field, it seamlessly governs both isolated **Virtual Clusters** (`vcluster`, default) and lightweight **Host Namespaced Clusters** (`namespaced`).
+
+---
+
+### 1. Canonical Manifest: Virtual Cluster (`clusterType: vcluster`)
+
+This exhaustive specification showcases every configurable field for a virtual cluster, including dedicated HA backing store, dual ingress entrypoints, automated DR snapshots, cross-plane synchronization, and governance policies:
 
 ```yaml
 apiVersion: vops.gitops.io/v1alpha1
 kind: VirtualCluster
 metadata:
-  name: billing-feature-auth
+  name: production-finance
   namespace: default
   annotations:
-    vops.gitops.io/custom-endpoint: "billing.apps.example.com"
+    vops.gitops.io/owner: "finance-sre@internal.corp"
+    vops.gitops.io/allowed-groups: "finance-devs,platform-admins"
+    vops.gitops.io/custom-endpoint: "finance.apps.internal.corp"
+    # vops.gitops.io/ignore-capacity-check: "true"      # Optional: bypass host capacity validation
 spec:
-  clusterName: billing-feature-auth
-  vclusterVersion: "0.36.0"
-  kubernetesVersion: "v1.31.0"
-  etcdVersion: "3.6.8-0"
-  sizePreset: normal # small | normal | medium | large | ha
-  highAvailability: false
-  disasterRecovery:
-    enabled: true
-    schedule: daily # daily | weekly | monthly | custom | disabled
-    retentionCount: 7
-    storageSize: 10Gi
-    # restoreSnapshotName: "vc-dev-snapshot-latest.db" # Point-in-time restore
-    # initialBackupRestore: "vc-dev-snapshot-latest.db" # Clone from existing backup
+  # Cluster Identity & Deployment Mode
+  clusterName: production-finance
+  clusterType: vcluster                                # 'vcluster' (default) or 'namespaced'
+  sizePreset: medium                                   # small | normal | medium | large | ha | custom
+  highAvailability: true                               # Provisions 3-node HA etcd & 3-replica ingress proxy
+  
+  # Engine & Control Plane Distro Versions
+  vclusterVersion: "0.36.0"                            # vCluster OSS syncer version
+  kubernetesVersion: "v1.31.0"                         # Guest Kubernetes API server version
+  etcdVersion: "3.6.8-0"                               # Backing store etcd container tag
+  storageClass: "standard"                             # Default PVC storage class for tenant workloads
+  etcdStorageClass: "fast-nvme"                        # Dedicated high-IOPS storage tier for etcd
+  
+  # Enterprise Registry & Image Governance (Optional)
+  # imageRegistry: "harbor.internal.corp/vops"
+  # imageRewriteRules:
+  #   - from: "docker.io/library"
+  #     to: "harbor.internal.corp/mirror"
+
+  # Core Embedded Add-ons & Ingress Entrypoints
   components:
     coreDNS:
       enabled: true
@@ -996,33 +1124,172 @@ spec:
     metricsServer:
       enabled: true
       version: "v0.7.2"
-    # Ingress Option 1: Kubernetes Gateway API (Envoy Gateway)
+      
+    # Option 1: Kubernetes Gateway API (Envoy Gateway)
     gatewayAPI:
       enabled: true
       gatewayClassName: "eg"
       hosts:
-        - "billing.apps.example.com"
-      # replicas: 3 # defaults to 3 in HA mode, 1 in standard mode
-    # Ingress Option 2: Istio Service Mesh & Gateway
+        - "finance.apps.internal.corp"
+      certificateIssuer: "letsencrypt-prod"
+      certificateIssuerKind: "ClusterIssuer"           # ClusterIssuer | Issuer
+      # replicas: 3                                    # Defaults to 3 in HA mode, 1 in standard mode
+      hostRouting:
+        enabled: true                                  # Dynamic edge multiplexing on host Envoy Gateway
+        defaultGateway: "envoy-gateway-system/eg"
+        apiHost: "api.finance.apps.internal.corp"
+
+    # Option 2: Istio Service Mesh & Gateway (Alternative to Gateway API)
     istio:
-      enabled: false # Seamlessly toggle between Gateway API and Istio
+      enabled: false                                   # Set to true to switch entrypoint to Istio
       version: "1.24.2"
+      meshEnabled: false                               # Set true for mTLS sidecar injection
       certificateIssuer: "vcluster-ca-issuer"
-      certificateIssuerKind: "ClusterIssuer" # ClusterIssuer | Issuer
-      meshEnabled: false # optional service mesh
+      certificateIssuerKind: "ClusterIssuer"
       hosts:
-        - "billing.apps.example.com"
+        - "finance.apps.internal.corp"
       ingressGateway:
         enabled: true
         serviceType: "ClusterIP"
+      hostRouting:
+        enabled: true
+        defaultGateway: "istio-system/default-gateway"
+        apiHost: "api.finance.apps.internal.corp"
+
+  # Disaster Recovery & Automated etcd Snapshots
+  disasterRecovery:
+    enabled: true
+    schedule: daily                                    # daily | weekly | monthly | custom | disabled
+    # cronExpression: "0 2 * * *"                     # Used when schedule: custom
+    retentionCount: 7                                  # Snapshots retained before rotation
+    storageSize: "10Gi"                                # Dedicated isolated backup PVC size
+    # initialBackupRestore: "finance-prev.db"          # Initialize cluster cloned from snapshot
+    # restoreSnapshotName: "finance-point-in-time.db"  # Rolling restore onto existing cluster
+
+  # Workload Governance & Resource Policies (Enforced inner + host)
+  policies:
+    resourceQuota:
+      enabled: true
+      pods: "50"
+      requestsCPU: "8"
+      limitsCPU: "16"
+      requestsMemory: "16Gi"
+      limitsMemory: "32Gi"
+      requestsStorage: "50Gi"
+      services: "30"
+      servicesLoadBalancers: "2"
+      servicesNodePorts: "0"
+      persistentVolumeClaims: "20"
+      configMaps: "100"
+      secrets: "100"
+    limitRange:
+      enabled: true
+      defaultCPU: "500m"
+      defaultMemory: "512Mi"
+      defaultRequestCPU: "100m"
+      defaultRequestMemory: "128Mi"
+      maxCPU: "4"
+      maxMemory: "8Gi"
+      minCPU: "10m"
+      minMemory: "32Mi"
+
+  # Host Syncer Synchronization (Virtual to Host mapping)
   sync:
     pods: true
     services: true
     ingresses: true
+
+  # Cost Optimization & Hibernation Lifecycle
   lifecycle:
-    autoSleep: true
-    ttlHours: 72
+    autoSleep: true                                    # Hibernates compute when idle
+    sleep: false                                       # Explicit sleep toggle (true = hibernated)
+    ttlHours: 0                                        # Cluster time-to-live in hours (0 = infinite)
 ```
+
+---
+
+### 2. Canonical Manifest: Host Namespaced Cluster (`clusterType: namespaced`)
+
+This specification showcases a host namespaced cluster that provisions and governs multi-namespace tenant environments natively on the host cluster with **zero** syncer or etcd daemon overhead:
+
+```yaml
+apiVersion: vops.gitops.io/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: payment-microservices
+  namespace: payment-microservices
+  annotations:
+    vops.gitops.io/owner: "payments-dev@internal.corp"
+    vops.gitops.io/allowed-groups: "developers,qa-engineers"
+spec:
+  # Cluster Identity & Deployment Mode
+  clusterName: payment-microservices
+  clusterType: namespaced                              # 'namespaced' (host native)
+  
+  # Managed Host Namespace Slice
+  # If omitted, defaults to the single namespace of the VirtualCluster resource
+  namespaces:
+    - payment-microservices
+    - payment-microservices-staging
+    - payment-microservices-qa
+    
+  sizePreset: medium                                   # Predefined compute & memory quota tier
+  
+  # Workload Governance Policies (Enforced across ALL managed namespaces)
+  policies:
+    resourceQuota:
+      enabled: true
+      pods: "30"
+      requestsCPU: "6"
+      limitsCPU: "12"
+      requestsMemory: "12Gi"
+      limitsMemory: "24Gi"
+      requestsStorage: "40Gi"
+      services: "20"
+      persistentVolumeClaims: "15"
+    limitRange:
+      enabled: true
+      defaultCPU: "500m"
+      defaultMemory: "512Mi"
+      defaultRequestCPU: "50m"
+      defaultRequestMemory: "64Mi"
+
+  # Cost Optimization & Hibernation Lifecycle
+  lifecycle:
+    autoSleep: true                                    # Scales tenant workloads in target namespaces to 0
+    sleep: false                                       # Explicit sleep toggle (true = scaled to 0)
+    ttlHours: 72                                       # Auto-teardown after 72 hours (0 = disabled)
+```
+
+---
+
+### 3. Field Compatibility & Specification Matrix
+
+The following matrix clarifies which fields apply to **Virtual Clusters** (`vcluster`), **Host Namespaced Clusters** (`namespaced`), or **Both**:
+
+| Field Path | Type | Architecture | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `spec.clusterName` | string | **Both** | *(Required)* | Unique cluster identifier (RFC 1123 compliant). |
+| `spec.clusterType` | enum | **Both** | `vcluster` | Deployment model: `vcluster` (isolated virtual control plane) or `namespaced` (host-native namespaces). |
+| `spec.namespaces` | `[]string` | `namespaced` | `[namespace]` | Target host namespace(s) managed by this cluster. Ignored in `vcluster` mode. |
+| `spec.sizePreset` | enum | **Both** | `medium` | Predefined sizing tier: `small`, `normal`, `medium`, `large`, `ha`, or `custom`. |
+| `spec.highAvailability`| bool | `vcluster` | `true` | When true, provisions 3-node HA etcd and 3-replica ingress proxies. |
+| `spec.vclusterVersion` | string | `vcluster` | `0.36.0` | Target vCluster OSS syncer container version. |
+| `spec.kubernetesVersion`| string | `vcluster` | `v1.31.0` | Virtual control plane Kubernetes API server release. |
+| `spec.etcdVersion` | string | `vcluster` | `3.6.8-0` | Backing store etcd container image tag. |
+| `spec.etcdStorageClass`| string | `vcluster` | *(Cluster Default)*| Dedicated high-performance StorageClass for etcd quorum volumes. |
+| `spec.storageClass` | string | **Both** | *(Cluster Default)*| Default StorageClass applied to tenant PersistentVolumeClaims. |
+| `spec.components.coreDNS`| object | `vcluster` | `{enabled: true}` | Embedded intra-vcluster CoreDNS service discovery. |
+| `spec.components.metricsServer`| object | `vcluster` | `{enabled: true}` | Embedded metrics-server for `kubectl top` and tenant HPA. |
+| `spec.components.gatewayAPI`| object | `vcluster` | `{enabled: false}` | Kubernetes SIG-Network Gateway API ingress stack (Envoy Gateway). |
+| `spec.components.istio` | object | `vcluster` | `{enabled: false}` | Istio ingress gateway and optional service mesh stack. |
+| `spec.disasterRecovery`| object | `vcluster` | `{enabled: true}` | Automated etcd snapshot runner, CronJob schedule, and restore manager. |
+| `spec.policies.resourceQuota`| object | **Both** | `{enabled: true}` | Compute, memory, storage, and object count quotas (enforced per managed namespace). |
+| `spec.policies.limitRange`| object | **Both** | `{enabled: true}` | Container-level default requests, limits, and min/max guardrails. |
+| `spec.sync` | object | `vcluster` | `{pods: true...}` | Syncer translation rules for pods, services, and ingresses. |
+| `spec.lifecycle.autoSleep`| bool | **Both** | `false` | Hibernates inactive tenant workloads to save host cluster compute costs. |
+| `spec.lifecycle.sleep` | bool | **Both** | `false` | Explicit sleep toggle (scales virtual control plane or tenant workloads to 0). |
+| `spec.lifecycle.ttlHours`| int32 | **Both** | `0` | Automated cluster decommissioning TTL in hours (0 = infinite). |
 
 ---
 
