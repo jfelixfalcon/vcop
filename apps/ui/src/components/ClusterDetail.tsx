@@ -64,6 +64,7 @@ import { WorkloadMetricsView } from './WorkloadMetricsView';
 import { IstioModal } from './IstioModal';
 import { GatewayAPIModal } from './GatewayAPIModal';
 import { DisasterRecoveryTab } from './DisasterRecoveryTab';
+import { NetFlowViewer } from './NetFlowViewer';
 
 function parseK8sQuantity(val?: string): number {
   if (!val) return 0;
@@ -230,7 +231,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
   const [user, setUser] = useState<UserSession | null>(currentUser || null);
   const [cluster, setCluster] = useState<VirtualCluster | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'telemetry' | 'workloads' | 'quota' | 'access' | 'apps' | 'dr' | 'yaml'>('telemetry');
+  const [activeTab, setActiveTab] = useState<'telemetry' | 'netflow' | 'workloads' | 'quota' | 'access' | 'apps' | 'dr' | 'yaml'>('telemetry');
   const [activeModal, setActiveModal] = useState<'kubeconfig' | 'upgrade' | 'delete' | 'quota' | 'sleep' | 'rbac' | 'install-app' | 'group' | 'istio' | 'gateway-api' | null>(null);
   const [kubeconfigInitialTab, setKubeconfigInitialTab] = useState<'admin' | 'oidc' | 'endpoint' | 'settings'>('admin');
   const [installAppTab, setInstallAppTab] = useState<'catalog' | 'direct' | 'add-app' | 'create-group'>('catalog');
@@ -840,6 +841,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
       <div className="flex border-b border-cyber-800 gap-6">
         {[
           { id: 'telemetry', label: 'Health & Telemetry', icon: Activity },
+          { id: 'netflow', label: 'NetFlow & Endpoints', icon: Network },
           { id: 'workloads', label: 'Pods & Metrics', icon: Cpu },
           { id: 'quota', label: 'Quotas & Policies', icon: Gauge },
           { id: 'access', label: 'Access & RBAC', icon: Users },
@@ -1592,6 +1594,11 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             })()}
           </div>
         </div>
+      )}
+
+      {/* TAB CONTENT: NetFlow & Endpoint Telemetry */}
+      {activeTab === 'netflow' && (
+        <NetFlowViewer cluster={cluster} />
       )}
 
       {/* TAB CONTENT: Workloads & Pod Metrics (Grafana Replacement) */}

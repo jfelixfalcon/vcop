@@ -1,0 +1,9 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { NetFlowFleetDashboard } from '../components/NetFlowFleetDashboard';
+const user = Astro.locals.user;
+---
+
+<Layout title="NetFlow & Endpoint Observability - vCOp">
+  <NetFlowFleetDashboard client:load currentUser={user} />
+</Layout>
