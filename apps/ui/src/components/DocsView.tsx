@@ -31,6 +31,8 @@ import {
   ArrowUpRight,
   Info,
   Code2,
+  Network,
+  Radio,
 } from 'lucide-react';
 import type { UserSession } from '../lib/types';
 
@@ -55,6 +57,22 @@ const RBAC_DATA: RbacRow[] = [
     admin: true,
     dev: true,
     viewer: true,
+  },
+  {
+    op: 'NetFlow Live Telemetry & Topology Stream',
+    category: 'Network Observability',
+    description: 'Stream real-time eBPF socket events, inspect packet flow paths, and analyze cross-namespace traffic matrices.',
+    admin: true,
+    dev: true,
+    viewer: true,
+  },
+  {
+    op: 'Execute Active Reachability Probes',
+    category: 'Network Observability',
+    description: 'Trigger synthetic HTTP/TCP probes from the Operations Center to test workload reachability and latency.',
+    admin: true,
+    dev: true,
+    viewer: false,
   },
   {
     op: 'Download / View Kubeconfig',
@@ -184,6 +202,7 @@ export const DocsView: React.FC<Props> = ({ currentUser }) => {
     { id: 'architecture', label: 'Architecture', icon: Layers },
     { id: 'lifecycle', label: 'Cluster Lifecycle', icon: Server },
     { id: 'networking', label: 'Networking & Gateways', icon: Globe },
+    { id: 'netflow', label: 'NetFlow & Topology', icon: Network, badge: 'eBPF' },
     { id: 'dr', label: 'Disaster Recovery', icon: Database },
     { id: 'capacity', label: 'Capacity Engine', icon: Gauge },
     { id: 'apps', label: 'App Store', icon: Package },
@@ -273,7 +292,7 @@ export const DocsView: React.FC<Props> = ({ currentUser }) => {
           <div className="sticky top-24 space-y-3 bg-cyber-900/60 border border-cyber-800/80 rounded-2xl p-4 backdrop-blur-md">
             <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider px-2 font-semibold flex items-center justify-between">
               <span>Table of Contents</span>
-              <span className="text-[10px] text-cyan-400">9 Topics</span>
+              <span className="text-[10px] text-cyan-400">10 Topics</span>
             </div>
             <nav className="space-y-1">
               {navItems.map((item) => {
@@ -991,7 +1010,201 @@ export const DocsView: React.FC<Props> = ({ currentUser }) => {
             </div>
           </section>
 
-          {/* SECTION 5: Disaster Recovery */}
+          {/* SECTION 5: NetFlow & Endpoint Topology Observability */}
+          <section id="netflow" className="scroll-mt-24 space-y-6">
+            <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-300 shadow-sm">
+                  <Network className="w-5 h-5 text-cyan-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+                    NetFlow & Endpoint Topology Observability
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    Real-time eBPF socket tracing, active reachability probes, and interactive multi-tier topology graph
+                  </p>
+                </div>
+              </div>
+              <span className="hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-mono font-semibold bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
+                Live Telemetry & Probing (/netflow)
+              </span>
+            </div>
+
+            {/* Overview & Core Engine Card */}
+            <div className="bg-cyber-900/90 border border-cyan-500/30 rounded-2xl p-6 space-y-5 shadow-lg shadow-cyan-950/10">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-3 h-3 rounded-full bg-cyan-400 animate-pulse"></span>
+                  <h3 className="text-base font-bold text-white tracking-tight">
+                    Cluster-Wide eBPF Flow Engine & Topology Graph
+                  </h3>
+                </div>
+                <span className="text-[11px] font-mono text-cyan-300 bg-cyan-950/80 px-2.5 py-1 rounded-lg border border-cyan-700/60 self-start sm:self-auto">
+                  Engine: eBPF Socket Filter + K8s Endpoint Discovery
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed">
+                vCOp NetFlow provides complete Layer 3/4 and Layer 7 network visibility across the host cluster and all virtual clusters.
+                It continuously discovers active pods, services, ingresses, and gateway proxies, mapping socket connections into a live interactive topology graph:
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs font-mono">
+                <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-cyan-400 font-bold">
+                    <Activity className="w-4 h-4 text-cyan-400" />
+                    <span>1. Interactive Topology</span>
+                  </div>
+                  <p className="text-slate-400 font-sans text-[11px] leading-relaxed">
+                    Visual nodes categorized into Ingress, Workload, Storage, and System tiers with animated particle velocity and zoom controls.
+                  </p>
+                </div>
+
+                <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                    <Radio className="w-4 h-4 text-emerald-400" />
+                    <span>2. Active Probing</span>
+                  </div>
+                  <p className="text-slate-400 font-sans text-[11px] leading-relaxed">
+                    Synthetic HTTP and TCP reachability probing directly tests socket latency, TLS handshakes, and route viability between endpoints.
+                  </p>
+                </div>
+
+                <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-purple-400 font-bold">
+                    <Zap className="w-4 h-4 text-purple-400" />
+                    <span>3. Flow Stream & Verdicts</span>
+                  </div>
+                  <p className="text-slate-400 font-sans text-[11px] leading-relaxed">
+                    Real-time flow event stream capturing <code className="text-emerald-300">FORWARDED</code>, <code className="text-rose-400">DROPPED</code>, and <code className="text-amber-300">ERROR</code> packet verdicts.
+                  </p>
+                </div>
+
+                <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-amber-400 font-bold">
+                    <Layers className="w-4 h-4 text-amber-400" />
+                    <span>4. Traffic Matrix</span>
+                  </div>
+                  <p className="text-slate-400 font-sans text-[11px] leading-relaxed">
+                    Cross-namespace communication matrix highlighting network policy boundaries and inter-tenant traffic isolation.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Scope & Filtering Capabilities */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 space-y-3">
+                <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-cyan-400" />
+                  Multi-Dimensional Observability Scopes
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  NetFlow supports granular scoping so platform operators and developers can focus on relevant workloads:
+                </p>
+                <div className="space-y-2 text-xs font-mono">
+                  <div className="bg-cyber-950 p-2.5 rounded-xl border border-cyber-800">
+                    <span className="text-cyan-300 font-bold">🌐 Cluster-Wide (all:all):</span>
+                    <span className="text-slate-400 block text-[11px] font-sans mt-0.5">
+                      Observes all pods and services across every host namespace, Envoy Gateway, and Istio component.
+                    </span>
+                  </div>
+                  <div className="bg-cyber-950 p-2.5 rounded-xl border border-cyber-800">
+                    <span className="text-purple-300 font-bold">📦 Virtual Cluster (vcluster:&lt;name&gt;):</span>
+                    <span className="text-slate-400 block text-[11px] font-sans mt-0.5">
+                      Filters to workloads belonging to a specific virtual cluster, tracing syncer proxy hops and intra-vcluster communications.
+                    </span>
+                  </div>
+                  <div className="bg-cyber-950 p-2.5 rounded-xl border border-cyber-800">
+                    <span className="text-emerald-300 font-bold">🏷️ Host Namespace (namespace:&lt;ns&gt;):</span>
+                    <span className="text-slate-400 block text-[11px] font-sans mt-0.5">
+                      Inspects traffic flows and endpoint health inside a specific host namespace or Namespaced Cluster slice.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 space-y-3">
+                <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-emerald-400" />
+                  Active Reachability Probing Engine
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Unlike passive log aggregators, vCOp actively validates network health on demand:
+                </p>
+                <div className="space-y-2 text-xs font-mono">
+                  <div className="bg-cyber-950 p-2.5 rounded-xl border border-cyber-800">
+                    <span className="text-emerald-300 font-bold">✓ Socket Connectivity:</span>
+                    <span className="text-slate-400 block text-[11px] font-sans mt-0.5">
+                      Direct TCP SYN/ACK socket verification against target container ports with microsecond latency calculation.
+                    </span>
+                  </div>
+                  <div className="bg-cyber-950 p-2.5 rounded-xl border border-cyber-800">
+                    <span className="text-blue-300 font-bold">✓ HTTP / gRPC Status Probing:</span>
+                    <span className="text-slate-400 block text-[11px] font-sans mt-0.5">
+                      Sends synthetic health requests to verify HTTP 200/404 responses and TLS certificate validation.
+                    </span>
+                  </div>
+                  <div className="bg-cyber-950 p-2.5 rounded-xl border border-cyber-800">
+                    <span className="text-rose-400 font-bold">✓ Drop & Partition Detection:</span>
+                    <span className="text-slate-400 block text-[11px] font-sans mt-0.5">
+                      Instantly alerts on connection timeouts, network policy blocks, and missing service endpoint slices.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* REST API & CLI Snippets */}
+            <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-cyan-400" />
+                  NetFlow REST API & CLI Query Snippets
+                </h3>
+                <span className="text-[10px] font-mono text-slate-400">Operations Center API</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Query Netflow Telemetry */}
+                <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono text-cyan-400 font-semibold">Query Live NetFlow Topology & Events:</span>
+                    <button
+                      onClick={() => copyToClipboard('api-netflow', 'curl -s http://localhost:4321/api/netflow?scope=all | jq .summary')}
+                      className="flex items-center gap-1 text-[11px] font-mono text-cyan-400 hover:text-cyan-300"
+                    >
+                      {copiedSnippets['api-netflow'] ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                      <span>{copiedSnippets['api-netflow'] ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <code className="text-cyan-300 block bg-cyber-900 p-2 rounded-lg border border-cyber-800 font-mono text-[11px]">
+                    curl -s http://localhost:4321/api/netflow?scope=all | jq .summary
+                  </code>
+                </div>
+
+                {/* Run Active Reachability Probe */}
+                <div className="bg-cyber-950 p-3.5 rounded-xl border border-cyber-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono text-emerald-400 font-semibold">Trigger Synthetic Reachability Probe:</span>
+                    <button
+                      onClick={() => copyToClipboard('api-probe', 'curl -X POST http://localhost:4321/api/netflow/probe -H "Content-Type: application/json" -d \'{"clusterKey":"all","endpointId":"vc-dev:nginx-deployment"}\'')}
+                      className="flex items-center gap-1 text-[11px] font-mono text-cyan-400 hover:text-cyan-300"
+                    >
+                      {copiedSnippets['api-probe'] ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                      <span>{copiedSnippets['api-probe'] ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <code className="text-cyan-300 block bg-cyber-900 p-2 rounded-lg border border-cyber-800 font-mono text-[11px] truncate">
+                    curl -X POST http://localhost:4321/api/netflow/probe -H "Content-Type: application/json" -d '&#123;"clusterKey":"all","endpointId":"vc-dev:nginx-deployment"&#125;'
+                  </code>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* SECTION 6: Disaster Recovery */}
           <section id="dr" className="scroll-mt-24 space-y-6">
             <div className="flex items-center justify-between border-b border-cyber-800 pb-3">
               <div className="flex items-center gap-3">

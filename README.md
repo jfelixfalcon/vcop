@@ -17,8 +17,8 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
                   ┌────────────────────────────────────────────────────────┐
                   │               Operations Center UI (Astro SSR)         │
                   │   - Dark-mode Cybernetic Glassmorphism Aesthetic       │
-                  │   - 3-Step 1-Click Provisioning Wizard                 │
-                  │   - Live Fleet Health Sparklines & Telemetry           │
+                  │   - Dual Deployment Wizard (vCluster & Namespaced)     │
+                  │   - Live NetFlow Topology & Active Reachability Probes │
                   │   - Instant Kubeconfig Download & CLI Connect Snippets │
                   └───────────────────────────┬────────────────────────────┘
                                               │ REST / CRD Mutations
@@ -72,6 +72,10 @@ vCOp v1.5 unifies multi-tenant Kubernetes management under the generalized conce
 | **Sleep / Wake** | Hibernates control-plane syncer & etcd to 0 | Scales tenant Deployments & StatefulSets to 0 |
 | **Disaster Recovery**| Automated etcd snapshots & S3 backup runner | Host-native infrastructure managed |
 | **Best For** | Multi-version testing, cluster CRDs, strong isolation | Microservices, lightweight apps, cost-optimized tenants |
+
+#### How to Provision:
+- **In the Operations Center UI (`/new`):** In Step 1 of the Provisioning Wizard, choose between **Virtual Cluster (vCluster)** and **Namespaced Cluster (Host)** using the prominent architecture cards at the top of the form. For namespaced clusters, optionally specify multiple target host namespaces.
+- **Via Declarative GitOps / YAML:** Set `spec.clusterType: "namespaced"` or `spec.clusterType: "vcluster"` (default).
 
 ```yaml
 apiVersion: vops.gitops.io/v1alpha1
@@ -196,6 +200,19 @@ spec:
 - **Persistent Storage & Zero-Configuration Deployment:** Backed by a dedicated 20Gi PVC (`vcop-registry-data`) with delete enabled, CORS support, and automatic deployment via the main `charts/vcop` Helm chart or `deploy/registry.yaml`.
 - **Integrated OCI Repository Explorer UI:** In the Operations Center, inspect available repositories, tags, digests, and generated push/pull CLI commands for Helm, Docker/Podman, and ORAS.
 - **1-Click "Deploy Chart as App":** Browse charts hosted in the internal OCI registry and instantly generate an App Store definition with a single click.
+
+### 15. eBPF NetFlow & Endpoint Topology Observability Engine
+- **Cluster-Wide Network Telemetry & Dynamic Topology Mapping (`/netflow`):** Provides deep, real-time Layer 3/4 and Layer 7 network visibility across physical host nodes, host namespaces, and tenant virtual clusters without external observability agents or heavy sidecars.
+- **4 Interconnected Observability Perspectives:**
+  1. **Interactive Topology Graph:** Multi-tier architectural visualization categorizing nodes into Ingress, Workload, Storage, and System tiers with animated particle streams reflecting live packet velocity, drag-and-drop node organization, and zoom controls.
+  2. **Endpoint Inventory & Health Diagnostics:** Live inspection of every socket listener, ClusterIP, node port, container IP, readiness status, and pod metadata.
+  3. **Real-Time Flow Stream & Verdict Engine:** Live event stream capturing L3/L4/L7 socket traffic with deterministic verdicts (`FORWARDED`, `DROPPED`, `ERROR`), protocol classification (`HTTP`, `gRPC`, `TCP`, `UDP`, `DNS`), byte counters, and socket latency measurements.
+  4. **Cross-Namespace Traffic Matrix:** Dynamic communication heatmap matrix highlighting inter-namespace traffic flows and verifying tenant network policy boundaries.
+- **Active Synthetic Reachability Probing Engine:** Trigger synthetic HTTP and TCP probes on demand directly from the Operations Center UI (`POST /api/netflow/probe`) to test socket connectivity, pinpoint NetworkPolicy drops, and verify TLS certificates.
+- **Multi-Scope Observability:** Switch seamlessly between global cluster-wide telemetry (`all:all`), virtual cluster-specific traffic (`vcluster:<name>`), and namespace-specific traffic (`namespace:<ns>`).
+- **REST API Endpoints:**
+  - `GET /api/netflow?scope=all|vcluster|namespace&target=<name>`: Retrieves live topology graph, endpoint inventory, and flow stream buffer.
+  - `POST /api/netflow/probe`: Executes synthetic connectivity probe against a target endpoint and returns latency and socket status.
 
 ---
 

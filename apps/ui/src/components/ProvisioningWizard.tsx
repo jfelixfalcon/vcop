@@ -865,95 +865,20 @@ policies:
               </h3>
             </div>
 
-            {/* PREDEFINED CLUSTER BASELINES */}
-            <div className="space-y-3">
+            {/* 1. CLUSTER ARCHITECTURE SELECTION (FIRST & PROMINENT) */}
+            <div className="p-4 bg-cyber-950/90 border border-cyber-700/80 rounded-2xl space-y-3 shadow-lg shadow-cyan-950/10">
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
-                    <Sliders className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Choose Predefined Cluster Baseline</span>
-                  </h4>
+                  <label className="block text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                    <Server className="w-4 h-4 text-cyan-400" />
+                    <span>1. Cluster Architecture (Deployment Model)</span>
+                  </label>
                   <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                    Predefined configuration with zero-touch wildcard Ingress. Select a baseline to deploy with 1 click.
+                    Select whether to deploy an isolated Virtual Cluster or a lightweight Host Namespaced Cluster.
                   </p>
                 </div>
-                {isAdmin && (
-                  <a
-                    href="/admin/baselines"
-                    className="text-[11px] text-cyan-400 hover:text-cyan-300 font-mono flex items-center gap-1 hover:underline"
-                  >
-                    <span>Manage Baselines</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-              </div>
-
-              {baselines.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {baselines.map((b) => {
-                    const isSelected = selectedBaselineId === b.id;
-                    const fqdnPreview = computeClusterFqdn(clusterName || 'cluster', b.baseDomain);
-
-                    return (
-                      <button
-                        key={b.id}
-                        type="button"
-                        onClick={() => applyBaseline(b)}
-                        className={`p-3.5 rounded-2xl border text-left transition-all relative flex flex-col justify-between ${
-                          isSelected
-                            ? 'bg-cyan-500/10 border-cyan-500 text-white shadow-md shadow-cyan-500/10 ring-1 ring-cyan-500/50'
-                            : 'bg-cyber-950/60 border-cyber-800 hover:border-cyber-700 hover:bg-cyber-900/60 text-slate-300'
-                        }`}
-                      >
-                        <div>
-                          <div className="flex items-center justify-between gap-1 mb-1">
-                            <span className="text-xs font-bold text-white flex items-center gap-1.5 font-mono">
-                              {b.name}
-                            </span>
-                            {isSelected && <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
-                          </div>
-
-                          <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed mb-2.5">
-                            {b.description}
-                          </p>
-                        </div>
-
-                        <div className="space-y-1 pt-2 border-t border-cyber-800/80 text-[10px] font-mono">
-                          <div className="flex items-center justify-between text-slate-400">
-                            <span>Tier:</span>
-                            <span className="text-slate-200 uppercase font-semibold">{b.preset}</span>
-                          </div>
-                          <div className="flex items-center justify-between text-slate-400">
-                            <span>etcd Drive:</span>
-                            <span className="text-amber-300 font-semibold truncate max-w-[130px]" title={b.etcdStorageClass || 'Cluster Default'}>
-                              {b.etcdStorageClass || 'Default'}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-slate-400">
-                            <span>Ingress:</span>
-                            <span className="text-emerald-400 font-semibold">{fqdnPreview.wildcard}</span>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="p-3 bg-cyber-950/60 rounded-xl border border-cyber-800 text-xs font-mono text-slate-400">
-                  Loading predefined baselines...
-                </div>
-              )}
-            </div>
-
-            {/* CLUSTER ARCHITECTURE SELECTION */}
-            <div className="p-4 bg-cyber-950/70 border border-cyber-850 rounded-2xl space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono flex items-center gap-2">
-                  <Server className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Cluster Architecture</span>
-                </label>
-                <span className="text-[10px] font-mono text-slate-400">
-                  Select deployment model
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyber-900 border border-cyber-750 text-cyan-300 font-semibold">
+                  Dual-Model Architecture
                 </span>
               </div>
 
@@ -1031,6 +956,86 @@ policies:
                   <p className="text-[10px] text-slate-400 font-mono">
                     Quotas, LimitRanges, and scoped Kubeconfigs will be enforced across all specified host namespaces.
                   </p>
+                </div>
+              )}
+            </div>
+
+            {/* 2. PREDEFINED CLUSTER BASELINES */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                    <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>2. Choose Predefined Cluster Baseline</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                    Predefined configuration with zero-touch wildcard Ingress. Select a baseline to deploy with 1 click.
+                  </p>
+                </div>
+                {isAdmin && (
+                  <a
+                    href="/admin/baselines"
+                    className="text-[11px] text-cyan-400 hover:text-cyan-300 font-mono flex items-center gap-1 hover:underline"
+                  >
+                    <span>Manage Baselines</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+
+              {baselines.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {baselines.map((b) => {
+                    const isSelected = selectedBaselineId === b.id;
+                    const fqdnPreview = computeClusterFqdn(clusterName || 'cluster', b.baseDomain);
+
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => applyBaseline(b)}
+                        className={`p-3.5 rounded-2xl border text-left transition-all relative flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-cyan-500/10 border-cyan-500 text-white shadow-md shadow-cyan-500/10 ring-1 ring-cyan-500/50'
+                            : 'bg-cyber-950/60 border-cyber-800 hover:border-cyber-700 hover:bg-cyber-900/60 text-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5 font-mono">
+                              {b.name}
+                            </span>
+                            {isSelected && <Check className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
+                          </div>
+
+                          <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed mb-2.5">
+                            {b.description}
+                          </p>
+                        </div>
+
+                        <div className="space-y-1 pt-2 border-t border-cyber-800/80 text-[10px] font-mono">
+                          <div className="flex items-center justify-between text-slate-400">
+                            <span>Tier:</span>
+                            <span className="text-slate-200 uppercase font-semibold">{b.preset}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-slate-400">
+                            <span>etcd Drive:</span>
+                            <span className="text-amber-300 font-semibold truncate max-w-[130px]" title={b.etcdStorageClass || 'Cluster Default'}>
+                              {b.etcdStorageClass || 'Default'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-slate-400">
+                            <span>Ingress:</span>
+                            <span className="text-emerald-400 font-semibold">{fqdnPreview.wildcard}</span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-3 bg-cyber-950/60 rounded-xl border border-cyber-800 text-xs font-mono text-slate-400">
+                  Loading predefined baselines...
                 </div>
               )}
             </div>
