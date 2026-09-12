@@ -229,3 +229,59 @@ func TestValidator_ValidateCapacity(t *testing.T) {
 		t.Fatalf("Expected bypassVC to succeed, got: %v", err)
 	}
 }
+
+func TestValidator_ClusterType(t *testing.T) {
+	v := NewVirtualClusterValidator()
+	ctx := context.Background()
+
+	// Valid namespaced cluster
+	namespaced := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-cluster"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "ns-cluster",
+			ClusterType: v1alpha1.ClusterTypeNamespaced,
+			Namespaces:  []string{"team-a", "team-b"},
+		},
+	}
+	if err := v.ValidateCreate(ctx, namespaced); err != nil {
+		t.Fatalf("Expected namespaced cluster to be valid, got: %v", err)
+	}
+
+	// Valid host cluster (alias)
+	hostCluster := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "host-cluster"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "host-cluster",
+			ClusterType: v1alpha1.ClusterTypeHost,
+		},
+	}
+	if err := v.ValidateCreate(ctx, hostCluster); err != nil {
+		t.Fatalf("Expected host cluster to be valid, got: %v", err)
+	}
+
+	// Invalid cluster type
+	invalidType := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "invalid-type"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "invalid-type",
+			ClusterType: "unsupported-mode",
+		},
+	}
+	if err := v.ValidateCreate(ctx, invalidType); err == nil {
+		t.Fatalf("Expected error for invalid clusterType, got nil")
+	}
+
+	// Prohibited clusterType change on update
+	oldVC := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "vc-to-ns"},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "vc-to-ns",
+			ClusterType: v1alpha1.ClusterTypeVCluster,
+		},
+	}
+	newVC := oldVC.DeepCopy()
+	newVC.Spec.ClusterType = v1alpha1.ClusterTypeNamespaced
+	if err := v.ValidateUpdate(ctx, oldVC, newVC); err == nil {
+		t.Fatalf("Expected error when attempting to change clusterType on existing cluster, got nil")
+	}
+}

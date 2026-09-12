@@ -30,6 +30,13 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
     });
   }
 
+  if (cluster.spec.clusterType === 'namespaced' || cluster.status.clusterType === 'namespaced') {
+    return new Response(JSON.stringify({ success: false, error: 'Engine upgrade is not applicable for host namespaced clusters.' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
     const body = await request.json();
     const targetNs = body.namespace || cluster.namespace || 'default';

@@ -7,6 +7,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -664,5 +665,480 @@ func TestVirtualClusterReconciler_FullDeletionCleanup(t *testing.T) {
 	checkNs := &corev1.Namespace{}
 	if err := client.Get(ctx, types.NamespacedName{Name: nsName}, checkNs); err == nil {
 		t.Errorf("Expected dedicated namespace %s to be deleted, but it still exists", nsName)
+	}
+}
+
+func TestVirtualClusterReconciler_NamespacedCluster(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = rbacv1.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-namespaced-cluster",
+			Namespace: "team-ns",
+			Annotations: map[string]string{
+				AnnotationOwner:         "dev-lead@company.com",
+				AnnotationAllowedEmails: "dev1@company.com,dev2@company.com",
+			},
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "test-namespaced-cluster",
+			ClusterType: v1alpha1.ClusterTypeNamespaced,
+			Namespaces:  []string{"team-ns", "team-ns-db"},
+			SizePreset:  v1alpha1.PresetSmall,
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc).
+		WithStatusSubresource(vc).
+		Build()
+
+	logger := zap.New(zap.UseDevMode(true))
+
+	reconciler := &VirtualClusterReconciler{
+		Client:               client,
+		Log:                  logger,
+		Scheme:               scheme,
+		EtcdReconciler:       NewEtcdReconciler(client),
+		SyncerReconciler:     NewSyncerReconciler(client),
+		KubeconfigReconciler: NewKubeconfigReconciler(client),
+		AddonsReconciler:     NewAddonsReconciler(client),
+		UpgradeManager:       NewUpgradeManager(client),
+		QuotaReconciler:      NewQuotaReconciler(client),
+		RBACReconciler:       NewRBACReconciler(client),
+	}
+
+	ctx := context.Background()
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      vc.Name,
+			Namespace: vc.Namespace,
+		},
+	}
+
+	// Pass 1: add finalizer
+	_, err := reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile pass 1 failed: %v", err)
+	}
+
+	// Pass 2: reconcile namespaced cluster
+	_, err = reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile pass 2 failed: %v", err)
+	}
+
+	// 1. Verify managed namespaces exist
+	for _, nsName := range []string{"team-ns", "team-ns-db"} {
+		ns := &corev1.Namespace{}
+		if err := client.Get(ctx, types.NamespacedName{Name: nsName}, ns); err != nil {
+			t.Errorf("Expected namespace %s to be created: %v", nsName, err)
+		}
+	}
+
+	// 2. Verify NO syncer or etcd statefulset was created
+	syncerSts := &appsv1.StatefulSet{}
+	if err := client.Get(ctx, types.NamespacedName{Name: vc.Name, Namespace: vc.Namespace}, syncerSts); err == nil {
+		t.Errorf("Syncer StatefulSet should NOT be created for namespaced cluster")
+	}
+	etcdSts := &appsv1.StatefulSet{}
+	if err := client.Get(ctx, types.NamespacedName{Name: vc.Name + "-etcd", Namespace: vc.Namespace}, etcdSts); err == nil {
+		t.Errorf("etcd StatefulSet should NOT be created for namespaced cluster")
+	}
+
+	// 3. Verify ResourceQuota and LimitRange exist in both namespaces
+	for _, nsName := range []string{"team-ns", "team-ns-db"} {
+		rq := &corev1.ResourceQuota{}
+		if err := client.Get(ctx, types.NamespacedName{Name: vc.Name + "-quota", Namespace: nsName}, rq); err != nil {
+			t.Errorf("Expected ResourceQuota in namespace %s: %v", nsName, err)
+		}
+		lr := &corev1.LimitRange{}
+		if err := client.Get(ctx, types.NamespacedName{Name: vc.Name + "-limits", Namespace: nsName}, lr); err != nil {
+			t.Errorf("Expected LimitRange in namespace %s: %v", nsName, err)
+		}
+	}
+
+	// 4. Verify ServiceAccount and RoleBinding created
+	sa := &corev1.ServiceAccount{}
+	if err := client.Get(ctx, types.NamespacedName{Name: vc.Name + "-admin", Namespace: vc.Namespace}, sa); err != nil {
+		t.Errorf("Expected admin ServiceAccount to be created: %v", err)
+	}
+
+	// 5. Verify Kubeconfig secret was generated
+	kubeSec := &corev1.Secret{}
+	if err := client.Get(ctx, types.NamespacedName{Name: vc.Name + "-kubeconfig", Namespace: vc.Namespace}, kubeSec); err != nil {
+		t.Errorf("Expected kubeconfig secret to be created: %v", err)
+	} else if len(kubeSec.Data["config"]) == 0 {
+		t.Errorf("Expected kubeconfig data in secret")
+	}
+
+	// 6. Verify cluster status
+	updatedVC := &v1alpha1.VirtualCluster{}
+	if err := client.Get(ctx, req.NamespacedName, updatedVC); err != nil {
+		t.Fatalf("Failed to get updated cluster: %v", err)
+	}
+	if updatedVC.Status.Phase != v1alpha1.PhaseReady {
+		t.Errorf("Expected cluster phase Ready, got: %s", updatedVC.Status.Phase)
+	}
+	if updatedVC.Status.ClusterType != v1alpha1.ClusterTypeNamespaced {
+		t.Errorf("Expected cluster type namespaced, got: %s", updatedVC.Status.ClusterType)
+	}
+}
+
+func TestVirtualClusterReconciler_NamespacedSleepAndWake(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = rbacv1.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	two := int32(2)
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-app",
+			Namespace: "app-ns",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &two,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "test-app"},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "test-app"},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "app", Image: "nginx:latest"},
+					},
+				},
+			},
+		},
+	}
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "sleep-cluster",
+			Namespace:  "app-ns",
+			Finalizers: []string{VirtualClusterFinalizer},
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "sleep-cluster",
+			ClusterType: v1alpha1.ClusterTypeNamespaced,
+			Paused:      true,
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc, dep).
+		WithStatusSubresource(vc).
+		Build()
+
+	logger := zap.New(zap.UseDevMode(true))
+	reconciler := &VirtualClusterReconciler{
+		Client:               client,
+		Log:                  logger,
+		Scheme:               scheme,
+		EtcdReconciler:       NewEtcdReconciler(client),
+		SyncerReconciler:     NewSyncerReconciler(client),
+		KubeconfigReconciler: NewKubeconfigReconciler(client),
+		AddonsReconciler:     NewAddonsReconciler(client),
+		UpgradeManager:       NewUpgradeManager(client),
+		QuotaReconciler:      NewQuotaReconciler(client),
+		RBACReconciler:       NewRBACReconciler(client),
+	}
+
+	ctx := context.Background()
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: vc.Name, Namespace: vc.Namespace}}
+
+	// Reconcile in sleep mode
+	_, err := reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile in sleep failed: %v", err)
+	}
+
+	checkDep := &appsv1.Deployment{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-app", Namespace: "app-ns"}, checkDep); err != nil {
+		t.Fatalf("Failed to fetch deployment: %v", err)
+	}
+	if checkDep.Spec.Replicas == nil || *checkDep.Spec.Replicas != 0 {
+		t.Errorf("Expected deployment replicas 0 during sleep, got: %v", checkDep.Spec.Replicas)
+	}
+
+	// Wake up cluster
+	_ = client.Get(ctx, req.NamespacedName, vc)
+	vc.Spec.Paused = false
+	_ = client.Update(ctx, vc)
+
+	_, err = reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile after wake failed: %v", err)
+	}
+
+	if err := client.Get(ctx, types.NamespacedName{Name: "test-app", Namespace: "app-ns"}, checkDep); err != nil {
+		t.Fatalf("Failed to fetch deployment after wake: %v", err)
+	}
+	if checkDep.Spec.Replicas == nil || *checkDep.Spec.Replicas != 2 {
+		t.Errorf("Expected deployment replicas restored to 2 after wake, got: %v", checkDep.Spec.Replicas)
+	}
+}
+
+func TestVirtualClusterReconciler_NamespacedDeletion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = rbacv1.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	now := metav1.Now()
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "del-namespaced",
+			Namespace:         "custom-del-ns",
+			Finalizers:        []string{VirtualClusterFinalizer},
+			DeletionTimestamp: &now,
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "del-namespaced",
+			ClusterType: v1alpha1.ClusterTypeNamespaced,
+		},
+	}
+
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "del-namespaced-admin",
+			Namespace: "custom-del-ns",
+		},
+	}
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "del-namespaced-kubeconfig",
+			Namespace: "custom-del-ns",
+		},
+	}
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "custom-del-ns",
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc, sa, sec, ns).
+		WithStatusSubresource(vc).
+		Build()
+
+	logger := zap.New(zap.UseDevMode(true))
+	reconciler := &VirtualClusterReconciler{
+		Client:               client,
+		Log:                  logger,
+		Scheme:               scheme,
+		KubeconfigReconciler: NewKubeconfigReconciler(client),
+		QuotaReconciler:      NewQuotaReconciler(client),
+		RBACReconciler:       NewRBACReconciler(client),
+	}
+
+	ctx := context.Background()
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: vc.Name, Namespace: vc.Namespace}}
+
+	_, err := reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile deletion failed: %v", err)
+	}
+
+	// Verify SA was deleted
+	checkSa := &corev1.ServiceAccount{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "del-namespaced-admin", Namespace: "custom-del-ns"}, checkSa); err == nil {
+		t.Errorf("Expected admin SA to be deleted")
+	}
+
+	// Verify Kubeconfig secret was deleted
+	checkSec := &corev1.Secret{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "del-namespaced-kubeconfig", Namespace: "custom-del-ns"}, checkSec); err == nil {
+		t.Errorf("Expected kubeconfig secret to be deleted")
+	}
+
+	// Verify finalizer was removed
+	checkVC := &v1alpha1.VirtualCluster{}
+	if err := client.Get(ctx, req.NamespacedName, checkVC); err == nil {
+		if len(checkVC.Finalizers) > 0 {
+			t.Errorf("Expected finalizers to be cleared, got: %v", checkVC.Finalizers)
+		}
+	}
+}
+
+func TestNamespacedKubeconfigReconciler_MultiNamespace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = rbacv1.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "multi-kube-test",
+			Namespace: "ns-primary",
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "multi-kube-test",
+			ClusterType: v1alpha1.ClusterTypeNamespaced,
+			Namespaces:  []string{"ns-primary", "ns-secondary", "ns-tertiary"},
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc).
+		WithStatusSubresource(vc).
+		Build()
+
+	rec := NewKubeconfigReconciler(client)
+	ctx := context.Background()
+
+	err := rec.ReconcileNamespacedKubeconfig(ctx, vc, "https://10.96.0.1:443")
+	if err != nil {
+		t.Fatalf("ReconcileNamespacedKubeconfig failed: %v", err)
+	}
+
+	// Verify SA created
+	sa := &corev1.ServiceAccount{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "multi-kube-test-admin", Namespace: "ns-primary"}, sa); err != nil {
+		t.Errorf("Admin SA not found: %v", err)
+	}
+
+	// Verify RoleBindings created in all 3 namespaces
+	for _, ns := range []string{"ns-primary", "ns-secondary", "ns-tertiary"} {
+		rb := &rbacv1.RoleBinding{}
+		if err := client.Get(ctx, types.NamespacedName{Name: "multi-kube-test-sa-admin-binding", Namespace: ns}, rb); err != nil {
+			t.Errorf("RoleBinding not found in namespace %s: %v", ns, err)
+		} else {
+			if rb.RoleRef.Name != "admin" {
+				t.Errorf("RoleBinding in %s does not reference admin ClusterRole", ns)
+			}
+		}
+	}
+
+	// Verify Kubeconfig secret
+	sec := &corev1.Secret{}
+	if err := client.Get(ctx, types.NamespacedName{Name: "multi-kube-test-kubeconfig", Namespace: "ns-primary"}, sec); err != nil {
+		t.Fatalf("Kubeconfig secret not found: %v", err)
+	}
+	if _, ok := sec.Data["config"]; !ok {
+		t.Errorf("Kubeconfig secret missing 'config' data key")
+	}
+}
+
+func TestNamespacedQuotaReconciler_MultiNamespace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "multi-quota-test",
+			Namespace: "ns-one",
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "multi-quota-test",
+			ClusterType: v1alpha1.ClusterTypeNamespaced,
+			Namespaces:  []string{"ns-one", "ns-two"},
+			SizePreset:  v1alpha1.PresetLarge,
+			Policies: &v1alpha1.PoliciesSpec{
+				ResourceQuota: &v1alpha1.ResourceQuotaPolicy{
+					Enabled: true,
+					Pods:    "50",
+				},
+				LimitRange: &v1alpha1.LimitRangePolicy{
+					Enabled:           true,
+					DefaultRequestCPU: "100m",
+				},
+			},
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc).
+		WithStatusSubresource(vc).
+		Build()
+
+	rec := NewQuotaReconciler(client)
+	ctx := context.Background()
+
+	err := rec.ReconcileQuota(ctx, vc)
+	if err != nil {
+		t.Fatalf("QuotaReconciler.ReconcileQuota failed: %v", err)
+	}
+
+	// Check ResourceQuota & LimitRange in both namespaces
+	for _, ns := range []string{"ns-one", "ns-two"} {
+		rq := &corev1.ResourceQuota{}
+		if err := client.Get(ctx, types.NamespacedName{Name: "multi-quota-test-quota", Namespace: ns}, rq); err != nil {
+			t.Errorf("ResourceQuota not found in namespace %s: %v", ns, err)
+		} else {
+			if pods, ok := rq.Spec.Hard[corev1.ResourcePods]; !ok || pods.String() != "50" {
+				t.Errorf("Expected pods 50 in %s, got %v", ns, pods)
+			}
+		}
+
+		lr := &corev1.LimitRange{}
+		if err := client.Get(ctx, types.NamespacedName{Name: "multi-quota-test-limits", Namespace: ns}, lr); err != nil {
+			t.Errorf("LimitRange not found in namespace %s: %v", ns, err)
+		}
+	}
+}
+
+func TestNamespacedRBACReconciler_MultiNamespace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = rbacv1.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+
+	vc := &v1alpha1.VirtualCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "multi-rbac-test",
+			Namespace: "ns-a",
+			Annotations: map[string]string{
+				"vops.gitops.io/owner":          "lead-dev@corp.local",
+				"vops.gitops.io/allowed-groups": "backend-team,platform-team",
+				"vops.gitops.io/allowed-emails": "qa-lead@corp.local",
+			},
+		},
+		Spec: v1alpha1.VirtualClusterSpec{
+			ClusterName: "multi-rbac-test",
+			ClusterType: v1alpha1.ClusterTypeNamespaced,
+			Namespaces:  []string{"ns-a", "ns-b"},
+		},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(vc).
+		WithStatusSubresource(vc).
+		Build()
+
+	rec := NewRBACReconciler(client)
+	ctx := context.Background()
+
+	err := rec.ReconcileNamespacedRBAC(ctx, vc)
+	if err != nil {
+		t.Fatalf("RBACReconciler.ReconcileNamespacedRBAC failed: %v", err)
+	}
+
+	// Verify vcop-oidc-admins binding in both namespaces
+	for _, ns := range []string{"ns-a", "ns-b"} {
+		rb := &rbacv1.RoleBinding{}
+		if err := client.Get(ctx, types.NamespacedName{Name: DefaultGuestAdminBindingName, Namespace: ns}, rb); err != nil {
+			t.Errorf("RoleBinding %s not found in namespace %s: %v", DefaultGuestAdminBindingName, ns, err)
+		} else {
+			if rb.RoleRef.Name != "admin" {
+				t.Errorf("Expected roleRef admin, got %s", rb.RoleRef.Name)
+			}
+			if len(rb.Subjects) != 4 { // 1 owner + 2 groups + 1 email
+				t.Errorf("Expected 4 subjects in %s, got %d", ns, len(rb.Subjects))
+			}
+		}
 	}
 }

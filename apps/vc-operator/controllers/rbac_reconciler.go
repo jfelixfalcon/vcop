@@ -222,3 +222,49 @@ func (r *RBACReconciler) ReconcileGuestRBACWithClient(ctx context.Context, vc *v
 
 	return err
 }
+
+// ReconcileNamespacedRBAC reconciles RoleBindings in each target namespace on the host cluster
+func (r *RBACReconciler) ReconcileNamespacedRBAC(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
+	subjects := r.BuildSubjects(vc)
+	targetNamespaces := vc.GetNamespaces()
+
+	for _, ns := range targetNamespaces {
+		binding := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      DefaultGuestAdminBindingName,
+				Namespace: ns,
+			},
+		}
+
+		if len(subjects) == 0 {
+			err := r.client.Get(ctx, types.NamespacedName{Name: DefaultGuestAdminBindingName, Namespace: ns}, binding)
+			if err == nil {
+				if delErr := r.client.Delete(ctx, binding); delErr != nil && !apierrors.IsNotFound(delErr) {
+					return delErr
+				}
+			}
+			continue
+		}
+
+		_, err := controllerutil.CreateOrUpdate(ctx, r.client, binding, func() error {
+			if binding.Labels == nil {
+				binding.Labels = make(map[string]string)
+			}
+			binding.Labels["app.kubernetes.io/managed-by"] = "vc-operator"
+			binding.Labels["vops.gitops.io/cluster"] = vc.Name
+
+			binding.RoleRef = rbacv1.RoleRef{
+				APIGroup: rbacv1.GroupName,
+				Kind:     "ClusterRole",
+				Name:     "admin",
+			}
+			binding.Subjects = subjects
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed reconciling RoleBinding in namespace %s: %w", ns, err)
+		}
+	}
+
+	return nil
+}

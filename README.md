@@ -5,7 +5,7 @@
 [![vCluster](https://img.shields.io/badge/vCluster%20OSS-v0.36-purple.svg)](https://vcluster.com)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-v1.31%2B-326CE5.svg)](https://kubernetes.io)
 
-An enterprise-grade, cloud-native **Virtual Cluster Management Platform** and Internal Developer Platform (IDP) designed to manage multi-tenant virtual clusters using **vCluster OSS v0.36**, high-availability etcd, internal CoreDNS, and metrics-server.
+An enterprise-grade, cloud-native **Cluster Management Platform** and Internal Developer Platform (IDP) designed to manage multi-tenant environments with dual deployment models: **Virtual Clusters (`vcluster`)** using vCluster OSS v0.36 and dedicated HA etcd, and lightweight **Host Namespaced Clusters (`namespaced`)** with identical governance (quotas, limits, RBAC, scoped kubeconfigs, and sleep/wake lifecycle) with zero control-plane overhead.
 
 ---
 
@@ -57,6 +57,46 @@ vCOp couples a high-performance Kubernetes Operator with an ultra-responsive Ast
 ---
 
 ## Key Capabilities
+
+### 0. Dual Deployment Models: Virtual Clusters vs Namespaced Clusters
+vCOp v1.5 unifies multi-tenant Kubernetes management under the generalized concept of **Clusters**. Teams can select the ideal architecture for their workload needs:
+
+| Capability | Virtual Cluster (`vcluster`) | Namespaced Cluster (`namespaced`) |
+| :--- | :--- | :--- |
+| **Control Plane** | Dedicated virtual API server (K3s/K0s/Vanilla K8s) | Shared Host Kubernetes API server |
+| **Storage Backing** | Dedicated 1- or 3-node HA etcd StatefulSet | Host cluster persistent storage |
+| **Overhead** | Syncer container + etcd pod(s) (~300–800Mi RAM) | **Zero** syncer/etcd overhead (host native) |
+| **Namespaces** | Inner virtual namespaces mapped to single host namespace | One or multiple managed host namespaces (`spec.namespaces`) |
+| **Governance** | Quotas enforced inner + host via syncer translation | Host-native `ResourceQuota` & `LimitRange` per namespace |
+| **Kubeconfig** | Virtual cluster admin kubeconfig | Scoped ServiceAccount admin token Kubeconfig |
+| **Sleep / Wake** | Hibernates control-plane syncer & etcd to 0 | Scales tenant Deployments & StatefulSets to 0 |
+| **Disaster Recovery**| Automated etcd snapshots & S3 backup runner | Host-native infrastructure managed |
+| **Best For** | Multi-version testing, cluster CRDs, strong isolation | Microservices, lightweight apps, cost-optimized tenants |
+
+```yaml
+apiVersion: vops.gitops.io/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: team-service
+  namespace: team-service
+spec:
+  clusterName: team-service
+  clusterType: namespaced              # 'namespaced' (host native) or 'vcluster' (default)
+  namespaces:                          # Optional: manage multiple target host namespaces
+    - team-service
+    - team-service-staging
+  sizePreset: medium                   # Predefined compute & memory quota tier
+  policies:
+    resourceQuota:
+      enabled: true
+      pods: "25"
+      requestsCPU: "4"
+      requestsMemory: "8Gi"
+    limitRange:
+      enabled: true
+      defaultRequestCPU: "50m"
+      defaultRequestMemory: "64Mi"
+```
 
 ### 1. vCluster OSS v0.36 Unified Engine
 - Generates and enforces the unified `vcluster.yaml` schema introduced in v0.36.x.

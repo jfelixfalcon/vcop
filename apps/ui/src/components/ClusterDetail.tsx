@@ -375,9 +375,10 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
     );
   }
 
+  const isNamespaced = cluster.spec.clusterType === 'namespaced' || cluster.status.clusterType === 'namespaced';
   const isHA = cluster.spec.highAvailability;
   const isSleeping = cluster.status.phase === 'Sleeping' || cluster.spec.paused || cluster.spec.lifecycle?.sleep;
-  const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'N/A';
+  const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || (isNamespaced ? 'Host Native' : 'N/A');
   const vclusterVer = cluster.status.vclusterVersion || cluster.spec.vclusterVersion || 'N/A';
   const clusterGroups =
     cluster.metadata?.clusterGroups && cluster.metadata.clusterGroups.length > 0
@@ -401,6 +402,17 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-2xl font-bold font-mono text-white tracking-wide">{cluster.name}</h1>
               <StatusBadge phase={cluster.status.phase} />
+              {isNamespaced ? (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                  <Layers className="w-2.5 h-2.5" />
+                  Host Namespaced
+                </span>
+              ) : (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 flex items-center gap-1">
+                  <Box className="w-2.5 h-2.5" />
+                  Virtual Cluster
+                </span>
+              )}
               {cluster.metadata?.environment && (
                 <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-cyber-800 text-slate-400 border border-cyber-700">
                   {cluster.metadata.environment}
@@ -417,9 +429,15 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
               ))}
             </div>
             <p className="text-xs text-slate-400 font-mono mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span>Namespace: <span className="text-slate-300">{cluster.namespace}</span></span>
+              <span>Namespace{cluster.spec.namespaces && cluster.spec.namespaces.length > 1 ? 's' : ''}: <span className="text-slate-300">
+                {cluster.spec.namespaces && cluster.spec.namespaces.length > 0 ? cluster.spec.namespaces.join(', ') : cluster.namespace}
+              </span></span>
               <span>•</span>
-              <span>Engine: <span className="text-cyan-400">vCluster {vclusterVer}</span></span>
+              {isNamespaced ? (
+                <span>Architecture: <span className="text-emerald-400 font-semibold">Host Namespaced</span></span>
+              ) : (
+                <span>Engine: <span className="text-cyan-400">vCluster {vclusterVer}</span></span>
+              )}
               <span>•</span>
               {canManage ? (
                 <button
@@ -774,7 +792,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-4 backdrop-blur-sm">
           <div className="flex justify-between items-center">
             <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Kubernetes API Level</span>
-            {canManage && (
+            {canManage && !isNamespaced && (
               <button
                 onClick={() => setActiveModal('upgrade')}
                 className="text-[10px] font-mono text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1"
@@ -787,7 +805,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
           </div>
           <p className="font-mono text-base font-bold text-white mt-1">{k8sVer}</p>
           <span className="inline-block mt-1 text-[10px] text-cyber-accent font-mono">
-            K8s Distro Native Syncer
+            {isNamespaced ? 'Host Native Kubernetes' : 'K8s Distro Native Syncer'}
           </span>
         </div>
 
@@ -797,7 +815,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
             {cluster.spec.sizePreset} Tier
           </p>
           <span className="inline-block mt-1 text-[10px] text-slate-400 font-mono">
-            {isHA ? 'HA 3-Node Quorum' : 'Single-replica'}
+            {isNamespaced ? 'Host Shared' : (isHA ? 'HA 3-Node Quorum' : 'Single-replica')}
           </span>
         </div>
 
@@ -847,7 +865,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
           { id: 'access', label: 'Access & RBAC', icon: Users },
           { id: 'apps', label: 'Applications ', icon: Package },
           { id: 'dr', label: 'Disaster Recovery', icon: ShieldAlert },
-          { id: 'yaml', label: 'Effective vcluster.yaml', icon: FileCode },
+          { id: 'yaml', label: isNamespaced ? 'Cluster Spec YAML' : 'Effective vcluster.yaml', icon: FileCode },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -914,7 +932,7 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
                   <Globe className="w-4 h-4 text-cyan-400" />
                   Opinionated Core Stack & Application Entrypoint
                   <span className="text-[10px] font-mono uppercase bg-cyan-950 text-cyan-400 px-2 py-0.5 rounded border border-cyan-800 font-bold">
-                    vCluster Core
+                    {isNamespaced ? 'Host Native Core' : 'vCluster Core'}
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
@@ -2671,15 +2689,41 @@ export const ClusterDetail: React.FC<Props> = ({ clusterName, currentUser }) => 
         <DisasterRecoveryTab cluster={cluster} onRefresh={fetchCluster} isAdmin={canManage} />
       )}
 
-      {/* TAB CONTENT: Effective vCluster 0.36 YAML */}
+      {/* TAB CONTENT: Effective Config / CR YAML */}
       {activeTab === 'yaml' && (
         <div className="bg-cyber-900/90 border border-cyber-700/70 rounded-2xl p-5 font-mono text-xs animate-in fade-in duration-150">
           <div className="flex justify-between items-center mb-3">
-            <span className="text-slate-300 font-semibold">Compiled vcluster.yaml ({vclusterVer} Unified Schema)</span>
-            <span className="text-slate-500 text-[10px]">Stored in host ConfigMap: {cluster.name}-config</span>
+            <span className="text-slate-300 font-semibold">
+              {isNamespaced ? 'VirtualCluster Custom Resource (Host Namespaced)' : `Compiled vcluster.yaml (${vclusterVer} Unified Schema)`}
+            </span>
+            <span className="text-slate-500 text-[10px]">
+              {isNamespaced ? `Custom Resource: virtualclusters.vops.gitops.io/${cluster.name}` : `Stored in host ConfigMap: ${cluster.name}-config`}
+            </span>
           </div>
           <pre className="bg-cyber-950 border border-cyber-800 rounded-xl p-4 text-slate-300 overflow-x-auto whitespace-pre leading-relaxed">
-{cluster.compiledConfig || `# vcluster.yaml is being reconciled by vc-operator for ${cluster.name}-config...`}
+{isNamespaced
+  ? `apiVersion: vops.gitops.io/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: ${cluster.name}
+  namespace: ${cluster.namespace}
+spec:
+  clusterType: namespaced
+  namespaces:
+${(cluster.spec.namespaces && cluster.spec.namespaces.length > 0 ? cluster.spec.namespaces : [cluster.namespace]).map((ns: string) => `    - ${ns}`).join('\n')}
+  sizePreset: ${cluster.spec.sizePreset}
+  paused: ${Boolean(cluster.spec.paused)}
+  quota:
+    cpu: "${cluster.spec.quota?.cpu || 'unlimited'}"
+    memory: "${cluster.spec.quota?.memory || 'unlimited'}"
+    storage: "${cluster.spec.quota?.storage || 'unlimited'}"
+    pods: "${cluster.spec.quota?.pods || 'unlimited'}"
+  ingress:
+    enabled: ${Boolean(cluster.spec.ingress?.enabled)}
+    host: "${cluster.spec.ingress?.host || ''}"
+  lifecycle:
+    sleep: ${Boolean(cluster.spec.lifecycle?.sleep)}`
+  : (cluster.compiledConfig || `# vcluster.yaml is being reconciled by vc-operator for ${cluster.name}-config...`)}
           </pre>
         </div>
       )}

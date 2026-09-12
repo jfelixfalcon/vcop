@@ -61,20 +61,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    // Guardrail: Verify core components exist in version registry before provisioning
-    const registry = await getVersionRegistry();
-    const missingCore = getMissingCoreComponents(registry);
-    if (missingCore.length > 0) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: `Cannot deploy virtual cluster: Missing Version Registry for core component(s): ${missingCore.join(', ')}. An administrator must import a version registry manifest before clusters can be deployed.`,
-        }),
-        {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
+    // Guardrail: Verify core components exist in version registry before provisioning (only required for virtual clusters)
+    const isNamespaced = body.clusterType === 'namespaced' || body.clusterType === 'host';
+    if (!isNamespaced) {
+      const registry = await getVersionRegistry();
+      const missingCore = getMissingCoreComponents(registry);
+      if (missingCore.length > 0) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `Cannot deploy virtual cluster: Missing Version Registry for core component(s): ${missingCore.join(', ')}. An administrator must import a version registry manifest before clusters can be deployed.`,
+          }),
+          {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
     }
 
     // Strict guardrail for developers: must deploy using a predefined baseline
@@ -111,6 +114,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       status: 'SUCCESS',
       details: {
         clusterName: cluster.name,
+        clusterType: body.clusterType || 'vcluster',
         namespace: cluster.namespace,
         baselineId: body.baselineId,
         preset: body.preset,

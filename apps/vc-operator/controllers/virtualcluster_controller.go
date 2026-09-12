@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -58,7 +59,8 @@ type VirtualClusterReconciler struct {
 // +kubebuilder:rbac:groups=vops.gitops.io,resources=virtualclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=vops.gitops.io,resources=virtualclusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=statefulsets;deployments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=services;configmaps;secrets;persistentvolumeclaims;pods;resourcequotas;limitranges,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services;configmaps;secrets;persistentvolumeclaims;pods;resourcequotas;limitranges;namespaces;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
 func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -125,6 +127,25 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		vc.Status.Phase = v1alpha1.PhasePending
 	}
 
+	// Determine and record cluster architecture type
+	if vc.Spec.ClusterType == "" {
+		vc.Status.ClusterType = v1alpha1.ClusterTypeVCluster
+	} else if vc.IsNamespaced() {
+		vc.Status.ClusterType = v1alpha1.ClusterTypeNamespaced
+	} else {
+		vc.Status.ClusterType = vc.Spec.ClusterType
+	}
+
+	// 1.5 Ensure target managed namespaces exist on the host
+	if vc.IsNamespaced() {
+		if err := r.ensureNamespaces(ctx, &vc); err != nil {
+			log.Error(err, "failed ensuring managed namespaces")
+			vc.Status.Phase = v1alpha1.PhaseDegraded
+			_ = r.Status().Update(ctx, &vc)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+	}
+
 	// 2. Check for Pending Version Upgrades
 	needsUpgrade, upgradeDesc := r.UpgradeManager.CheckUpgradeStatus(&vc)
 	if needsUpgrade {
@@ -149,7 +170,9 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	_ = r.syncHardwareConfigMap(ctx)
 
 	// 2.8 Reconcile Disaster Recovery Storage & Automated Backups
-	if err := r.DisasterRecoveryReconciler.ReconcileDisasterRecovery(ctx, &vc); err != nil {
+	if vc.IsNamespaced() {
+		r.setCondition(&vc, v1alpha1.ConditionDisasterRecoveryReady, metav1.ConditionTrue, "HostDRManaged", "Host cluster infrastructure manages disaster recovery for namespaced environments")
+	} else if err := r.DisasterRecoveryReconciler.ReconcileDisasterRecovery(ctx, &vc); err != nil {
 		log.Error(err, "failed reconciling disaster recovery backups")
 		r.setCondition(&vc, v1alpha1.ConditionDisasterRecoveryReady, metav1.ConditionFalse, "DisasterRecoveryFailed", err.Error())
 	} else if vc.Spec.DisasterRecovery != nil && vc.Spec.DisasterRecovery.Enabled {
@@ -158,13 +181,37 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		r.setCondition(&vc, v1alpha1.ConditionDisasterRecoveryReady, metav1.ConditionTrue, "DisasterRecoveryDisabled", "Automated backups disabled")
 	}
 
-	// 3 & 4. Reconcile HA etcd Backing Store & vCluster Syncer
+	// 3 & 4. Reconcile Backing Store & Control Plane / Workloads
 	isSleeping := vc.IsSleeping()
 	var etcdReady bool
 	var syncerReady bool
 	var endpoint string
 
-	if isSleeping {
+	if vc.IsNamespaced() {
+		if isSleeping {
+			_ = r.sleepNamespacedWorkloads(ctx, &vc)
+			r.setCondition(&vc, v1alpha1.ConditionSleeping, metav1.ConditionTrue, "ClusterSleeping", "Host namespaced cluster workloads are in sleep mode (scaled to 0)")
+			r.setCondition(&vc, v1alpha1.ConditionControlPlaneReady, metav1.ConditionFalse, "ControlPlaneSleeping", "Namespaced cluster is in sleep mode")
+			r.setCondition(&vc, v1alpha1.ConditionEtcdReady, metav1.ConditionFalse, "StorageSleeping", "Namespaced cluster storage is in sleep mode")
+			vc.Status.Phase = v1alpha1.PhaseSleeping
+			vc.Status.Metrics = v1alpha1.ClusterMetrics{
+				ActiveNodeCount: 0,
+				PodCount:        0,
+				MemoryUsage:     "0Mi",
+				CPUUsage:        "0m",
+			}
+		} else {
+			_ = r.wakeNamespacedWorkloads(ctx, &vc)
+			etcdReady = true
+			syncerReady = true
+			endpoint = r.getHostApiEndpoint(ctx, &vc)
+			vc.Status.Endpoint = endpoint
+
+			r.setCondition(&vc, v1alpha1.ConditionSleeping, metav1.ConditionFalse, "ClusterAwake", "Host namespaced cluster is awake and active")
+			r.setCondition(&vc, v1alpha1.ConditionControlPlaneReady, metav1.ConditionTrue, "HostControlPlaneReady", "Host Kubernetes control plane is active")
+			r.setCondition(&vc, v1alpha1.ConditionEtcdReady, metav1.ConditionTrue, "HostStorageReady", "Host cluster backing storage is active")
+		}
+	} else if isSleeping {
 		// 1. Put virtual workloads to sleep while apiserver and etcd are still running
 		_ = r.sleepVirtualWorkloads(ctx, &vc)
 
@@ -234,21 +281,34 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// 5. Reconcile Kubeconfig Secret
 	var kubeconfigReady bool
 	if syncerReady {
-		if err := r.KubeconfigReconciler.ReconcileKubeconfig(ctx, &vc, endpoint); err != nil {
-			log.Error(err, "failed reconciling kubeconfig")
-			r.setCondition(&vc, v1alpha1.ConditionKubeconfigGenerated, metav1.ConditionFalse, "KubeconfigFailed", err.Error())
+		if vc.IsNamespaced() {
+			if err := r.KubeconfigReconciler.ReconcileNamespacedKubeconfig(ctx, &vc, endpoint); err != nil {
+				log.Error(err, "failed reconciling namespaced kubeconfig")
+				r.setCondition(&vc, v1alpha1.ConditionKubeconfigGenerated, metav1.ConditionFalse, "KubeconfigFailed", err.Error())
+			} else {
+				kubeconfigReady = true
+				r.setCondition(&vc, v1alpha1.ConditionKubeconfigGenerated, metav1.ConditionTrue, "KubeconfigReady", "Host namespaced admin kubeconfig secret successfully generated")
+			}
 		} else {
-			kubeconfigReady = true
-			r.setCondition(&vc, v1alpha1.ConditionKubeconfigGenerated, metav1.ConditionTrue, "KubeconfigReady", "Kubeconfig secret successfully generated")
+			if err := r.KubeconfigReconciler.ReconcileKubeconfig(ctx, &vc, endpoint); err != nil {
+				log.Error(err, "failed reconciling kubeconfig")
+				r.setCondition(&vc, v1alpha1.ConditionKubeconfigGenerated, metav1.ConditionFalse, "KubeconfigFailed", err.Error())
+			} else {
+				kubeconfigReady = true
+				r.setCondition(&vc, v1alpha1.ConditionKubeconfigGenerated, metav1.ConditionTrue, "KubeconfigReady", "Kubeconfig secret successfully generated")
 
-			// Restore any virtual workloads that were scaled to 0 during sleep
-			_ = r.wakeVirtualWorkloads(ctx, &vc)
+				// Restore any virtual workloads that were scaled to 0 during sleep
+				_ = r.wakeVirtualWorkloads(ctx, &vc)
+			}
 		}
 	}
 
 	// 6. Reconcile External Add-ons (CoreDNS & Metrics Server)
 	var addonsReady bool
-	if kubeconfigReady && (vc.Spec.Components.CoreDNS.Enabled || vc.Spec.Components.MetricsServer.Enabled) {
+	if vc.IsNamespaced() {
+		addonsReady = true
+		r.setCondition(&vc, v1alpha1.ConditionAddonsReady, metav1.ConditionTrue, "HostAddonsConfigured", "Host CoreDNS and Metrics Server services available for namespace")
+	} else if kubeconfigReady && (vc.Spec.Components.CoreDNS.Enabled || vc.Spec.Components.MetricsServer.Enabled) {
 		if err := r.AddonsReconciler.ReconcileAddons(ctx, &vc); err != nil {
 			log.Error(err, "failed reconciling external addons inside vcluster")
 			r.setCondition(&vc, v1alpha1.ConditionAddonsReady, metav1.ConditionFalse, "AddonsFailed", err.Error())
@@ -275,7 +335,15 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// 8. Reconcile Guest RBAC Delegation (ClusterRoleBinding for owner, allowed-emails, and allowed-groups)
 	var rbacReady bool
-	if kubeconfigReady {
+	if vc.IsNamespaced() {
+		if err := r.RBACReconciler.ReconcileNamespacedRBAC(ctx, &vc); err != nil {
+			log.Error(err, "failed reconciling host namespaced RBAC")
+			r.setCondition(&vc, v1alpha1.ConditionRBACReady, metav1.ConditionFalse, "RBACReconcileFailed", err.Error())
+		} else {
+			rbacReady = true
+			r.setCondition(&vc, v1alpha1.ConditionRBACReady, metav1.ConditionTrue, "RBACConfigured", "Host namespace RBAC role bindings successfully reconciled")
+		}
+	} else if kubeconfigReady {
 		if err := r.RBACReconciler.ReconcileGuestRBAC(ctx, &vc); err != nil {
 			log.Error(err, "failed reconciling guest cluster RBAC")
 			r.setCondition(&vc, v1alpha1.ConditionRBACReady, metav1.ConditionFalse, "RBACReconcileFailed", err.Error())
@@ -290,7 +358,10 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// 9. Reconcile Opinionated Application Entrypoint (Istio & TLS)
 	var istioReady bool = true
 	if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Enabled {
-		if !kubeconfigReady {
+		if vc.IsNamespaced() {
+			istioReady = true
+			r.setCondition(&vc, v1alpha1.ConditionIstioReady, metav1.ConditionTrue, "IstioHostConfigured", "Host namespace Istio routing active")
+		} else if !kubeconfigReady {
 			r.setCondition(&vc, v1alpha1.ConditionIstioReady, metav1.ConditionFalse, "WaitingForControlPlane", "Istio ingress awaiting control plane readiness")
 			istioReady = false
 		} else {
@@ -320,7 +391,10 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// 9b. Reconcile Opinionated Application Entrypoint (Gateway API & TLS)
 	var gatewayAPIReady bool = true
 	if vc.Spec.Components.GatewayAPI != nil && vc.Spec.Components.GatewayAPI.Enabled {
-		if !kubeconfigReady {
+		if vc.IsNamespaced() {
+			gatewayAPIReady = true
+			r.setCondition(&vc, v1alpha1.ConditionGatewayAPIReady, metav1.ConditionTrue, "GatewayAPIHostConfigured", "Host namespace Gateway API routing active")
+		} else if !kubeconfigReady {
 			r.setCondition(&vc, v1alpha1.ConditionGatewayAPIReady, metav1.ConditionFalse, "WaitingForControlPlane", "Gateway API ingress awaiting control plane readiness")
 			gatewayAPIReady = false
 		} else {
@@ -359,56 +433,77 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if isSleeping {
 		vc.Status.Phase = v1alpha1.PhaseSleeping
 	} else if etcdReady && syncerReady && addonsReady && quotaReady && rbacReady && istioReady && gatewayAPIReady {
-		targetK8s := vc.Spec.KubernetesVersion
-		if targetK8s == "" {
-			targetK8s = "v1.31.0"
-		}
-		targetVCluster := vc.Spec.VClusterVersion
-		if targetVCluster == "" {
-			targetVCluster = "0.36.0"
-		}
-
-		targetEtcd := vc.Spec.EtcdVersion
-		if targetEtcd == "" {
-			targetEtcd = "3.6.8-0"
-		}
-		targetCoreDNS := vc.Spec.Components.CoreDNS.Version
-		if targetCoreDNS == "" {
-			targetCoreDNS = "v1.11.3"
-		}
-		targetMetrics := vc.Spec.Components.MetricsServer.Version
-		if targetMetrics == "" {
-			targetMetrics = "v0.7.2"
-		}
-		targetIstio := ""
-		if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Enabled {
-			targetIstio = vc.Spec.Components.Istio.Version
-			if targetIstio == "" {
-				targetIstio = "1.24.2"
+		if vc.IsNamespaced() {
+			vc.Status.VirtualK8sVersion = "host"
+			vc.Status.VClusterVersion = "host-native"
+			vc.Status.ClusterType = v1alpha1.ClusterTypeNamespaced
+			vc.Status.ComponentVersions = &v1alpha1.ComponentVersionsStatus{
+				Etcd:          "host",
+				CoreDNS:       "host",
+				MetricsServer: "host",
+				Istio:         "host",
+				GatewayAPI:    "host",
 			}
-		}
-		targetGatewayAPI := ""
-		if vc.Spec.Components.GatewayAPI != nil && vc.Spec.Components.GatewayAPI.Enabled {
-			targetGatewayAPI = vc.Spec.Components.GatewayAPI.Version
-			if targetGatewayAPI == "" {
-				targetGatewayAPI = "v1.2.0"
+			vc.Status.Phase = v1alpha1.PhaseReady
+			if previousPhase != v1alpha1.PhaseReady {
+				log.Info("Namespaced cluster transitioned to Ready", "cluster", vc.Name, "previousPhase", previousPhase)
+				if r.Recorder != nil {
+					r.Recorder.Event(&vc, corev1.EventTypeNormal, "ClusterReady", "Namespaced cluster governance, quotas, and RBAC are Active and Ready")
+				}
 			}
-		}
+		} else {
+			targetK8s := vc.Spec.KubernetesVersion
+			if targetK8s == "" {
+				targetK8s = "v1.31.0"
+			}
+			targetVCluster := vc.Spec.VClusterVersion
+			if targetVCluster == "" {
+				targetVCluster = "0.36.0"
+			}
 
-		vc.Status.VirtualK8sVersion = targetK8s
-		vc.Status.VClusterVersion = targetVCluster
-		vc.Status.ComponentVersions = &v1alpha1.ComponentVersionsStatus{
-			Etcd:          targetEtcd,
-			CoreDNS:       targetCoreDNS,
-			MetricsServer: targetMetrics,
-			Istio:         targetIstio,
-			GatewayAPI:    targetGatewayAPI,
-		}
-		vc.Status.Phase = v1alpha1.PhaseReady
-		if previousPhase != v1alpha1.PhaseReady {
-			log.Info("Virtual cluster transitioned to Ready", "cluster", vc.Name, "previousPhase", previousPhase)
-			if r.Recorder != nil {
-				r.Recorder.Event(&vc, corev1.EventTypeNormal, "ClusterReady", "VirtualCluster control plane, addons, governance, and ingress are Active and Ready")
+			targetEtcd := vc.Spec.EtcdVersion
+			if targetEtcd == "" {
+				targetEtcd = "3.6.8-0"
+			}
+			targetCoreDNS := vc.Spec.Components.CoreDNS.Version
+			if targetCoreDNS == "" {
+				targetCoreDNS = "v1.11.3"
+			}
+			targetMetrics := vc.Spec.Components.MetricsServer.Version
+			if targetMetrics == "" {
+				targetMetrics = "v0.7.2"
+			}
+			targetIstio := ""
+			if vc.Spec.Components.Istio != nil && vc.Spec.Components.Istio.Enabled {
+				targetIstio = vc.Spec.Components.Istio.Version
+				if targetIstio == "" {
+					targetIstio = "1.24.2"
+				}
+			}
+			targetGatewayAPI := ""
+			if vc.Spec.Components.GatewayAPI != nil && vc.Spec.Components.GatewayAPI.Enabled {
+				targetGatewayAPI = vc.Spec.Components.GatewayAPI.Version
+				if targetGatewayAPI == "" {
+					targetGatewayAPI = "v1.2.0"
+				}
+			}
+
+			vc.Status.VirtualK8sVersion = targetK8s
+			vc.Status.VClusterVersion = targetVCluster
+			vc.Status.ClusterType = v1alpha1.ClusterTypeVCluster
+			vc.Status.ComponentVersions = &v1alpha1.ComponentVersionsStatus{
+				Etcd:          targetEtcd,
+				CoreDNS:       targetCoreDNS,
+				MetricsServer: targetMetrics,
+				Istio:         targetIstio,
+				GatewayAPI:    targetGatewayAPI,
+			}
+			vc.Status.Phase = v1alpha1.PhaseReady
+			if previousPhase != v1alpha1.PhaseReady {
+				log.Info("Virtual cluster transitioned to Ready", "cluster", vc.Name, "previousPhase", previousPhase)
+				if r.Recorder != nil {
+					r.Recorder.Event(&vc, corev1.EventTypeNormal, "ClusterReady", "VirtualCluster control plane, addons, governance, and ingress are Active and Ready")
+				}
 			}
 		}
 	} else {
@@ -438,7 +533,11 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	if !isSleeping {
-		vc.Status.Metrics = r.calculateMetrics(ctx, &vc)
+		if vc.IsNamespaced() {
+			vc.Status.Metrics = r.calculateNamespacedMetrics(ctx, &vc)
+		} else {
+			vc.Status.Metrics = r.calculateMetrics(ctx, &vc)
+		}
 	}
 
 	vc.Status.ObservedGeneration = vc.Generation
@@ -464,6 +563,10 @@ func (r *VirtualClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 }
 
 func (r *VirtualClusterReconciler) handleDeletion(ctx context.Context, log logr.Logger, vc *v1alpha1.VirtualCluster) (ctrl.Result, error) {
+	if vc.IsNamespaced() {
+		return r.handleNamespacedDeletion(ctx, log, vc)
+	}
+
 	log.Info("Executing graceful finalizer cleanup", "cluster", vc.Name, "namespace", vc.Namespace)
 	vc.Status.Phase = v1alpha1.PhaseTerminating
 	_ = r.Status().Update(ctx, vc)
@@ -897,6 +1000,8 @@ func (r *VirtualClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ResourceQuota{}).
 		Owns(&corev1.LimitRange{}).
 		Owns(&batchv1.CronJob{}).
+		Owns(&corev1.ServiceAccount{}).
+		Owns(&rbacv1.RoleBinding{}).
 		Complete(r)
 }
 
@@ -1084,4 +1189,295 @@ func (r *VirtualClusterReconciler) syncHardwareConfigMap(ctx context.Context) er
 	})
 
 	return err
+}
+
+func (r *VirtualClusterReconciler) ensureNamespaces(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
+	targetNamespaces := vc.GetNamespaces()
+	for _, nsName := range targetNamespaces {
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nsName,
+			},
+		}
+		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, ns, func() error {
+			if ns.Labels == nil {
+				ns.Labels = make(map[string]string)
+			}
+			ns.Labels["app.kubernetes.io/managed-by"] = "vc-operator"
+			ns.Labels["vops.gitops.io/cluster"] = vc.Name
+			return nil
+		})
+		if err != nil && !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed ensuring namespace %s: %w", nsName, err)
+		}
+	}
+	return nil
+}
+
+func (r *VirtualClusterReconciler) sleepNamespacedWorkloads(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
+	log := r.Log.WithValues("virtualcluster", vc.Name, "namespace", vc.Namespace)
+	targetNamespaces := vc.GetNamespaces()
+
+	for _, ns := range targetNamespaces {
+		depList := &appsv1.DeploymentList{}
+		if err := r.List(ctx, depList, client.InNamespace(ns)); err == nil {
+			for i := range depList.Items {
+				dep := &depList.Items[i]
+				if dep.Namespace == "kube-system" || dep.Namespace == "vcop-system" {
+					continue
+				}
+				if dep.Spec.Replicas != nil && *dep.Spec.Replicas > 0 {
+					if dep.Annotations == nil {
+						dep.Annotations = make(map[string]string)
+					}
+					if _, exists := dep.Annotations[PreSleepReplicasAnnotation]; !exists {
+						dep.Annotations[PreSleepReplicasAnnotation] = strconv.Itoa(int(*dep.Spec.Replicas))
+					}
+					zero := int32(0)
+					dep.Spec.Replicas = &zero
+					if err := r.Update(ctx, dep); err != nil {
+						log.Info("Could not scale down deployment", "dep", dep.Name, "namespace", dep.Namespace, "err", err)
+					}
+				}
+			}
+		}
+
+		stsList := &appsv1.StatefulSetList{}
+		if err := r.List(ctx, stsList, client.InNamespace(ns)); err == nil {
+			for i := range stsList.Items {
+				sts := &stsList.Items[i]
+				if sts.Namespace == "kube-system" || sts.Namespace == "vcop-system" {
+					continue
+				}
+				if sts.Spec.Replicas != nil && *sts.Spec.Replicas > 0 {
+					if sts.Annotations == nil {
+						sts.Annotations = make(map[string]string)
+					}
+					if _, exists := sts.Annotations[PreSleepReplicasAnnotation]; !exists {
+						sts.Annotations[PreSleepReplicasAnnotation] = strconv.Itoa(int(*sts.Spec.Replicas))
+					}
+					zero := int32(0)
+					sts.Spec.Replicas = &zero
+					if err := r.Update(ctx, sts); err != nil {
+						log.Info("Could not scale down statefulset", "sts", sts.Name, "namespace", sts.Namespace, "err", err)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (r *VirtualClusterReconciler) wakeNamespacedWorkloads(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
+	targetNamespaces := vc.GetNamespaces()
+
+	for _, ns := range targetNamespaces {
+		depList := &appsv1.DeploymentList{}
+		if err := r.List(ctx, depList, client.InNamespace(ns)); err == nil {
+			for i := range depList.Items {
+				dep := &depList.Items[i]
+				if val, ok := dep.Annotations[PreSleepReplicasAnnotation]; ok {
+					orig, err := strconv.Atoi(val)
+					if err == nil && orig > 0 {
+						orig32 := int32(orig)
+						dep.Spec.Replicas = &orig32
+					} else {
+						one := int32(1)
+						dep.Spec.Replicas = &one
+					}
+					delete(dep.Annotations, PreSleepReplicasAnnotation)
+					_ = r.Update(ctx, dep)
+				}
+			}
+		}
+
+		stsList := &appsv1.StatefulSetList{}
+		if err := r.List(ctx, stsList, client.InNamespace(ns)); err == nil {
+			for i := range stsList.Items {
+				sts := &stsList.Items[i]
+				if val, ok := sts.Annotations[PreSleepReplicasAnnotation]; ok {
+					orig, err := strconv.Atoi(val)
+					if err == nil && orig > 0 {
+						orig32 := int32(orig)
+						sts.Spec.Replicas = &orig32
+					} else {
+						one := int32(1)
+						sts.Spec.Replicas = &one
+					}
+					delete(sts.Annotations, PreSleepReplicasAnnotation)
+					_ = r.Update(ctx, sts)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (r *VirtualClusterReconciler) calculateNamespacedMetrics(ctx context.Context, vc *v1alpha1.VirtualCluster) v1alpha1.ClusterMetrics {
+	if vc.IsSleeping() || vc.Status.Phase == v1alpha1.PhaseSleeping {
+		return v1alpha1.ClusterMetrics{
+			ActiveNodeCount: 0,
+			PodCount:        0,
+			MemoryUsage:     "0Mi",
+			CPUUsage:        "0m",
+		}
+	}
+
+	activeNodes := int32(1)
+	var nodeList corev1.NodeList
+	if err := r.List(ctx, &nodeList); err == nil && len(nodeList.Items) > 0 {
+		activeNodes = int32(len(nodeList.Items))
+	}
+
+	podCount := int32(0)
+	var totalCpuMillis int64
+	var totalMemBytes int64
+
+	targetNamespaces := vc.GetNamespaces()
+	for _, ns := range targetNamespaces {
+		var podList corev1.PodList
+		if err := r.List(ctx, &podList, client.InNamespace(ns)); err == nil {
+			for _, pod := range podList.Items {
+				if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+					continue
+				}
+				podCount++
+				for _, c := range pod.Spec.Containers {
+					if reqCpu := c.Resources.Requests.Cpu(); reqCpu != nil && reqCpu.MilliValue() > 0 {
+						totalCpuMillis += reqCpu.MilliValue()
+					} else if limCpu := c.Resources.Limits.Cpu(); limCpu != nil && limCpu.MilliValue() > 0 {
+						totalCpuMillis += limCpu.MilliValue() / 2
+					} else {
+						totalCpuMillis += 10
+					}
+
+					if reqMem := c.Resources.Requests.Memory(); reqMem != nil && reqMem.Value() > 0 {
+						totalMemBytes += reqMem.Value()
+					} else if limMem := c.Resources.Limits.Memory(); limMem != nil && limMem.Value() > 0 {
+						totalMemBytes += limMem.Value() / 2
+					} else {
+						totalMemBytes += 32 * 1024 * 1024
+					}
+				}
+			}
+		}
+	}
+
+	cpuUsageStr := fmt.Sprintf("%dm", totalCpuMillis)
+	var memUsageStr string
+	if totalMemBytes >= 1024*1024*1024 {
+		memUsageStr = fmt.Sprintf("%.1fGi", float64(totalMemBytes)/(1024*1024*1024))
+	} else {
+		memUsageStr = fmt.Sprintf("%dMi", totalMemBytes/(1024*1024))
+	}
+
+	return v1alpha1.ClusterMetrics{
+		ActiveNodeCount: activeNodes,
+		PodCount:        podCount,
+		MemoryUsage:     memUsageStr,
+		CPUUsage:        cpuUsageStr,
+	}
+}
+
+func (r *VirtualClusterReconciler) handleNamespacedDeletion(ctx context.Context, log logr.Logger, vc *v1alpha1.VirtualCluster) (ctrl.Result, error) {
+	log.Info("Executing graceful finalizer cleanup for namespaced cluster", "cluster", vc.Name, "namespace", vc.Namespace)
+	vc.Status.Phase = v1alpha1.PhaseTerminating
+	_ = r.Status().Update(ctx, vc)
+
+	targetNamespaces := vc.GetNamespaces()
+	for _, ns := range targetNamespaces {
+		// Clean up RoleBinding
+		binding := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      DefaultGuestAdminBindingName,
+				Namespace: ns,
+			},
+		}
+		_ = r.Delete(ctx, binding)
+
+		saBinding := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-sa-admin-binding", vc.Name),
+				Namespace: ns,
+			},
+		}
+		_ = r.Delete(ctx, saBinding)
+
+		// Clean up ResourceQuota & LimitRange
+		rq := &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-quota", vc.Name),
+				Namespace: ns,
+			},
+		}
+		_ = r.Delete(ctx, rq)
+
+		lr := &corev1.LimitRange{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-limits", vc.Name),
+				Namespace: ns,
+			},
+		}
+		_ = r.Delete(ctx, lr)
+	}
+
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-admin", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, sa)
+
+	tokenSec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-admin-token", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, tokenSec)
+
+	kubeSec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-kubeconfig", vc.Name),
+			Namespace: vc.Namespace,
+		},
+	}
+	_ = r.Delete(ctx, kubeSec)
+
+	r.cleanupRemainingClusterResources(ctx, log, vc)
+
+	isDedicated := r.isDedicatedNamespace(ctx, vc.Namespace, vc.Name)
+	controllerutil.RemoveFinalizer(vc, VirtualClusterFinalizer)
+	if err := r.Update(ctx, vc); err != nil {
+		log.Error(err, "failed to remove finalizer from VirtualCluster", "cluster", vc.Name)
+		return ctrl.Result{}, err
+	}
+
+	if isDedicated {
+		log.Info("Deleting dedicated namespace for namespaced cluster", "namespace", vc.Namespace)
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: vc.Namespace,
+			},
+		}
+		_ = r.Delete(ctx, ns)
+	}
+
+	log.Info("Successfully finalized namespaced cluster", "cluster", vc.Name)
+	return ctrl.Result{}, nil
+}
+
+func (r *VirtualClusterReconciler) getHostApiEndpoint(ctx context.Context, vc *v1alpha1.VirtualCluster) string {
+	if vc.Annotations != nil && vc.Annotations["vops.gitops.io/custom-endpoint"] != "" {
+		return strings.TrimSpace(vc.Annotations["vops.gitops.io/custom-endpoint"])
+	}
+	if host := os.Getenv("KUBERNETES_SERVICE_HOST"); host != "" {
+		port := os.Getenv("KUBERNETES_SERVICE_PORT")
+		if port == "" {
+			port = "443"
+		}
+		return fmt.Sprintf("https://%s:%s", host, port)
+	}
+	return "https://kubernetes.default.svc:443"
 }

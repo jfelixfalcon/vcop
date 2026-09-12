@@ -34,27 +34,55 @@ func (r *QuotaReconciler) ReconcileQuota(ctx context.Context, vc *v1alpha1.Virtu
 
 	// 1. Determine effective ResourceQuota specs
 	hardLimits := r.buildHardLimits(vc)
+	limitRangeItem := r.buildLimitRangeItem(vc)
 
-	quotaName := fmt.Sprintf("%s-quota", vc.Name)
-	hostQuota := &corev1.ResourceQuota{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      quotaName,
-			Namespace: vc.Namespace,
-		},
+	targetNamespaces := vc.GetNamespaces()
+	for _, targetNs := range targetNamespaces {
+		quotaName := fmt.Sprintf("%s-quota", vc.Name)
+		hostQuota := &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      quotaName,
+				Namespace: targetNs,
+			},
+		}
+
+		_, err := controllerutil.CreateOrUpdate(ctx, r.client, hostQuota, func() error {
+			hostQuota.Labels = labels
+			hostQuota.Spec.Hard = hardLimits
+			if targetNs == vc.Namespace {
+				return controllerutil.SetControllerReference(vc, hostQuota, r.client.Scheme())
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed reconciling host ResourceQuota in %s: %w", targetNs, err)
+		}
+
+		limitRangeName := fmt.Sprintf("%s-limits", vc.Name)
+		hostLR := &corev1.LimitRange{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      limitRangeName,
+				Namespace: targetNs,
+			},
+		}
+
+		_, err = controllerutil.CreateOrUpdate(ctx, r.client, hostLR, func() error {
+			hostLR.Labels = labels
+			hostLR.Spec.Limits = []corev1.LimitRangeItem{limitRangeItem}
+			if targetNs == vc.Namespace {
+				return controllerutil.SetControllerReference(vc, hostLR, r.client.Scheme())
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed reconciling host LimitRange in %s: %w", targetNs, err)
+		}
 	}
 
-	_, err := controllerutil.CreateOrUpdate(ctx, r.client, hostQuota, func() error {
-		hostQuota.Labels = labels
-		hostQuota.Spec.Hard = hardLimits
-		return controllerutil.SetControllerReference(vc, hostQuota, r.client.Scheme())
-	})
-	if err != nil {
-		return fmt.Errorf("failed reconciling host ResourceQuota: %w", err)
-	}
-
-	// 2. Read live observed quota status from host
+	// 2. Read live observed quota status from primary namespace
+	primaryQuotaName := fmt.Sprintf("%s-quota", vc.Name)
 	latestQuota := &corev1.ResourceQuota{}
-	if err := r.client.Get(ctx, types.NamespacedName{Name: quotaName, Namespace: vc.Namespace}, latestQuota); err == nil {
+	if err := r.client.Get(ctx, types.NamespacedName{Name: primaryQuotaName, Namespace: vc.Namespace}, latestQuota); err == nil {
 		hardMap := make(map[string]string)
 		for k, v := range latestQuota.Status.Hard {
 			hardMap[string(k)] = v.String()
@@ -70,27 +98,10 @@ func (r *QuotaReconciler) ReconcileQuota(ctx context.Context, vc *v1alpha1.Virtu
 		}
 	}
 
-	// 3. Reconcile LimitRange on host
-	limitRangeName := fmt.Sprintf("%s-limits", vc.Name)
-	limitRangeItem := r.buildLimitRangeItem(vc)
-	hostLR := &corev1.LimitRange{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      limitRangeName,
-			Namespace: vc.Namespace,
-		},
+	// 3. If vCluster is running and reachable, sync ResourceQuota & LimitRange inside vCluster
+	if !vc.IsNamespaced() {
+		_ = r.syncInsideVCluster(ctx, vc, hardLimits, limitRangeItem)
 	}
-
-	_, err = controllerutil.CreateOrUpdate(ctx, r.client, hostLR, func() error {
-		hostLR.Labels = labels
-		hostLR.Spec.Limits = []corev1.LimitRangeItem{limitRangeItem}
-		return controllerutil.SetControllerReference(vc, hostLR, r.client.Scheme())
-	})
-	if err != nil {
-		return fmt.Errorf("failed reconciling host LimitRange: %w", err)
-	}
-
-	// 4. If vCluster is running and reachable, sync ResourceQuota & LimitRange inside vCluster
-	_ = r.syncInsideVCluster(ctx, vc, hardLimits, limitRangeItem)
 
 	return nil
 }

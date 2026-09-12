@@ -18,6 +18,8 @@ spec:
     shortNames:
       - vc
       - vcluster
+      - cluster
+      - clusters
   scope: Namespaced
   versions:
     - name: v1alpha1
@@ -29,6 +31,9 @@ spec:
         - name: Cluster Name
           type: string
           jsonPath: .spec.clusterName
+        - name: Type
+          type: string
+          jsonPath: .spec.clusterType
         - name: Phase
           type: string
           jsonPath: .status.phase
@@ -76,6 +81,19 @@ spec:
                   minLength: 1
                   maxLength: 63
                   pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+                clusterType:
+                  type: string
+                  description: Deployment architecture mode (vcluster for virtual cluster, namespaced/host for host namespaced environment).
+                  default: "vcluster"
+                  enum:
+                    - vcluster
+                    - namespaced
+                    - host
+                namespaces:
+                  type: array
+                  description: Set of host namespaces managed by this cluster when clusterType is namespaced.
+                  items:
+                    type: string
                 vclusterVersion:
                   type: string
                   description: Target vCluster OSS engine version (0.36.x).
@@ -500,3 +518,6 @@ spec:
                       type: string
                     gatewayAPI:
                       type: string
+                clusterType:
+                  type: string
+                  description: Observed deployment architecture mode of the cluster.

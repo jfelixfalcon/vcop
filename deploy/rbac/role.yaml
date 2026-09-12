@@ -45,9 +45,26 @@ rules:
       - persistentvolumeclaims
       - pods
       - namespaces
+      - serviceaccounts
       - resourcequotas
       - limitranges
       - nodes
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # RBAC management for guest/namespaced clusters
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - roles
+      - rolebindings
+      - clusterroles
+      - clusterrolebindings
     verbs:
       - create
       - delete

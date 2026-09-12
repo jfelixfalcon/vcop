@@ -159,7 +159,9 @@ export interface VirtualCluster {
   namespace: string;
   spec: {
     clusterName: string;
-    vclusterVersion: string;
+    clusterType?: 'vcluster' | 'namespaced' | 'host';
+    namespaces?: string[];
+    vclusterVersion?: string;
     kubernetesVersion: string;
     etcdVersion?: string;
     storageClass?: string;
@@ -249,6 +251,7 @@ export interface VirtualCluster {
       istio?: string;
       gatewayAPI?: string;
     };
+    clusterType?: 'vcluster' | 'namespaced' | 'host';
     disasterRecovery?: DisasterRecoveryStatus;
   };
   metadata?: {

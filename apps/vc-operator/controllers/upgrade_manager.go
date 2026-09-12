@@ -21,6 +21,10 @@ func NewUpgradeManager(c client.Client) *UpgradeManager {
 
 // CheckUpgradeStatus detects if an upgrade is pending or in-progress
 func (m *UpgradeManager) CheckUpgradeStatus(vc *v1alpha1.VirtualCluster) (needsUpgrade bool, desc string) {
+	if vc.IsNamespaced() {
+		return false, ""
+	}
+
 	desiredVCluster := vc.Spec.VClusterVersion
 	if desiredVCluster == "" {
 		desiredVCluster = "0.36.0"

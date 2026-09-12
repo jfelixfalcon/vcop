@@ -48,6 +48,10 @@ func ComputeCronSchedule(schedule string, customCron string) string {
 
 // ReconcileDisasterRecovery manages backup PVCs, CronJobs, and status tracking
 func (r *DisasterRecoveryReconciler) ReconcileDisasterRecovery(ctx context.Context, vc *v1alpha1.VirtualCluster) error {
+	if vc.IsNamespaced() {
+		return nil
+	}
+
 	drSpec := vc.Spec.DisasterRecovery
 	if drSpec == nil || !drSpec.Enabled {
 		// If disabled, delete the CronJob if it exists and update status

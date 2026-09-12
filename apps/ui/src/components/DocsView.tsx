@@ -594,6 +594,48 @@ export const DocsView: React.FC<Props> = ({ currentUser }) => {
                   </p>
                 </div>
               </div>
+
+              {/* Dual Cluster Architecture Card */}
+              <div className="mt-4 pt-4 border-t border-cyber-800 space-y-3">
+                <div className="flex items-center gap-2 text-cyan-400 font-mono text-xs font-bold">
+                  <Server className="w-4 h-4" />
+                  <span>Dual Deployment Models: Virtual Clusters vs Namespaced Clusters</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  vCOp v1.5 unified multi-tenancy under the generic concept of <strong>Clusters</strong>. Users and platform engineers can choose between two deployment models based on operational complexity and isolation requirements:
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div className="bg-cyber-950 p-4 rounded-xl border border-cyber-800 space-y-2">
+                    <div className="text-cyan-400 font-bold text-xs font-mono flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Virtual Cluster (vCluster)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Spins up an isolated virtual control plane with its own API server, syncer, and dedicated 1- or 3-node HA etcd store. Ideal for multi-version testing, independent CRD lifecycles, and complete control plane isolation.
+                    </p>
+                    <div className="text-[10px] font-mono text-slate-400 space-y-0.5 pt-1 border-t border-cyber-850">
+                      <div>• <strong>Control Plane:</strong> Dedicated K8s API server</div>
+                      <div>• <strong>Storage:</strong> Dedicated HA etcd quorum</div>
+                      <div>• <strong>Use Case:</strong> Complex apps, cluster-scoped CRDs, multi-version testing</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-cyber-950 p-4 rounded-xl border border-purple-800/60 space-y-2">
+                    <div className="text-purple-400 font-bold text-xs font-mono flex items-center gap-1.5">
+                      <Server className="w-3.5 h-3.5" />
+                      <span>Namespaced Cluster (Host)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Deploys directly into one or more host namespaces with identical governance capabilities: multi-namespace ResourceQuotas, LimitRanges, scoped ServiceAccount Kubeconfig, and workload sleep/wake—with <strong>zero</strong> syncer or etcd overhead.
+                    </p>
+                    <div className="text-[10px] font-mono text-slate-400 space-y-0.5 pt-1 border-t border-cyber-850">
+                      <div>• <strong>Control Plane:</strong> Shared Host Kubernetes API</div>
+                      <div>• <strong>Storage:</strong> Host native storage</div>
+                      <div>• <strong>Use Case:</strong> Microservices, lightweight apps, cost-optimized multi-tenancy</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 

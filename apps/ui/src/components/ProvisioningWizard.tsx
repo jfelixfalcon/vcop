@@ -31,6 +31,7 @@ import {
   History,
   ExternalLink,
   Network,
+  RefreshCw,
 } from 'lucide-react';
 import type { SizePreset, PresetDetails, AppStoreCatalog, AppDefinition, AppGroup, VersionRegistry, ClusterCapacityData, BackupItem, ClusterBaseline, StorageClassInfo } from '../lib/types';
 import { PRESETS } from '../lib/presets';
@@ -71,6 +72,10 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
   const [storageClasses, setStorageClasses] = useState<StorageClassInfo[]>([]);
   const [etcdStorageClass, setEtcdStorageClass] = useState<string>('');
   const [storageClass, setStorageClass] = useState<string>('');
+
+  // Cluster Architecture State ('vcluster' | 'namespaced')
+  const [clusterType, setClusterType] = useState<'vcluster' | 'namespaced'>('vcluster');
+  const [namespacesInput, setNamespacesInput] = useState<string>('');
 
   // Dynamic Resource Quotas & Policies
   const [showQuotaOverrides, setShowQuotaOverrides] = useState<boolean>(false);
@@ -352,7 +357,7 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
   };
 
   const missingCoreComponents: string[] = [];
-  if (versionRegistry) {
+  if (versionRegistry && clusterType !== 'namespaced') {
     if (!versionRegistry.kubernetesVersions || versionRegistry.kubernetesVersions.length === 0) {
       missingCoreComponents.push('Kubernetes Control Plane');
     }
@@ -365,7 +370,7 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
   }
 
   const handleQuickLaunch = async () => {
-    if (missingCoreComponents.length > 0) {
+    if (clusterType !== 'namespaced' && missingCoreComponents.length > 0) {
       setError(`Cannot provision virtual cluster: Core component versions are missing in registry (${missingCoreComponents.join(', ')}). Platform administrators must import or register core component versions first.`);
       return;
     }
@@ -499,7 +504,7 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (missingCoreComponents.length > 0) {
+    if (clusterType !== 'namespaced' && missingCoreComponents.length > 0) {
       setError(`Cannot provision virtual cluster: Core component versions are missing in registry (${missingCoreComponents.join(', ')}). Platform administrators must import or register core component versions first.`);
       return;
     }
@@ -519,8 +524,15 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
         ? (gatewayHost.trim() === fqdn.wildcard ? fqdn.hosts : [gatewayHost.trim()])
         : fqdn.hosts;
 
+      const parsedNamespaces = namespacesInput
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
       const payload: any = {
         clusterName: clusterName.trim().toLowerCase(),
+        clusterType,
+        ...(parsedNamespaces.length > 0 ? { namespaces: parsedNamespaces } : {}),
         baselineId: selectedBaselineId || (selectedBaseline ? selectedBaseline.id : 'dev-sandbox'),
         preset: sizePreset,
         owner: owner.trim() || 'Internal Developer Platform',
@@ -533,24 +545,28 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
         autoSleep,
         ttlHours: autoSleep ? ttlHours : 0,
         kubernetesVersion,
-        vclusterVersion,
-        etcdVersion: etcdVersion || undefined,
+        ...(clusterType !== 'namespaced' ? { vclusterVersion } : {}),
+        ...(clusterType !== 'namespaced' && etcdVersion ? { etcdVersion } : {}),
         storageClass: storageClass.trim() || undefined,
-        etcdStorageClass: etcdStorageClass.trim() || undefined,
+        ...(clusterType !== 'namespaced' && etcdStorageClass.trim() ? { etcdStorageClass: etcdStorageClass.trim() } : {}),
         coreDNSVersion: coreDNSVersion || undefined,
         metricsServerVersion: metricsServerVersion || undefined,
         istioVersion: istioVersion || undefined,
         customYaml: customYaml.trim() ? customYaml : undefined,
         customCaCert: customCaCert.trim() || undefined,
         customCaSecret: customCaSecret.trim() || undefined,
-        disasterRecovery: {
-          enabled: enableBackup,
-          schedule: backupSchedule,
-          retentionCount: backupRetention,
-          storageSize: '10Gi',
-          initialBackupRestore: deploymentMode === 'restore' ? (selectedRestoreSnapshot.trim() || undefined) : undefined,
-        },
-        initialBackupRestore: deploymentMode === 'restore' ? (selectedRestoreSnapshot.trim() || undefined) : undefined,
+        ...(clusterType !== 'namespaced'
+          ? {
+              disasterRecovery: {
+                enabled: enableBackup,
+                schedule: backupSchedule,
+                retentionCount: backupRetention,
+                storageSize: '10Gi',
+                initialBackupRestore: deploymentMode === 'restore' ? (selectedRestoreSnapshot.trim() || undefined) : undefined,
+              },
+              initialBackupRestore: deploymentMode === 'restore' ? (selectedRestoreSnapshot.trim() || undefined) : undefined,
+            }
+          : { disasterRecovery: { enabled: false } }),
         customEndpoint: `https://${fqdn.primary}`,
         istio: enableIstio
           ? {
@@ -645,7 +661,32 @@ export const ProvisioningWizard: React.FC<ProvisioningWizardProps> = ({ user }) 
   };
 
   // Live YAML preview
-  const previewYaml = `controlPlane:
+  const previewYaml = clusterType === 'namespaced' ? `apiVersion: vops.gitops.io/v1alpha1
+kind: VirtualCluster
+metadata:
+  name: "${clusterName.trim().toLowerCase() || 'my-cluster'}"
+  namespace: "${(namespacesInput.split(',')[0] || clusterName || 'my-cluster').trim().toLowerCase()}"
+spec:
+  clusterType: namespaced
+  namespaces:
+${(namespacesInput.trim() ? namespacesInput.split(',').map(s => s.trim()).filter(Boolean) : [clusterName.trim().toLowerCase() || 'my-cluster']).map(n => `    - "${n}"`).join('\n')}
+  sizePreset: "${sizePreset}"
+  policies:
+    resourceQuota:
+      enabled: true
+      requestsCPU: "${requestsCPU}"
+      limitsCPU: "${limitsCPU}"
+      requestsMemory: "${requestsMemory}"
+      limitsMemory: "${limitsMemory}"
+      requestsStorage: "${requestsStorage}"
+      pods: "${pods}"
+      services: "${services}"
+    limitRange:
+      enabled: true
+      defaultRequestCPU: "${defaultRequestCPU}"
+      defaultRequestMemory: "${defaultRequestMemory}"
+      defaultCPU: "${defaultCPU}"
+      defaultMemory: "${defaultMemory}"${autoSleep ? '\n  lifecycle:\n    autoSleep: true' : ''}` : `controlPlane:
   distro:
     k8s:
       enabled: true
@@ -904,105 +945,197 @@ policies:
               )}
             </div>
 
-            {/* Deployment Mode: Clean Instance vs Restore from DR Backup */}
+            {/* CLUSTER ARCHITECTURE SELECTION */}
             <div className="p-4 bg-cyber-950/70 border border-cyber-850 rounded-2xl space-y-3">
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Deployment Mode
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono flex items-center gap-2">
+                  <Server className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Cluster Architecture</span>
+                </label>
+                <span className="text-[10px] font-mono text-slate-400">
+                  Select deployment model
+                </span>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   type="button"
-                  onClick={() => setDeploymentMode('clean')}
+                  onClick={() => setClusterType('vcluster')}
                   className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 ${
-                    deploymentMode === 'clean'
-                      ? 'bg-cyber-500/10 border-cyber-accent text-white shadow-sm'
+                    clusterType === 'vcluster'
+                      ? 'bg-cyan-500/10 border-cyan-400 text-white shadow-sm ring-1 ring-cyan-500/30'
                       : 'bg-cyber-900/60 border-cyber-800 text-slate-400 hover:text-slate-200 hover:border-cyber-700'
                   }`}
                 >
-                  <div className={`p-2 rounded-lg ${deploymentMode === 'clean' ? 'bg-cyber-accent/20 text-cyber-accent' : 'bg-slate-800 text-slate-400'}`}>
-                    <Sparkles className="w-5 h-5" />
+                  <div className={`p-2 rounded-lg ${clusterType === 'vcluster' ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-400'}`}>
+                    <Layers className="w-5 h-5" />
                   </div>
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <div className="text-xs font-bold text-white flex items-center justify-between">
-                      Clean Instance
-                      {deploymentMode === 'clean' && <Check className="w-3.5 h-3.5 text-cyber-accent" />}
+                      <span>Virtual Cluster (vCluster)</span>
+                      {clusterType === 'vcluster' && <Check className="w-3.5 h-3.5 text-cyan-400" />}
                     </div>
-                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      Deploy a brand-new vcluster with fresh etcd state
+                    <p className="text-[11px] text-slate-400 font-mono mt-0.5 leading-relaxed">
+                      Dedicated virtual control plane, isolated API server, and private HA etcd store
                     </p>
+                    <div className="mt-2 flex items-center gap-1.5 text-[10px] font-mono text-cyan-300">
+                      <span className="px-1.5 py-0.5 rounded bg-cyan-950 border border-cyan-800">Full API Isolation</span>
+                      <span className="px-1.5 py-0.5 rounded bg-cyan-950 border border-cyan-800">Dedicated CRDs</span>
+                    </div>
                   </div>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setDeploymentMode('restore')}
+                  onClick={() => {
+                    setClusterType('namespaced');
+                    setDeploymentMode('clean');
+                  }}
                   className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 ${
-                    deploymentMode === 'restore'
-                      ? 'bg-amber-500/10 border-amber-500 text-white shadow-sm'
+                    clusterType === 'namespaced'
+                      ? 'bg-purple-500/10 border-purple-400 text-white shadow-sm ring-1 ring-purple-500/30'
                       : 'bg-cyber-900/60 border-cyber-800 text-slate-400 hover:text-slate-200 hover:border-cyber-700'
                   }`}
                 >
-                  <div className={`p-2 rounded-lg ${deploymentMode === 'restore' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-400'}`}>
-                    <RotateCcw className="w-5 h-5" />
+                  <div className={`p-2 rounded-lg ${clusterType === 'namespaced' ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-800 text-slate-400'}`}>
+                    <Server className="w-5 h-5" />
                   </div>
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <div className="text-xs font-bold text-white flex items-center justify-between">
-                      Restore from Backup
-                      {deploymentMode === 'restore' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                      <span>Namespaced Cluster (Host)</span>
+                      {clusterType === 'namespaced' && <Check className="w-3.5 h-3.5 text-purple-400" />}
                     </div>
-                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      Seed cluster state from verified disaster recovery snapshot
+                    <p className="text-[11px] text-slate-400 font-mono mt-0.5 leading-relaxed">
+                      Direct host cluster namespace(s) with resource quotas, limit ranges, and zero overhead
                     </p>
+                    <div className="mt-2 flex items-center gap-1.5 text-[10px] font-mono text-purple-300">
+                      <span className="px-1.5 py-0.5 rounded bg-purple-950 border border-purple-800">Zero Overhead</span>
+                      <span className="px-1.5 py-0.5 rounded bg-purple-950 border border-purple-800">Host Direct</span>
+                    </div>
                   </div>
                 </button>
               </div>
 
-              {deploymentMode === 'restore' && (
-                <div className="mt-3 p-3.5 bg-cyber-900/80 border border-amber-500/30 rounded-xl space-y-2.5 animate-in fade-in">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5 font-mono">
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      Select Snapshot to Restore
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {loadingBackups ? 'Querying fleet backups...' : `${availableBackups.length} snapshots available`}
-                    </span>
-                  </div>
-
-                  {availableBackups.length > 0 ? (
-                    <div className="space-y-2">
-                      <select
-                        value={selectedRestoreSnapshot}
-                        onChange={(e) => setSelectedRestoreSnapshot(e.target.value)}
-                        className="w-full bg-cyber-950 border border-cyber-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
-                      >
-                        {availableBackups.map((b) => (
-                          <option key={b.filename || b.name} value={b.filename || b.name}>
-                            {b.filename || b.name} — ({b.clusterOrigin}, {b.size || '5.8 MB'}, {new Date(b.timestamp).toLocaleDateString()})
-                          </option>
-                        ))}
-                      </select>
-                      <p className="text-[10px] text-slate-400 font-mono">
-                        The new cluster will initialize its etcd backing store from this snapshot before serving API requests.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <input
-                        type="text"
-                        value={selectedRestoreSnapshot}
-                        onChange={(e) => setSelectedRestoreSnapshot(e.target.value)}
-                        placeholder="e.g. vc-dev-snapshot-latest.db or specific-snapshot.db"
-                        className="w-full bg-cyber-950 border border-cyber-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
-                      />
-                      <p className="text-[10px] text-slate-400 font-mono">
-                        Specify snapshot file name to restore from shared DR storage.
-                      </p>
-                    </div>
-                  )}
+              {clusterType === 'namespaced' && (
+                <div className="mt-3 p-3.5 bg-purple-950/20 border border-purple-500/30 rounded-xl space-y-2 animate-in fade-in">
+                  <label className="block text-xs font-medium text-purple-200 font-mono">
+                    Target Host Namespaces (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={namespacesInput}
+                    onChange={(e) => setNamespacesInput(e.target.value)}
+                    placeholder="e.g. team-frontend, team-backend (defaults to cluster name if blank)"
+                    className="w-full bg-cyber-950 border border-purple-500/40 rounded-lg px-3 py-2 text-xs font-mono text-white placeholder:text-slate-600 focus:outline-none focus:border-purple-400"
+                  />
+                  <p className="text-[10px] text-slate-400 font-mono">
+                    Quotas, LimitRanges, and scoped Kubeconfigs will be enforced across all specified host namespaces.
+                  </p>
                 </div>
               )}
             </div>
+
+            {/* Deployment Mode: Clean Instance vs Restore from DR Backup (vCluster only) */}
+            {clusterType === 'vcluster' && (
+              <div className="p-4 bg-cyber-950/70 border border-cyber-850 rounded-2xl space-y-3">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  Deployment Mode
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setDeploymentMode('clean')}
+                    className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 ${
+                      deploymentMode === 'clean'
+                        ? 'bg-cyber-500/10 border-cyber-accent text-white shadow-sm'
+                        : 'bg-cyber-900/60 border-cyber-800 text-slate-400 hover:text-slate-200 hover:border-cyber-700'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-lg ${deploymentMode === 'clean' ? 'bg-cyber-accent/20 text-cyber-accent' : 'bg-slate-800 text-slate-400'}`}>
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center justify-between">
+                        Clean Instance
+                        {deploymentMode === 'clean' && <Check className="w-3.5 h-3.5 text-cyber-accent" />}
+                      </div>
+                      <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                        Deploy a brand-new vcluster with fresh etcd state
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDeploymentMode('restore')}
+                    className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 ${
+                      deploymentMode === 'restore'
+                        ? 'bg-amber-500/10 border-amber-500 text-white shadow-sm'
+                        : 'bg-cyber-900/60 border-cyber-800 text-slate-400 hover:text-slate-200 hover:border-cyber-700'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-lg ${deploymentMode === 'restore' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-400'}`}>
+                      <RotateCcw className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center justify-between">
+                        Restore from Backup
+                        {deploymentMode === 'restore' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                      </div>
+                      <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                        Seed cluster state from verified disaster recovery snapshot
+                      </p>
+                    </div>
+                  </button>
+                </div>
+
+                {deploymentMode === 'restore' && (
+                  <div className="mt-3 p-3.5 bg-cyber-900/80 border border-amber-500/30 rounded-xl space-y-2.5 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5 font-mono">
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Select Snapshot to Restore
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {loadingBackups ? 'Querying fleet backups...' : `${availableBackups.length} snapshots available`}
+                      </span>
+                    </div>
+
+                    {availableBackups.length > 0 ? (
+                      <div className="space-y-2">
+                        <select
+                          value={selectedRestoreSnapshot}
+                          onChange={(e) => setSelectedRestoreSnapshot(e.target.value)}
+                          className="w-full bg-cyber-950 border border-cyber-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
+                        >
+                          {availableBackups.map((b) => (
+                            <option key={b.filename || b.name} value={b.filename || b.name}>
+                              {b.filename || b.name} — ({b.clusterOrigin}, {b.size || '5.8 MB'}, {new Date(b.timestamp).toLocaleDateString()})
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[10px] text-slate-400 font-mono">
+                          The new cluster will initialize its etcd backing store from this snapshot before serving API requests.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={selectedRestoreSnapshot}
+                          onChange={(e) => setSelectedRestoreSnapshot(e.target.value)}
+                          placeholder="e.g. vc-dev-snapshot-latest.db or specific-snapshot.db"
+                          className="w-full bg-cyber-950 border border-cyber-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
+                        />
+                        <p className="text-[10px] text-slate-400 font-mono">
+                          Specify snapshot file name to restore from shared DR storage.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="space-y-4">
               <div>
@@ -1346,79 +1479,103 @@ policies:
               );
             })()}
 
-            {/* etcd Database Storage Engine & StorageClass */}
-            <div className="p-5 bg-cyber-950/80 border border-amber-500/30 rounded-2xl space-y-4 shadow-lg shadow-amber-950/10">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-cyber-800/80">
+            {/* etcd Database Storage Engine & StorageClass (vCluster only) */}
+            {clusterType === 'vcluster' ? (
+              <div className="p-5 bg-cyber-950/80 border border-amber-500/30 rounded-2xl space-y-4 shadow-lg shadow-amber-950/10">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-cyber-800/80">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                      <Database className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white font-mono flex items-center gap-2">
+                        etcd Database Storage Engine
+                        <span className="text-[10px] font-mono text-amber-400/90 uppercase font-semibold bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
+                          High-IOPS Drive
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-slate-400 font-mono">
+                        Dedicated backing volume for cluster state database
+                      </p>
+                    </div>
+                  </div>
+                  {etcdStorageClass ? (
+                    <span className="text-xs font-mono text-amber-300 bg-amber-950/60 px-2.5 py-1 rounded-lg border border-amber-500/40 self-start sm:self-auto flex items-center gap-1.5">
+                      <HardDrive className="w-3.5 h-3.5" />
+                      {etcdStorageClass}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-mono text-slate-400 bg-cyber-900 px-2.5 py-1 rounded-lg border border-cyber-800 self-start sm:self-auto">
+                      Default Host StorageClass
+                    </span>
+                  )}
+                </div>
+
+                <div className="p-3 bg-amber-950/20 border border-amber-500/20 rounded-xl flex items-start gap-2.5 text-xs text-amber-200/90 font-mono leading-relaxed">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="text-amber-300">Fast Disk / SSD Required: </strong>
+                    etcd is a consensus state database that depends heavily on sequential write-ahead log (WAL) fsync speed. Selecting an SSD or NVMe-backed StorageClass avoids leader election timeouts and cluster latency spikes.
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-200 font-mono flex items-center justify-between">
+                      <span>Host StorageClass</span>
+                      <span className="text-[10px] text-slate-400">Autodetected ({storageClasses.length})</span>
+                    </label>
+                    <select
+                      value={etcdStorageClass}
+                      onChange={(e) => setEtcdStorageClass(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-cyber-900 border border-amber-500/40 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
+                    >
+                      <option value="">Cluster Default StorageClass</option>
+                      {storageClasses.map((sc) => (
+                        <option key={sc.name} value={sc.name}>
+                          {sc.name} {sc.isDefault ? '(Default)' : ''} — {sc.provisioner}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-slate-200 font-mono">
+                      Custom StorageClass Override
+                    </label>
+                    <input
+                      type="text"
+                      value={etcdStorageClass}
+                      onChange={(e) => setEtcdStorageClass(e.target.value)}
+                      placeholder="e.g. fast-nvme, local-ssd, gp3-fast"
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-cyber-900 border border-cyber-700 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 bg-cyber-950/70 border border-purple-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
-                  <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                    <Database className="w-5 h-5" />
+                  <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/30">
+                    <Server className="w-5 h-5" />
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-white font-mono flex items-center gap-2">
-                      etcd Database Storage Engine
-                      <span className="text-[10px] font-mono text-amber-400/90 uppercase font-semibold bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/30">
-                        High-IOPS Drive
+                      Host-Native Namespaces
+                      <span className="text-[10px] font-mono text-purple-400 uppercase font-semibold bg-purple-950/60 px-2 py-0.5 rounded border border-purple-500/30">
+                        Zero Overhead
                       </span>
                     </h4>
                     <p className="text-[11px] text-slate-400 font-mono">
-                      Dedicated backing volume for cluster state database
+                      No private etcd database or virtual syncer needed. Workloads deploy directly onto the host Kubernetes cluster.
                     </p>
                   </div>
                 </div>
-                {etcdStorageClass ? (
-                  <span className="text-xs font-mono text-amber-300 bg-amber-950/60 px-2.5 py-1 rounded-lg border border-amber-500/40 self-start sm:self-auto flex items-center gap-1.5">
-                    <HardDrive className="w-3.5 h-3.5" />
-                    {etcdStorageClass}
-                  </span>
-                ) : (
-                  <span className="text-xs font-mono text-slate-400 bg-cyber-900 px-2.5 py-1 rounded-lg border border-cyber-800 self-start sm:self-auto">
-                    Default Host StorageClass
-                  </span>
-                )}
+                <span className="text-xs font-mono text-purple-300 bg-purple-950/60 px-2.5 py-1 rounded-lg border border-purple-500/40 self-start sm:self-auto">
+                  Host Direct
+                </span>
               </div>
-
-              <div className="p-3 bg-amber-950/20 border border-amber-500/20 rounded-xl flex items-start gap-2.5 text-xs text-amber-200/90 font-mono leading-relaxed">
-                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-amber-300">Fast Disk / SSD Required: </strong>
-                  etcd is a consensus state database that depends heavily on sequential write-ahead log (WAL) fsync speed. Selecting an SSD or NVMe-backed StorageClass avoids leader election timeouts and cluster latency spikes.
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-200 font-mono flex items-center justify-between">
-                    <span>Host StorageClass</span>
-                    <span className="text-[10px] text-slate-400">Autodetected ({storageClasses.length})</span>
-                  </label>
-                  <select
-                    value={etcdStorageClass}
-                    onChange={(e) => setEtcdStorageClass(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-cyber-900 border border-amber-500/40 text-xs font-mono text-white focus:outline-none focus:border-amber-400"
-                  >
-                    <option value="">Cluster Default StorageClass</option>
-                    {storageClasses.map((sc) => (
-                      <option key={sc.name} value={sc.name}>
-                        {sc.name} {sc.isDefault ? '(Default)' : ''} — {sc.provisioner}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-200 font-mono">
-                    Custom StorageClass Override
-                  </label>
-                  <input
-                    type="text"
-                    value={etcdStorageClass}
-                    onChange={(e) => setEtcdStorageClass(e.target.value)}
-                    placeholder="e.g. fast-nvme, local-ssd, gp3-fast"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-cyber-900 border border-cyber-700 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-              </div>
-            </div>
+            )}
 
             {/* Collapsible Quota & Policy Tuning */}
             <div className="pt-2">
@@ -2522,61 +2679,80 @@ policies:
                 </div>
               </div>
 
-              {/* Disaster Recovery & Automated Backups */}
-              <div className="p-4 bg-cyber-950/70 border border-cyber-800 rounded-2xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-mono font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                    Disaster Recovery & Backup Protection
-                  </span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={enableBackup}
-                      onChange={(e) => setEnableBackup(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                  </label>
-                </div>
+              {/* Disaster Recovery & Automated Backups (vCluster only) */}
+              {clusterType === 'vcluster' ? (
+                <div className="p-4 bg-cyber-950/70 border border-cyber-800 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      Disaster Recovery & Backup Protection
+                    </span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={enableBackup}
+                        onChange={(e) => setEnableBackup(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                    </label>
+                  </div>
 
-                {enableBackup ? (
-                  <div className="space-y-3 pt-1">
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { id: 'daily', label: 'Daily (02:00 UTC)' },
-                        { id: 'weekly', label: 'Weekly (Sunday)' },
-                        { id: 'monthly', label: 'Monthly (1st)' },
-                      ].map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setBackupSchedule(item.id as any)}
-                          className={`py-2 px-2.5 rounded-xl text-xs font-mono border text-center transition-all ${
-                            backupSchedule === item.id
-                              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 font-semibold'
-                              : 'bg-cyber-900 border-cyber-800 text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          {item.label}
-                        </button>
-                      ))}
+                  {enableBackup ? (
+                    <div className="space-y-3 pt-1">
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { id: 'daily', label: 'Daily (02:00 UTC)' },
+                          { id: 'weekly', label: 'Weekly (Sunday)' },
+                          { id: 'monthly', label: 'Monthly (1st)' },
+                        ].map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setBackupSchedule(item.id as any)}
+                            className={`py-2 px-2.5 rounded-xl text-xs font-mono border text-center transition-all ${
+                              backupSchedule === item.id
+                                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 font-semibold'
+                                : 'bg-cyber-900 border-cyber-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-400 pt-1 border-t border-cyber-850">
+                        <span>Safe PVC: <strong className="text-purple-300">{clusterName ? `${clusterName.trim().toLowerCase()}-etcd-backups` : 'cluster-etcd-backups'} (10Gi)</strong></span>
+                        <span>Retention: <strong className="text-cyan-300">Keep {backupRetention} snapshots</strong></span>
+                        {deploymentMode === 'restore' && selectedRestoreSnapshot && (
+                          <span className="w-full text-amber-300 bg-amber-500/10 border border-amber-500/30 p-1.5 rounded-lg">
+                            Initial Restore: <strong className="font-mono">{selectedRestoreSnapshot}</strong>
+                          </span>
+                        )}
+                      </div>
                     </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-400 pt-1 border-t border-cyber-850">
-                      <span>Safe PVC: <strong className="text-purple-300">{clusterName ? `${clusterName.trim().toLowerCase()}-etcd-backups` : 'cluster-etcd-backups'} (10Gi)</strong></span>
-                      <span>Retention: <strong className="text-cyan-300">Keep {backupRetention} snapshots</strong></span>
-                      {deploymentMode === 'restore' && selectedRestoreSnapshot && (
-                        <span className="w-full text-amber-300 bg-amber-500/10 border border-amber-500/30 p-1.5 rounded-lg">
-                          Initial Restore: <strong className="font-mono">{selectedRestoreSnapshot}</strong>
-                        </span>
-                      )}
+                  ) : (
+                    <p className="text-xs text-slate-500 italic">Automated backups disabled. Cluster will run without scheduled snapshots.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 bg-cyber-950/70 border border-purple-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/30">
+                      <Server className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-mono font-semibold text-white">Disaster Recovery (Host Managed)</span>
+                      <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                        Host namespaced clusters run natively on the host cluster without an isolated etcd store. Backups and volume snapshots are managed at the host cluster level.
+                      </p>
                     </div>
                   </div>
-                ) : (
-                  <p className="text-xs text-slate-500 italic">Automated backups disabled. Cluster will run without scheduled snapshots.</p>
-                )}
-              </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/30 self-start sm:self-auto">
+                    Native Host
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Advanced Toggle (hidden by default) */}
@@ -2587,7 +2763,7 @@ policies:
                 className="flex items-center gap-2 text-xs font-mono text-slate-400 hover:text-cyber-accent transition-colors"
               >
                 <Settings2 className="w-4 h-4" />
-                <span>{showAdvanced ? 'Hide Advanced Settings' : 'Show Advanced Configuration (vcluster.yaml)'}</span>
+                <span>{showAdvanced ? 'Hide Advanced Settings' : clusterType === 'namespaced' ? 'Show Advanced Configuration (Manifest & Addons)' : 'Show Advanced Configuration (vcluster.yaml)'}</span>
               </button>
 
               {showAdvanced && (
@@ -2614,49 +2790,53 @@ policies:
                       </select>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
-                        <span>vCluster Engine Version:</span>
-                        <a href="/admin/versions" className="text-[10px] text-purple-400 hover:underline">Manage Registry</a>
-                      </label>
-                      <div className="flex gap-2">
-                        <select
-                          value={vclusterVersion}
-                          onChange={(e) => setVclusterVersion(e.target.value)}
-                          className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
-                        >
-                          {versionRegistry?.vclusterVersions.map((v) => (
-                            <option key={v.version} value={v.version}>
-                              {v.label || `vCluster ${v.version}`} {v.isDefault ? '★ (Default)' : ''}
-                            </option>
-                          ))}
-                          {vclusterVersion && !versionRegistry?.vclusterVersions.some(v => v.version === vclusterVersion) && (
-                            <option value={vclusterVersion}>{vclusterVersion}</option>
-                          )}
-                        </select>
-                      </div>
-                    </div>
+                    {clusterType === 'vcluster' && (
+                      <>
+                        <div>
+                          <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
+                            <span>vCluster Engine Version:</span>
+                            <a href="/admin/versions" className="text-[10px] text-purple-400 hover:underline">Manage Registry</a>
+                          </label>
+                          <div className="flex gap-2">
+                            <select
+                              value={vclusterVersion}
+                              onChange={(e) => setVclusterVersion(e.target.value)}
+                              className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
+                            >
+                              {versionRegistry?.vclusterVersions.map((v) => (
+                                <option key={v.version} value={v.version}>
+                                  {v.label || `vCluster ${v.version}`} {v.isDefault ? '★ (Default)' : ''}
+                                </option>
+                              ))}
+                              {vclusterVersion && !versionRegistry?.vclusterVersions.some(v => v.version === vclusterVersion) && (
+                                <option value={vclusterVersion}>{vclusterVersion}</option>
+                              )}
+                            </select>
+                          </div>
+                        </div>
 
-                    <div>
-                      <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
-                        <span>etcd Backing Store:</span>
-                        <a href="/admin/versions" className="text-[10px] text-amber-400 hover:underline">Manage Registry</a>
-                      </label>
-                      <select
-                        value={etcdVersion}
-                        onChange={(e) => setEtcdVersion(e.target.value)}
-                        className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
-                      >
-                        {versionRegistry?.etcdVersions?.map((v) => (
-                          <option key={v.version} value={v.version}>
-                            {v.label || `etcd ${v.version}`} {v.isDefault ? '★ (Default)' : ''}
-                          </option>
-                        ))}
-                        {etcdVersion && !versionRegistry?.etcdVersions?.some(v => v.version === etcdVersion) && (
-                          <option value={etcdVersion}>{etcdVersion}</option>
-                        )}
-                      </select>
-                    </div>
+                        <div>
+                          <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
+                            <span>etcd Backing Store:</span>
+                            <a href="/admin/versions" className="text-[10px] text-amber-400 hover:underline">Manage Registry</a>
+                          </label>
+                          <select
+                            value={etcdVersion}
+                            onChange={(e) => setEtcdVersion(e.target.value)}
+                            className="w-full bg-cyber-900 border border-cyber-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyber-accent"
+                          >
+                            {versionRegistry?.etcdVersions?.map((v) => (
+                              <option key={v.version} value={v.version}>
+                                {v.label || `etcd ${v.version}`} {v.isDefault ? '★ (Default)' : ''}
+                              </option>
+                            ))}
+                            {etcdVersion && !versionRegistry?.etcdVersions?.some(v => v.version === etcdVersion) && (
+                              <option value={etcdVersion}>{etcdVersion}</option>
+                            )}
+                          </select>
+                        </div>
+                      </>
+                    )}
 
                     <div>
                       <label className="block text-xs font-mono text-slate-300 mb-1 flex items-center justify-between">
@@ -2828,7 +3008,7 @@ policies:
                 type="button"
                 onClick={handleSubmit}
                 disabled={submitting || missingCoreComponents.length > 0}
-                title={missingCoreComponents.length > 0 ? `Disabled: Missing core component versions (${missingCoreComponents.join(', ')})` : 'Deploy Virtual Cluster'}
+                title={missingCoreComponents.length > 0 ? `Disabled: Missing core component versions (${missingCoreComponents.join(', ')})` : clusterType === 'namespaced' ? 'Deploy Namespaced Cluster' : 'Deploy Virtual Cluster'}
                 className="px-6 py-2.5 bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-bold text-xs rounded-xl shadow-glow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {submitting ? (
@@ -2839,7 +3019,7 @@ policies:
                 ) : (
                   <>
                     <Zap className="w-4 h-4" />
-                    Deploy Virtual Cluster
+                    {clusterType === 'namespaced' ? 'Deploy Namespaced Cluster' : 'Deploy Virtual Cluster'}
                   </>
                 )}
               </button>

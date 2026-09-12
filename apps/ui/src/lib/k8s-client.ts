@@ -296,6 +296,8 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
     namespace,
     spec: {
       clusterName: spec.clusterName || name,
+      clusterType: spec.clusterType || 'vcluster',
+      namespaces: spec.namespaces || [],
       vclusterVersion: spec.vclusterVersion || '',
       kubernetesVersion: spec.kubernetesVersion || '',
       sizePreset: ((item.metadata?.annotations?.['vops.gitops.io/sizing-tier'] || spec.sizePreset) as SizePreset) || 'normal',
@@ -322,6 +324,7 @@ function mapK8sResourceToVirtualCluster(item: any): VirtualCluster {
     status: {
       phase,
       conditions,
+      clusterType: status.clusterType || spec.clusterType || 'vcluster',
       virtualK8sVersion: status.virtualK8sVersion || spec.kubernetesVersion || '',
       vclusterVersion: status.vclusterVersion || spec.vclusterVersion || '',
       endpoint: customEndpoint || status.endpoint || '',
@@ -605,6 +608,8 @@ export function sanitizeAnnotations(annotations: Record<string, string | null | 
 
 export async function createVirtualCluster(data: {
   clusterName: string;
+  clusterType?: 'vcluster' | 'namespaced' | 'host';
+  namespaces?: string[];
   preset: SizePreset;
   owner?: string;
   allowedGroups?: string[];
@@ -674,6 +679,8 @@ export async function createVirtualCluster(data: {
   };
 }): Promise<VirtualCluster> {
   const name = data.clusterName.trim().toLowerCase();
+  const isNamespaced = data.clusterType === 'namespaced' || data.clusterType === 'host';
+  const effectiveClusterType = isNamespaced ? 'namespaced' : 'vcluster';
   let k8sVer = data.kubernetesVersion;
   let vclusterVer = data.vclusterVersion;
   let etcdVer = data.etcdVersion;
@@ -694,12 +701,12 @@ export async function createVirtualCluster(data: {
 
   const missingCore = [
     !k8sVer && 'Kubernetes',
-    !vclusterVer && 'vCluster Engine',
-    !etcdVer && 'etcd',
+    !isNamespaced && !vclusterVer && 'vCluster Engine',
+    !isNamespaced && !etcdVer && 'etcd',
   ].filter(Boolean);
   if (missingCore.length > 0) {
     throw new Error(
-      `Cannot deploy virtual cluster: Missing version for core component(s): ${missingCore.join(', ')}. An administrator must import a version registry manifest first.`
+      `Cannot deploy ${isNamespaced ? 'cluster' : 'virtual cluster'}: Missing version for core component(s): ${missingCore.join(', ')}. An administrator must import a version registry manifest first.`
     );
   }
   // Pre-flight host capacity guardrail
@@ -744,6 +751,18 @@ export async function createVirtualCluster(data: {
       kind: 'Namespace',
       metadata: { name: namespace },
     }).catch(() => {});
+  }
+
+  if (data.namespaces && data.namespaces.length > 0) {
+    for (const ns of data.namespaces) {
+      if (ns && ns !== 'default' && ns !== namespace) {
+        await k8sRequest('/api/v1/namespaces', 'POST', {
+          apiVersion: 'v1',
+          kind: 'Namespace',
+          metadata: { name: ns },
+        }).catch(() => {});
+      }
+    }
   }
 
   const annotations: Record<string, string> = {
@@ -852,11 +871,13 @@ export async function createVirtualCluster(data: {
     },
     spec: {
       clusterName: name,
-      vclusterVersion: vclusterVer,
-      kubernetesVersion: k8sVer,
-      etcdVersion: etcdVer,
+      clusterType: effectiveClusterType,
+      ...(data.namespaces && data.namespaces.length > 0 ? { namespaces: data.namespaces } : {}),
+      ...(!isNamespaced && vclusterVer ? { vclusterVersion: vclusterVer } : {}),
+      kubernetesVersion: k8sVer || '',
+      ...(!isNamespaced && etcdVer ? { etcdVersion: etcdVer } : {}),
       ...(data.storageClass ? { storageClass: data.storageClass } : {}),
-      ...(data.etcdStorageClass ? { etcdStorageClass: data.etcdStorageClass } : {}),
+      ...(!isNamespaced && data.etcdStorageClass ? { etcdStorageClass: data.etcdStorageClass } : {}),
       sizePreset: effectiveSizePreset,
       highAvailability: isHA,
       ...(effectiveCustomResources ? { customResources: effectiveCustomResources } : {}),
@@ -883,19 +904,23 @@ export async function createVirtualCluster(data: {
             }
           : {}),
       },
-      sync: { pods: true, services: true, ingresses: true },
+      ...(!isNamespaced ? { sync: { pods: true, services: true, ingresses: true } } : {}),
       lifecycle: {
         autoSleep: data.autoSleep ?? false,
         ttlHours: data.ttlHours ?? 0,
       },
       policies: data.policies,
-      disasterRecovery: data.disasterRecovery || {
-        enabled: true,
-        schedule: 'daily',
-        retentionCount: 7,
-        storageSize: '10Gi',
-        initialBackupRestore: data.initialBackupRestore,
-      },
+      ...(!isNamespaced
+        ? {
+            disasterRecovery: data.disasterRecovery || {
+              enabled: true,
+              schedule: 'daily',
+              retentionCount: 7,
+              storageSize: '10Gi',
+              initialBackupRestore: data.initialBackupRestore,
+            },
+          }
+        : {}),
     },
   };
 

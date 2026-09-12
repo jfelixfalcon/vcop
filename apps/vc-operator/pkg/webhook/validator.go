@@ -101,6 +101,29 @@ func (v *VirtualClusterValidator) validateBasicSpec(ctx context.Context, vc *v1a
 		allErrs = append(allErrs, field.Invalid(fldPath.Child("clusterName"), vc.Spec.ClusterName, "must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character"))
 	}
 
+	// Validate clusterType
+	if vc.Spec.ClusterType != "" &&
+		vc.Spec.ClusterType != v1alpha1.ClusterTypeVCluster &&
+		vc.Spec.ClusterType != v1alpha1.ClusterTypeNamespaced &&
+		vc.Spec.ClusterType != v1alpha1.ClusterTypeHost {
+		allErrs = append(allErrs, field.NotSupported(fldPath.Child("clusterType"), vc.Spec.ClusterType, []string{
+			string(v1alpha1.ClusterTypeVCluster),
+			string(v1alpha1.ClusterTypeNamespaced),
+			string(v1alpha1.ClusterTypeHost),
+		}))
+	}
+
+	// Validate namespaces if specified
+	for i, ns := range vc.Spec.Namespaces {
+		if ns == "" {
+			allErrs = append(allErrs, field.Required(fldPath.Child("namespaces").Index(i), "namespace name cannot be empty"))
+		} else if len(ns) > 63 {
+			allErrs = append(allErrs, field.TooLong(fldPath.Child("namespaces").Index(i), ns, 63))
+		} else if !clusterNameRegex.MatchString(ns) {
+			allErrs = append(allErrs, field.Invalid(fldPath.Child("namespaces").Index(i), ns, "must consist of lower case alphanumeric characters or '-'"))
+		}
+	}
+
 	// Validate kubernetesVersion
 	if vc.Spec.KubernetesVersion != "" {
 		if _, err := ParseSemver(vc.Spec.KubernetesVersion); err != nil {
@@ -109,7 +132,7 @@ func (v *VirtualClusterValidator) validateBasicSpec(ctx context.Context, vc *v1a
 	}
 
 	// Validate vclusterVersion
-	if vc.Spec.VClusterVersion != "" {
+	if !vc.IsNamespaced() && vc.Spec.VClusterVersion != "" {
 		if _, err := ParseSemver(vc.Spec.VClusterVersion); err != nil {
 			allErrs = append(allErrs, field.Invalid(fldPath.Child("vclusterVersion"), vc.Spec.VClusterVersion, err.Error()))
 		}
@@ -216,6 +239,19 @@ func (v *VirtualClusterValidator) ValidateUpdate(ctx context.Context, oldVC, new
 		allErrs = append(allErrs, field.Forbidden(fldPath.Child("clusterName"), "clusterName is immutable once created"))
 	}
 
+	// ClusterType is immutable
+	oldType := oldVC.Spec.ClusterType
+	if oldType == "" {
+		oldType = v1alpha1.ClusterTypeVCluster
+	}
+	newType := newVC.Spec.ClusterType
+	if newType == "" {
+		newType = v1alpha1.ClusterTypeVCluster
+	}
+	if oldType != newType && !(oldVC.IsNamespaced() && newVC.IsNamespaced()) {
+		allErrs = append(allErrs, field.Forbidden(fldPath.Child("clusterType"), "clusterType is immutable once created"))
+	}
+
 	// Kubernetes Version upgrade safety checks
 	if oldVC.Spec.KubernetesVersion != "" && newVC.Spec.KubernetesVersion != "" {
 		oldK8s, errOld := ParseSemver(oldVC.Spec.KubernetesVersion)
@@ -236,7 +272,7 @@ func (v *VirtualClusterValidator) ValidateUpdate(ctx context.Context, oldVC, new
 	}
 
 	// vCluster Engine Version upgrade safety checks
-	if oldVC.Spec.VClusterVersion != "" && newVC.Spec.VClusterVersion != "" {
+	if !newVC.IsNamespaced() && oldVC.Spec.VClusterVersion != "" && newVC.Spec.VClusterVersion != "" {
 		oldEng, errOld := ParseSemver(oldVC.Spec.VClusterVersion)
 		newEng, errNew := ParseSemver(newVC.Spec.VClusterVersion)
 		if errOld == nil && errNew == nil {

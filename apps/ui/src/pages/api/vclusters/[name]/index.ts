@@ -85,6 +85,13 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
       updated = await updateVirtualClusterGroups(name, groupsToSet, namespace);
     }
     if (body.kubernetesVersion || body.vclusterVersion) {
+      const existing = await getVirtualCluster(name, namespace);
+      if (existing && (existing.spec.clusterType === 'namespaced' || existing.status.clusterType === 'namespaced')) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Engine upgrade is not applicable for host namespaced clusters.' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       updated = await upgradeVirtualCluster(name, {
         kubernetesVersion: body.kubernetesVersion,
         vclusterVersion: body.vclusterVersion,

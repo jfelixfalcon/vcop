@@ -4,6 +4,7 @@ import {
   Plus,
   Search,
   Layers,
+  Box,
   Activity,
   Terminal,
   ArrowUpCircle,
@@ -11,6 +12,7 @@ import {
   ExternalLink,
   Shield,
   ShieldCheck,
+  ShieldAlert,
   Cpu,
   Package,
   LayoutGrid,
@@ -43,6 +45,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
   const [envFilter, setEnvFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
@@ -153,7 +156,13 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
     const matchesGroup =
       groupFilter === 'all' || cGroups.includes(groupFilter);
 
-    return matchesSearch && matchesStatus && matchesEnv && matchesGroup;
+    const clusterType = c.status.clusterType || c.spec.clusterType || 'vcluster';
+    const matchesType =
+      typeFilter === 'all' ||
+      (typeFilter === 'vcluster' && clusterType === 'vcluster') ||
+      (typeFilter === 'namespaced' && (clusterType === 'namespaced' || clusterType === 'host'));
+
+    return matchesSearch && matchesStatus && matchesEnv && matchesGroup && matchesType;
   });
 
   // Calculate fleet stats
@@ -469,35 +478,58 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                 className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-semibold text-xs rounded-xl shadow-glow-sm flex items-center justify-center gap-1.5 transition-all shrink-0"
               >
                 <Plus className="w-4 h-4" />
-                Provision Virtual Cluster
+                Provision Cluster
               </a>
             )}
           </div>
         </div>
 
-        {/* Status Filter Chips Row */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-cyber-800/60">
-          <span className="text-[11px] font-mono text-slate-400 uppercase mr-1">Status:</span>
-          {[
-            { id: 'all', label: 'All' },
-            { id: 'active', label: 'Active' },
-            { id: 'sleeping', label: 'Sleeping' },
-            { id: 'syncing', label: 'Syncing' },
-            { id: 'upgrading', label: 'Upgrading' },
-            { id: 'degraded', label: 'Degraded' },
-          ].map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setStatusFilter(item.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                statusFilter === item.id
-                  ? 'bg-cyber-accent text-slate-950 font-semibold shadow-glow-sm'
-                  : 'bg-cyber-800/80 text-slate-400 hover:text-white hover:bg-cyber-750'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
+        {/* Filter Chips: Architecture & Status */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 pt-2.5 border-t border-cyber-800/60">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-mono text-slate-400 uppercase mr-1">Architecture:</span>
+            {[
+              { id: 'all', label: 'All' },
+              { id: 'vcluster', label: 'vCluster' },
+              { id: 'namespaced', label: 'Namespaced' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setTypeFilter(item.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  typeFilter === item.id
+                    ? 'bg-cyan-500 text-slate-950 font-semibold shadow-glow-sm'
+                    : 'bg-cyber-800/80 text-slate-400 hover:text-white hover:bg-cyber-750'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-mono text-slate-400 uppercase mr-1">Status:</span>
+            {[
+              { id: 'all', label: 'All' },
+              { id: 'active', label: 'Active' },
+              { id: 'sleeping', label: 'Sleeping' },
+              { id: 'syncing', label: 'Syncing' },
+              { id: 'upgrading', label: 'Upgrading' },
+              { id: 'degraded', label: 'Degraded' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setStatusFilter(item.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  statusFilter === item.id
+                    ? 'bg-cyber-accent text-slate-950 font-semibold shadow-glow-sm'
+                    : 'bg-cyber-800/80 text-slate-400 hover:text-white hover:bg-cyber-750'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -549,6 +581,8 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
             </thead>
             <tbody className="divide-y divide-cyber-800/60">
               {filteredClusters.map((cluster) => {
+                const clusterType = cluster.status.clusterType || cluster.spec.clusterType || 'vcluster';
+                const isNamespaced = clusterType === 'namespaced' || clusterType === 'host';
                 const isHA = cluster.spec.highAvailability;
                 const size = cluster.spec.sizePreset || 'medium';
                 const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'N/A';
@@ -567,6 +601,13 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         <a href={`/clusters/${cluster.name}`} className="font-bold text-white hover:text-cyber-accent transition-colors">
                           {cluster.name}
                         </a>
+                        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+                          isNamespaced
+                            ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                            : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+                        }`}>
+                          {isNamespaced ? 'Namespaced' : 'vCluster'}
+                        </span>
                         {cluster.metadata?.environment && (
                           <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-cyber-800 text-slate-400 border border-cyber-700">
                             {cluster.metadata.environment}
@@ -618,7 +659,11 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                       <div className="text-[10px] text-cyber-accent">{k8sVer}</div>
                     </td>
                     <td className="py-3.5 px-4 whitespace-nowrap">
-                      {isHA ? (
+                      {isNamespaced ? (
+                        <span className="px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-300 border border-purple-500/20 text-[10px]">
+                          Host Direct
+                        </span>
+                      ) : isHA ? (
                         <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px]">
                           3-Node HA
                         </span>
@@ -659,16 +704,18 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         </button>
                         {canManage && (
                           <>
-                            <button
-                              onClick={() => {
-                                setSelectedCluster(cluster);
-                                setActiveModal('upgrade');
-                              }}
-                              className="w-7 h-7 flex items-center justify-center shrink-0 bg-cyber-800 hover:bg-cyber-700 text-purple-300 rounded-lg border border-cyber-700 transition-colors"
-                              title="Upgrade Engine / K8s Version"
-                            >
-                              <ArrowUpCircle className="w-3.5 h-3.5" />
-                            </button>
+                            {!isNamespaced && (
+                              <button
+                                onClick={() => {
+                                  setSelectedCluster(cluster);
+                                  setActiveModal('upgrade');
+                                }}
+                                className="w-7 h-7 flex items-center justify-center shrink-0 bg-cyber-800 hover:bg-cyber-700 text-purple-300 rounded-lg border border-cyber-700 transition-colors"
+                                title="Upgrade Engine / K8s Version"
+                              >
+                                <ArrowUpCircle className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             <button
                               onClick={() => {
                                 setSelectedCluster(cluster);
@@ -715,9 +762,10 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredClusters.map((cluster) => {
+            const isNamespaced = cluster.spec.clusterType === 'namespaced' || cluster.status.clusterType === 'namespaced';
             const isHA = cluster.spec.highAvailability;
             const size = cluster.spec.sizePreset || 'medium';
-            const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || 'N/A';
+            const k8sVer = cluster.status.virtualK8sVersion || cluster.spec.kubernetesVersion || (isNamespaced ? 'Host Native' : 'N/A');
             const clusterGroups =
               cluster.metadata?.clusterGroups && cluster.metadata.clusterGroups.length > 0
                 ? cluster.metadata.clusterGroups
@@ -738,6 +786,17 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                         <h4 className="font-mono text-base font-bold text-white group-hover:text-cyber-accent transition-colors">
                           {cluster.name}
                         </h4>
+                        {isNamespaced ? (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                            <Layers className="w-2.5 h-2.5" />
+                            Namespaced
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 flex items-center gap-1">
+                            <Box className="w-2.5 h-2.5" />
+                            vCluster
+                          </span>
+                        )}
                         {cluster.metadata?.environment && (
                           <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-cyber-800 text-slate-400 border border-cyber-700">
                             {cluster.metadata.environment}
@@ -797,10 +856,16 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                     <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyber-850 text-slate-300 border border-cyber-800">
                       K8s: <strong className="text-cyber-accent">{k8sVer}</strong>
                     </span>
-                    {isHA && (
-                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        3-Node HA etcd
+                    {isNamespaced ? (
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-cyber-850 text-slate-400 border border-cyber-800">
+                        Host Direct
                       </span>
+                    ) : (
+                      isHA && (
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          3-Node HA etcd
+                        </span>
+                      )
                     )}
                   </div>
 
@@ -869,17 +934,19 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
 
                     {canManage && (
                       <>
-                        <button
-                          onClick={() => {
-                            setSelectedCluster(cluster);
-                            setActiveModal('upgrade');
-                          }}
-                          className="px-2.5 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-purple-300 text-xs font-medium rounded-lg border border-cyber-700 flex items-center gap-1.5 transition-colors"
-                          title="Upgrade Kubernetes or vCluster Engine"
-                        >
-                          <ArrowUpCircle className="w-3.5 h-3.5" />
-                          Upgrade
-                        </button>
+                        {!isNamespaced && (
+                          <button
+                            onClick={() => {
+                              setSelectedCluster(cluster);
+                              setActiveModal('upgrade');
+                            }}
+                            className="px-2.5 py-1.5 bg-cyber-800 hover:bg-cyber-750 text-purple-300 text-xs font-medium rounded-lg border border-cyber-700 flex items-center gap-1.5 transition-colors"
+                            title="Upgrade Kubernetes or vCluster Engine"
+                          >
+                            <ArrowUpCircle className="w-3.5 h-3.5" />
+                            Upgrade
+                          </button>
+                        )}
 
                         <button
                           onClick={() => {
@@ -891,7 +958,7 @@ export const FleetDashboard: React.FC<FleetDashboardProps> = ({ currentUser }) =
                               ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
                               : 'bg-cyber-800 hover:bg-cyber-750 text-indigo-300 border-cyber-700'
                           }`}
-                          title={cluster.status.phase === 'Sleeping' ? 'Wake up virtual cluster' : 'Put virtual cluster to sleep'}
+                          title={cluster.status.phase === 'Sleeping' ? 'Wake up cluster' : 'Put cluster to sleep'}
                         >
                           {cluster.status.phase === 'Sleeping' ? (
                             <>

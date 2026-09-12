@@ -19,6 +19,16 @@ const (
 	PresetCustom SizePreset = "custom"
 )
 
+// ClusterType defines the deployment architecture mode of the cluster
+// +kubebuilder:validation:Enum=vcluster;namespaced;host
+type ClusterType string
+
+const (
+	ClusterTypeVCluster   ClusterType = "vcluster"
+	ClusterTypeNamespaced ClusterType = "namespaced"
+	ClusterTypeHost       ClusterType = "host" // alias for namespaced
+)
+
 // ClusterPhase defines the state lifecycle of the virtual cluster
 // +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Upgrading;Degraded;Terminating;Sleeping
 type ClusterPhase string
@@ -505,6 +515,17 @@ type VirtualClusterSpec struct {
 	// +kubebuilder:validation:Pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
 	ClusterName string `json:"clusterName"`
 
+	// ClusterType defines whether this cluster is a virtual cluster (vcluster) or a host namespaced environment (namespaced/host)
+	// +kubebuilder:default="vcluster"
+	// +kubebuilder:validation:Enum=vcluster;namespaced;host
+	// +optional
+	ClusterType ClusterType `json:"clusterType,omitempty"`
+
+	// Namespaces defines the managed host namespaces when clusterType is "namespaced".
+	// If omitted or empty, defaults to the VirtualCluster's namespace.
+	// +optional
+	Namespaces []string `json:"namespaces,omitempty"`
+
 	// VClusterVersion defines the target vCluster OSS engine version (0.36.x)
 	// +kubebuilder:default="0.36.0"
 	// +optional
@@ -646,6 +667,10 @@ type VirtualClusterStatus struct {
 	// +optional
 	DisasterRecovery *DisasterRecoveryStatus `json:"disasterRecovery,omitempty"`
 
+	// ClusterType reflects the active deployment architecture of the cluster
+	// +optional
+	ClusterType ClusterType `json:"clusterType,omitempty"`
+
 	// ObservedGeneration is the most recent generation observed by the controller
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -677,6 +702,7 @@ type ComponentVersionsStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Cluster Name",type=string,JSONPath=`.spec.clusterName`
+// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.clusterType`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="vCluster Ver",type=string,JSONPath=`.status.vclusterVersion`
 // +kubebuilder:printcolumn:name="K8s Ver",type=string,JSONPath=`.status.virtualK8sVersion`
@@ -696,6 +722,22 @@ type VirtualCluster struct {
 // IsSleeping returns true if the virtual cluster is paused or in sleep mode
 func (vc *VirtualCluster) IsSleeping() bool {
 	return vc.Spec.Paused || vc.Spec.Lifecycle.Sleep
+}
+
+// IsNamespaced returns true if the cluster is a host namespaced environment
+func (vc *VirtualCluster) IsNamespaced() bool {
+	return vc.Spec.ClusterType == ClusterTypeNamespaced || vc.Spec.ClusterType == ClusterTypeHost
+}
+
+// GetNamespaces returns the list of namespaces managed by this cluster
+func (vc *VirtualCluster) GetNamespaces() []string {
+	if len(vc.Spec.Namespaces) > 0 {
+		return vc.Spec.Namespaces
+	}
+	if vc.Namespace != "" {
+		return []string{vc.Namespace}
+	}
+	return []string{vc.Spec.ClusterName}
 }
 
 // +kubebuilder:object:root=true

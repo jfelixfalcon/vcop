@@ -366,6 +366,11 @@ func (in *VirtualClusterSpec) DeepCopyInto(out *VirtualClusterSpec) {
 		*out = new(DisasterRecoverySpec)
 		**out = **in
 	}
+	if in.Namespaces != nil {
+		in, out := &in.Namespaces, &out.Namespaces
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.ImageRewriteRules != nil {
 		in, out := &in.ImageRewriteRules, &out.ImageRewriteRules
 		*out = make([]ImageRewriteRule, len(*in))
