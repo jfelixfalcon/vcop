@@ -21,6 +21,7 @@ const PUBLIC_PATHS = [
   '/api/registry/images',
   '/api/cluster/capacity',
   '/api/cluster/storage-classes',
+  '/api/cluster/namespaces',
   '/api/cert-manager/issuers',
   '/api/ai/status',
   '/api/ai/chat',

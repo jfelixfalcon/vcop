@@ -52,7 +52,10 @@ import type { VirtualCluster } from '../lib/types';
 import { ModalPortal } from './ModalPortal';
 
 interface Props {
-  cluster: VirtualCluster;
+  cluster?: VirtualCluster;
+  scope?: 'all' | 'vcluster' | 'namespace';
+  target?: string;
+  scopeLabel?: string;
 }
 
 type ViewTab = 'topology' | 'endpoints' | 'flows' | 'matrix';
@@ -63,7 +66,10 @@ interface NodePosition {
   tier: ServiceTier;
 }
 
-export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
+export const NetFlowViewer: React.FC<Props> = ({ cluster, scope, target, scopeLabel }) => {
+  const effectiveScope = scope || (cluster ? 'vcluster' : 'all');
+  const effectiveTarget = target || (cluster ? cluster.name : 'all');
+
   // Main Data States
   const [data, setData] = useState<NetflowClusterData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -105,7 +111,12 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
   const fetchNetflowData = useCallback(async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
-      const res = await fetch(`/api/vclusters/${cluster.name}/netflow`);
+      const queryParams = new URLSearchParams();
+      queryParams.set('scope', effectiveScope);
+      if (effectiveTarget && effectiveTarget !== 'all') {
+        queryParams.set('target', effectiveTarget);
+      }
+      const res = await fetch(`/api/netflow?${queryParams.toString()}`);
       const json = await res.json();
       if (json.success) {
         setData(json);
@@ -119,13 +130,20 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [cluster.name]);
+  }, [effectiveScope, effectiveTarget]);
 
-  // Initial Load & Streaming Interval
+  // Reset viewport & state on scope/target change
   useEffect(() => {
+    setNodePositions({});
+    setSelectedEndpoint(null);
+    setSelectedEdge(null);
+    setInspectedFlow(null);
+    setProbeResult(null);
+    setLoading(true);
     fetchNetflowData();
-  }, [fetchNetflowData]);
+  }, [effectiveScope, effectiveTarget]);
 
+  // Streaming Interval
   useEffect(() => {
     if (!isStreaming) return;
     const interval = setInterval(() => {
@@ -247,14 +265,17 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
   const handleSelectEndpoint = (ep: NetflowEndpoint | null) => {
     setSelectedEndpoint(ep);
     if (ep?.lastProbeStatus) {
+      const resolvedPort = ep.ports[0]?.port || Number(ep.ports[0]?.targetPort) || 80;
+      const targetIp = ep.clusterIP && ep.clusterIP !== 'None' && ep.clusterIP !== 'External'
+        ? ep.clusterIP
+        : ep.backingPods[0]?.ip
+        ? ep.backingPods[0].ip
+        : ep.externalIP || 'None';
+
       setProbeResult({
-        targetEndpoint: ep.clusterIP && ep.clusterIP !== 'None' && ep.clusterIP !== 'External'
-          ? `${ep.clusterIP}:${ep.ports[0]?.port || 80}`
-          : ep.backingPods[0]?.ip
-          ? `${ep.backingPods[0].ip}:${ep.ports[0]?.targetPort || ep.ports[0]?.port || 80}`
-          : `${ep.externalIP || '1.1.1.1'}:${ep.ports[0]?.port || 443}`,
-        targetIp: ep.clusterIP || '1.1.1.1',
-        targetPort: ep.ports[0]?.port || 80,
+        targetEndpoint: `${targetIp}:${resolvedPort}`,
+        targetIp,
+        targetPort: resolvedPort,
         protocol: 'TCP',
         reachable: ep.lastProbeStatus.reachable,
         statusCode: ep.lastProbeStatus.statusCode,
@@ -267,7 +288,7 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
     }
   };
 
-  // Run Active Live Endpoint Probe (Service VIP or specific Pod instance)
+  // Run Active Live Endpoint Probe (Service VIP, Pod, or specific Pod instance)
   const handleRunProbe = async (endpoint: NetflowEndpoint, podTarget?: { ip: string; name: string }) => {
     const isPodProbe = Boolean(podTarget);
     setProbingEndpointId(podTarget ? `${endpoint.id}:${podTarget.name}` : endpoint.id);
@@ -281,16 +302,34 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
 
     if (podTarget) {
       targetIp = podTarget.ip;
-      targetPort = endpoint.ports[0]?.targetPort || endpoint.ports[0]?.port || 80;
+      targetPort = Number(endpoint.ports[0]?.targetPort) || endpoint.ports[0]?.port || 80;
+    } else if (endpoint.type === 'Pod') {
+      targetIp = endpoint.clusterIP || endpoint.backingPods[0]?.ip || '';
+      targetPort = endpoint.ports[0]?.port || Number(endpoint.ports[0]?.targetPort) || 80;
     } else if (isExternal) {
-      targetIp = endpoint.externalIP || '1.1.1.1';
+      targetIp = endpoint.externalIP || endpoint.clusterIP || '';
       targetPort = endpoint.ports[0]?.port || 443;
     } else if (isHeadless && endpoint.backingPods.length > 0) {
       targetIp = endpoint.backingPods[0].ip;
-      targetPort = endpoint.ports[0]?.targetPort || endpoint.ports[0]?.port || 80;
+      targetPort = Number(endpoint.ports[0]?.targetPort) || endpoint.ports[0]?.port || 80;
     } else {
       targetIp = endpoint.clusterIP;
       targetPort = endpoint.ports[0]?.port || 80;
+    }
+
+    if (!targetIp || targetIp === 'None' || targetIp.toLowerCase() === 'pending') {
+      setProbingEndpointId(null);
+      setProbeResult({
+        targetEndpoint: `${endpoint.name}:${targetPort}`,
+        targetIp: 'None',
+        targetPort,
+        protocol: 'TCP',
+        reachable: false,
+        latencyMs: 0,
+        details: 'Endpoint has no active IP address allocated.',
+        checkedAt: new Date().toISOString(),
+      });
+      return;
     }
 
     const protocol = (targetPort === 443 || endpoint.ports[0]?.name?.includes('https'))
@@ -300,7 +339,7 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
       : 'TCP';
 
     try {
-      const res = await fetch(`/api/vclusters/${cluster.name}/netflow/probe`, {
+      const res = await fetch('/api/netflow/probe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -308,7 +347,9 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
           targetIp,
           port: targetPort,
           protocol,
-          targetType: isPodProbe ? 'pod' : 'service',
+          targetType: isPodProbe || endpoint.type === 'Pod' ? 'pod' : 'service',
+          scope: effectiveScope,
+          target: effectiveTarget,
         }),
       });
       const json = await res.json();
@@ -340,7 +381,7 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
           reachable: false,
           latencyMs: 0,
           checkedAt: new Date().toISOString(),
-          details: json.error || 'Probe failed',
+          details: json.error || (json.probe && json.probe.details) || 'Probe failed',
         });
       }
     } catch (err: any) {
@@ -1367,12 +1408,12 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
                     {probingEndpointId === selectedEndpoint.id ? (
                       <>
                         <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span>Probing VIP...</span>
+                        <span>Probing...</span>
                       </>
                     ) : (
                       <>
                         <Zap className="w-3.5 h-3.5" />
-                        <span>Probe Service VIP</span>
+                        <span>{selectedEndpoint.type === 'Pod' ? 'Probe Pod' : 'Probe Service VIP'}</span>
                       </>
                     )}
                   </button>

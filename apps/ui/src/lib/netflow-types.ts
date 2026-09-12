@@ -30,7 +30,7 @@ export interface NetflowEndpoint {
   serviceName: string;
   clusterIP: string;
   externalIP?: string;
-  type: 'ClusterIP' | 'NodePort' | 'LoadBalancer' | 'Headless' | 'External';
+  type: 'ClusterIP' | 'NodePort' | 'LoadBalancer' | 'Headless' | 'External' | 'Pod';
   ports: ServicePortInfo[];
   backingPods: BackingPodEndpoint[];
   readyCount: number;
@@ -127,6 +127,7 @@ export interface NetflowSummary {
 export interface NetflowClusterData {
   success: boolean;
   cluster: string;
+  scope?: 'cluster' | 'vcluster' | 'namespace';
   timestamp: string;
   summary: NetflowSummary;
   endpoints: NetflowEndpoint[];

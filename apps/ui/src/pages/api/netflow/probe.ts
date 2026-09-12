@@ -1,60 +1,43 @@
 import type { APIRoute } from 'astro';
-import { getVirtualCluster } from '../../../../../lib/k8s-client';
-import { canUserViewCluster } from '../../../../../lib/auth';
-import { probeEndpoint, recordEndpointProbeResult, getGenericNetflowData } from '../../../../../lib/netflow-service';
+import { probeEndpoint, recordEndpointProbeResult, getGenericNetflowData } from '../../../lib/netflow-service';
+import { getVirtualCluster } from '../../../lib/k8s-client';
+import { canUserViewCluster } from '../../../lib/auth';
 
-export const POST: APIRoute = async ({ params, request, locals }) => {
-  const { name } = params;
-  if (!name) {
-    return new Response(JSON.stringify({ success: false, error: 'Cluster name required' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  const isClusterWide = name === 'all' || name === 'cluster-wide';
-  const user = locals.user;
-
-  if (!isClusterWide) {
-    const cluster = await getVirtualCluster(name);
-    if (!cluster) {
-      return new Response(JSON.stringify({ success: false, error: 'Cluster not found' }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    if (user && !canUserViewCluster(user, cluster)) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Forbidden: Insufficient privileges.' }),
-        {
-          status: 403,
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
-    }
-  }
-
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
     const body = await request.json();
-    let { endpointId, targetIp, port, protocol, targetType } = body;
+    let { endpointId, targetIp, port, protocol, targetType, scope, target } = body;
+
+    const user = locals.user;
+    if (scope === 'vcluster' && target && target !== 'all') {
+      const cluster = await getVirtualCluster(target);
+      if (cluster && user && !canUserViewCluster(user, cluster)) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Forbidden: Insufficient privileges.' }),
+          {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
 
     let resolvedIp = (targetIp || '').trim();
     let resolvedPort = typeof port === 'number' ? port : parseInt(String(port), 10);
     let resolvedProto = protocol ? (String(protocol).toUpperCase() as 'TCP' | 'HTTP' | 'HTTPS') : 'TCP';
 
-    // If endpointId is provided, validate against actual cluster topology to ensure correct Service VIP vs Pod Port
+    // If endpointId is provided, validate against actual cluster topology
     if (endpointId) {
       try {
-        const netflowData = await getGenericNetflowData(
-          isClusterWide ? { scope: 'all' } : { scope: 'vcluster', target: name }
-        );
+        const netflowData = await getGenericNetflowData({
+          scope: scope || 'all',
+          target: target || 'all',
+        });
         const ep = netflowData.endpoints.find((e) => e.id === endpointId);
         if (ep) {
           const isPodTarget = targetType === 'pod' || ep.backingPods.some((p) => p.ip === resolvedIp);
 
           if (isPodTarget) {
-            // Probing a specific backing pod instance directly
             const matchedPod = ep.backingPods.find((p) => p.ip === resolvedIp) || ep.backingPods[0];
             resolvedIp = matchedPod?.ip || resolvedIp;
             resolvedPort = Number(ep.ports[0]?.targetPort) || ep.ports[0]?.port || 80;
@@ -62,11 +45,9 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
             resolvedIp = ep.clusterIP || ep.backingPods[0]?.ip || resolvedIp;
             resolvedPort = ep.ports[0]?.port || Number(ep.ports[0]?.targetPort) || 80;
           } else if (ep.clusterIP && ep.clusterIP !== 'None' && ep.clusterIP !== 'External') {
-            // Standard Kubernetes Service VIP
             resolvedIp = ep.clusterIP;
             resolvedPort = ep.ports[0]?.port || 80;
           } else if (ep.backingPods.length > 0) {
-            // Headless service without ClusterIP VIP -> route to first backing pod targetPort
             resolvedIp = ep.backingPods[0].ip;
             resolvedPort = Number(ep.ports[0]?.targetPort) || ep.ports[0]?.port || 80;
           } else if (ep.externalIP) {
@@ -74,7 +55,6 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
             resolvedPort = ep.ports[0]?.port || 443;
           }
 
-          // Auto-detect protocol if not explicitly specified
           if (!protocol) {
             if (resolvedPort === 443 || ep.ports[0]?.name?.includes('https')) {
               resolvedProto = 'HTTPS';
@@ -88,7 +68,7 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
       }
     }
 
-    if (!resolvedIp || resolvedIp === 'External' || resolvedIp === 'external' || resolvedIp === 'None' || resolvedIp.toLowerCase() === 'pending') {
+    if (!resolvedIp || resolvedIp === 'None' || resolvedIp.toLowerCase() === 'pending' || resolvedIp === 'External') {
       return new Response(
         JSON.stringify({
           success: false,
@@ -115,16 +95,13 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
       resolvedPort = 80;
     }
 
-    // Run active reachability probe
-    const probeResult = await probeEndpoint(
-      resolvedIp,
-      resolvedPort,
-      resolvedProto
-    );
+    // Execute active socket / HTTP probe
+    const probeResult = await probeEndpoint(resolvedIp, resolvedPort, resolvedProto);
 
-    // Cache probe result for this endpoint
+    // Cache probe result
     if (endpointId) {
-      recordEndpointProbeResult(name, endpointId, probeResult);
+      const clusterKey = scope === 'vcluster' && target ? target : 'cluster-wide';
+      recordEndpointProbeResult(clusterKey, endpointId, probeResult);
     }
 
     return new Response(JSON.stringify({ success: true, probe: probeResult }), {

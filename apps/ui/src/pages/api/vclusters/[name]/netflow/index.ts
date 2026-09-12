@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getVirtualCluster } from '../../../../../lib/k8s-client';
 import { canUserViewCluster } from '../../../../../lib/auth';
-import { getClusterNetflowData } from '../../../../../lib/netflow-service';
+import { getGenericNetflowData } from '../../../../../lib/netflow-service';
 
 export const GET: APIRoute = async ({ params, locals }) => {
   const { name } = params;
@@ -10,6 +10,25 @@ export const GET: APIRoute = async ({ params, locals }) => {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  // Support cluster-wide scope fallback
+  if (name === 'all' || name === 'cluster-wide') {
+    try {
+      const netflowData = await getGenericNetflowData({ scope: 'all' });
+      return new Response(JSON.stringify(netflowData), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err.message || 'Failed to get NetFlow data' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
   }
 
   const cluster = await getVirtualCluster(name);
@@ -32,7 +51,7 @@ export const GET: APIRoute = async ({ params, locals }) => {
   }
 
   try {
-    const netflowData = await getClusterNetflowData(name);
+    const netflowData = await getGenericNetflowData({ scope: 'vcluster', target: name });
     return new Response(JSON.stringify(netflowData), {
       status: 200,
       headers: {
