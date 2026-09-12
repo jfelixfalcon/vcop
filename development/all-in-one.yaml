@@ -1,0 +1,341 @@
+# MetalLB IP Pool & L2 Advertisement for Kind Docker Network
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: kind-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 172.18.255.200-172.18.255.250
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: kind-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - kind-pool
+---
+# Cert-Manager Root CA, ClusterIssuer, and Service Certificates
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: local-dev-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: "Local Development Root CA"
+  secretName: local-dev-ca-keypair
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: local-ca-issuer
+spec:
+  ca:
+    secretName: local-dev-ca-keypair
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-tls-cert
+  namespace: envoy-gateway-system
+spec:
+  secretName: gateway-tls-cert
+  issuerRef:
+    name: local-ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - "vcop.local"
+  - "keycloak.local"
+  - "*.local"
+  - "localhost"
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-tls-cert
+  namespace: default
+spec:
+  secretName: keycloak-tls-secret
+  issuerRef:
+    name: local-ca-issuer
+    kind: ClusterIssuer
+  dnsNames:
+  - "keycloak.local"
+  - "example-keycloak-service.default.svc.cluster.local"
+  - "example-keycloak-service.default.svc"
+  - "example-keycloak-service"
+  - "localhost"
+---
+# PostgreSQL Database with Persistent Storage for Keycloak
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-db-data
+  namespace: default
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: standard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: postgres
+  name: postgres-db
+  namespace: default
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - env:
+        - name: POSTGRES_DB
+          value: keycloak
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: keycloak-db-secret
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: keycloak-db-secret
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        image: docker.io/library/postgres:16-alpine
+        imagePullPolicy: IfNotPresent
+        name: postgres
+        ports:
+        - containerPort: 5432
+          name: postgres
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: postgres-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: default
+spec:
+  ports:
+  - port: 5432
+    protocol: TCP
+    targetPort: 5432
+  selector:
+    app: postgres
+  type: ClusterIP
+---
+# Keycloak Custom Resource Definition (Keycloak Operator)
+apiVersion: k8s.keycloak.org/v2beta1
+kind: Keycloak
+metadata:
+  name: example-keycloak
+  namespace: default
+spec:
+  instances: 1
+  image: local-keycloak:26.1.3
+  hostname:
+    hostname: keycloak.local
+  http:
+    tlsSecret: keycloak-tls-secret
+  db:
+    vendor: postgres
+    host: postgres-service.default.svc.cluster.local
+    database: keycloak
+    usernameSecret:
+      name: keycloak-db-secret
+      key: username
+    passwordSecret:
+      name: keycloak-db-secret
+      key: password
+  unsupported:
+    podTemplate:
+      spec:
+        containers:
+        - name: keycloak
+          imagePullPolicy: IfNotPresent
+---
+# Gateway API Infrastructure, Listeners, and Routes
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: eg
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+  - name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: gateway-tls-cert
+    allowedRoutes:
+      namespaces:
+        from: All
+  - name: https-8443
+    port: 8443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: gateway-tls-cert
+    allowedRoutes:
+      namespaces:
+        from: All
+
+---
+# HTTP -> HTTPS 301 Redirect for vcop.local (Port 80)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: vcop-ui-redirect
+  namespace: vcop-system
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: http
+  hostnames:
+  - "vcop.local"
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect:
+        scheme: https
+        statusCode: 301
+
+---
+# HTTP -> HTTPS 301 Redirect for keycloak.local (Port 80)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak-redirect
+  namespace: default
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: http
+  hostnames:
+  - "keycloak.local"
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect:
+        scheme: https
+        statusCode: 301
+
+---
+# HTTPS Route for VCOP UI (Port 443)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: vcop-ui-route
+  namespace: vcop-system
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: https
+  hostnames:
+  - "vcop.local"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: vcop-ui
+      port: 80
+
+---
+# BackendTLSPolicy: Enables Envoy Gateway to securely talk HTTPS to Keycloak Backend
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: keycloak-backend-tls
+  namespace: default
+spec:
+  targetRefs:
+  - group: ""
+    kind: Service
+    name: example-keycloak-service
+  validation:
+    caCertificateRefs:
+    - group: ""
+      kind: ConfigMap
+      name: keycloak-ca-cert
+    hostname: keycloak.local
+
+---
+# HTTPS Route for Keycloak (Port 443 & 8443)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak-route
+  namespace: default
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: https
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: https-8443
+  hostnames:
+  - "keycloak.local"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: example-keycloak-service
+      port: 8443

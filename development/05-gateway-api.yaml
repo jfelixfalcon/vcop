@@ -1,0 +1,154 @@
+# Gateway API Infrastructure, Listeners, and Routes
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: eg
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+  - name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: gateway-tls-cert
+    allowedRoutes:
+      namespaces:
+        from: All
+  - name: https-8443
+    port: 8443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: gateway-tls-cert
+    allowedRoutes:
+      namespaces:
+        from: All
+
+---
+# HTTP -> HTTPS 301 Redirect for vcop.local (Port 80)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: vcop-ui-redirect
+  namespace: vcop-system
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: http
+  hostnames:
+  - "vcop.local"
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect:
+        scheme: https
+        statusCode: 301
+
+---
+# HTTP -> HTTPS 301 Redirect for keycloak.local (Port 80)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak-redirect
+  namespace: default
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: http
+  hostnames:
+  - "keycloak.local"
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect:
+        scheme: https
+        statusCode: 301
+
+---
+# HTTPS Route for VCOP UI (Port 443)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: vcop-ui-route
+  namespace: vcop-system
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: https
+  hostnames:
+  - "vcop.local"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: vcop-ui
+      port: 80
+
+---
+# BackendTLSPolicy: Enables Envoy Gateway to securely talk HTTPS to Keycloak Backend
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: keycloak-backend-tls
+  namespace: default
+spec:
+  targetRefs:
+  - group: ""
+    kind: Service
+    name: example-keycloak-service
+  validation:
+    caCertificateRefs:
+    - group: ""
+      kind: ConfigMap
+      name: keycloak-ca-cert
+    hostname: keycloak.local
+
+---
+# HTTPS Route for Keycloak (Port 443 & 8443)
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak-route
+  namespace: default
+spec:
+  parentRefs:
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: https
+  - name: eg
+    namespace: envoy-gateway-system
+    sectionName: https-8443
+  hostnames:
+  - "keycloak.local"
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: example-keycloak-service
+      port: 8443
