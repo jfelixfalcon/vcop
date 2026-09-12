@@ -19,7 +19,8 @@ spec:
       serviceAccountName: vcop-ui
       containers:
         - name: ui
-          image: vops/vc-operations-center:v1.4.27
+          image: vops/vc-operations-center:v1.4.28
+          imagePullPolicy: IfNotPresent
           env:
             - name: HOST
               value: "0.0.0.0"

@@ -26,6 +26,8 @@ import {
   RotateCw,
   ShieldAlert,
   Trash2,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import { AISettingsPanel } from './AISettingsPanel';
 
@@ -40,6 +42,7 @@ interface ChatMessage {
 }
 
 const DEFAULT_SUGGESTIONS = [
+  'Put virtual cluster vc-dev to sleep',
   'Can you restart the keycloak-operator deployment for me?',
   'How many pods are running across the cluster?',
   'What is the average CPU usage of namespace alpha for the past 10 hours?',
@@ -774,19 +777,41 @@ export default function AIChatOverlay() {
                             <span className="flex items-center gap-1.5 text-cyan-300 font-medium">
                               {msg.toolData.action.type === 'delete' ? (
                                 <Trash2 className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-rose-400' : 'text-amber-400'}`} />
+                              ) : msg.toolData.action.type === 'sleep' ? (
+                                <Moon className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-blue-400' : 'text-amber-400'}`} />
+                              ) : msg.toolData.action.type === 'wake' ? (
+                                <Sun className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-amber-400' : 'text-amber-400'}`} />
                               ) : (
                                 <RotateCw className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-emerald-400 animate-spin [animation-duration:3s]' : 'text-amber-400'}`} />
                               )}
-                              Cluster Operation: {msg.toolData.action.type === 'restart' ? 'Rollout Restart' : msg.toolData.action.type === 'delete' ? 'Resource Deletion' : 'Scale Workload'}
+                              Cluster Operation: {
+                                msg.toolData.action.type === 'restart' ? 'Rollout Restart' :
+                                msg.toolData.action.type === 'delete' ? 'Resource Deletion' :
+                                msg.toolData.action.type === 'sleep' ? 'Virtual Cluster Sleep' :
+                                msg.toolData.action.type === 'wake' ? 'Virtual Cluster Wake' :
+                                'Scale Workload'
+                              }
                             </span>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
                               msg.toolData.action.status === 'success'
                                 ? (msg.toolData.action.type === 'delete'
                                     ? 'bg-rose-950/80 border border-rose-500/40 text-rose-300'
+                                    : msg.toolData.action.type === 'sleep'
+                                    ? 'bg-blue-950/80 border border-blue-500/40 text-blue-300'
+                                    : msg.toolData.action.type === 'wake'
+                                    ? 'bg-amber-950/80 border border-amber-500/40 text-amber-300'
                                     : 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-300')
                                 : 'bg-amber-950/80 border border-amber-500/40 text-amber-300'
                             }`}>
-                              {msg.toolData.action.status === 'success' ? (msg.toolData.action.type === 'delete' ? 'Deleted 🗑️' : 'Executed ⚡') : 'Failed ⚠️'}
+                              {msg.toolData.action.status === 'success'
+                                ? (msg.toolData.action.type === 'delete'
+                                    ? 'Deleted 🗑️'
+                                    : msg.toolData.action.type === 'sleep'
+                                    ? 'Sleeping 💤'
+                                    : msg.toolData.action.type === 'wake'
+                                    ? 'Awakened ⚡'
+                                    : 'Executed ⚡')
+                                : 'Failed ⚠️'}
                             </span>
                           </div>
 
@@ -848,6 +873,24 @@ export default function AIChatOverlay() {
                                 <Boxes className="w-3 h-3 text-cyan-400" />
                                 Check Pods ({msg.toolData.action.namespace})
                               </button>
+                              {msg.toolData.action.type === 'sleep' && (
+                                <button
+                                  onClick={() => handleSendMessage(`Wake up the ${msg.toolData.action.name} virtual cluster`)}
+                                  className="px-2.5 py-1 bg-cyber-900 hover:bg-amber-950/60 border border-cyber-700 hover:border-amber-500/50 rounded-lg text-[10px] text-slate-300 hover:text-amber-300 transition-all flex items-center gap-1"
+                                >
+                                  <Sun className="w-3 h-3 text-amber-400" />
+                                  Wake Up {msg.toolData.action.name}
+                                </button>
+                              )}
+                              {msg.toolData.action.type === 'wake' && (
+                                <button
+                                  onClick={() => handleSendMessage(`Put the ${msg.toolData.action.name} virtual cluster to sleep`)}
+                                  className="px-2.5 py-1 bg-cyber-900 hover:bg-blue-950/60 border border-cyber-700 hover:border-blue-500/50 rounded-lg text-[10px] text-slate-300 hover:text-blue-300 transition-all flex items-center gap-1"
+                                >
+                                  <Moon className="w-3 h-3 text-blue-400" />
+                                  Put {msg.toolData.action.name} to sleep
+                                </button>
+                              )}
                               {msg.toolData.action.type === 'restart' && (
                                 <button
                                   onClick={() => handleSendMessage(`Can you restart the ${msg.toolData.action.name} deployment for me?`)}

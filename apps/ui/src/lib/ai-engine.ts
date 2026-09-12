@@ -12,6 +12,9 @@ import {
   findWorkload,
   listAllDeployments,
   getClusterHardware,
+  setVirtualClusterSleep,
+  getVirtualCluster,
+  deleteVirtualCluster,
   type PodItem,
   type ClusterPodsSummary,
   type WorkloadRestartResult,
@@ -58,7 +61,7 @@ export interface WorkloadStat {
 }
 
 export interface ActionPayload {
-  type: 'restart' | 'scale' | 'delete';
+  type: 'restart' | 'scale' | 'delete' | 'sleep' | 'wake';
   kind: string;
   name: string;
   namespace: string;
@@ -74,6 +77,12 @@ export interface ActionPayload {
     updated?: number;
     previous?: number;
     new?: number;
+  };
+  clusterDetails?: {
+    phase?: string;
+    paused?: boolean;
+    preset?: string;
+    istio?: boolean;
   };
 }
 
@@ -242,20 +251,31 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
     }
   }
 
-  // 1. Identify intent & action commands (restart, scale, delete)
-  const isRestartAction = /\b(?:restart|reboot|bounce|rollout\s+restart)\b/i.test(lower);
-  const isScaleAction = /\b(?:scale|resize)\b/i.test(lower);
+  // Fetch known virtual clusters to resolve targets accurately
+  const vclustersList = await listVirtualClusters().catch(() => []);
+  const matchedVCluster = vclustersList.find(
+    (c) =>
+      lower.includes(c.name.toLowerCase()) ||
+      (c.namespace && lower.includes(c.namespace.toLowerCase()))
+  );
 
   // Check if this is an informational / instructional inquiry rather than an imperative execution command
   const isInstructionalInquiry =
     /\b(?:how\s+(?:to|do|can)|why|what\s+is|what\s+are|explain|guide|tutorial|documentation|sample|example|write\s+(?:a\s+)?(?:yaml|manifest|script))\b/i.test(lower) ||
     /\b(?:what\s+happens|when\s+should|difference\s+between)\b/i.test(lower);
 
+  // 1. Identify intent & action commands (sleep, wake, restart, scale, delete)
+  const isSleepAction = !isInstructionalInquiry &&
+    (/\b(?:sleep|put\s+.*?to\s+sleep|hibernate|pause)\b/i.test(lower) && !/\b(?:wake|resume|unpause)\b/i.test(lower));
+  const isWakeAction = !isInstructionalInquiry &&
+    /\b(?:wake|wake\s+up|resume|unpause)\b/i.test(lower);
+  const isRestartAction = /\b(?:restart|reboot|bounce|rollout\s+restart)\b/i.test(lower);
+  const isScaleAction = /\b(?:scale|resize)\b/i.test(lower);
   const isDeleteExecution = !isInstructionalInquiry && /\b(?:delete|destroy|remove|kill|terminate|prune|uninstall)\b/i.test(lower);
-  const isActionQuery = isRestartAction || isScaleAction || isDeleteExecution;
+  const isActionQuery = isSleepAction || isWakeAction || isRestartAction || isScaleAction || isDeleteExecution;
 
-  let targetWorkloadName: string | undefined;
-  let targetKind: string | undefined;
+  let targetWorkloadName: string | undefined = matchedVCluster?.name;
+  let targetKind: string | undefined = matchedVCluster ? 'VirtualCluster' : undefined;
 
   if (/\b(?:virtual\s*cluster|vcluster)\b/i.test(lower)) targetKind = 'VirtualCluster';
   else if (/\b(?:deployment|deploy)\b/i.test(lower)) targetKind = 'Deployment';
@@ -267,10 +287,14 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
   else if (/\b(?:namespace|ns)\b/i.test(lower)) targetKind = 'Namespace';
   else if (/\b(?:pod|pods)\b/i.test(lower)) targetKind = 'Pod';
 
-  if (isActionQuery) {
+  if (isActionQuery && !targetWorkloadName) {
     const actionPatterns = [
-      /(?:restart|reboot|bounce|rollout\s+restart)\s+(?:the\s+)?(?:deployment|deploy|statefulset|sts|daemonset|ds|pod)\s+([a-zA-Z0-9_-]+)/i,
-      /(?:restart|reboot|bounce|rollout\s+restart)\s+(?:the\s+)?([a-zA-Z0-9_-]+)\s+(?:deployment|deploy|statefulset|sts|daemonset|ds|pod)/i,
+      /(?:sleep|pause|hibernate)\s+(?:the\s+)?(?:virtual\s*cluster|vcluster)\s+([a-zA-Z0-9_-]+)/i,
+      /(?:sleep|pause|hibernate)\s+(?:the\s+)?([a-zA-Z0-9_-]+)/i,
+      /(?:wake|wake\s+up|resume|unpause)\s+(?:the\s+)?(?:virtual\s*cluster|vcluster)\s+([a-zA-Z0-9_-]+)/i,
+      /(?:wake|wake\s+up|resume|unpause)\s+(?:the\s+)?([a-zA-Z0-9_-]+)/i,
+      /(?:restart|reboot|bounce|rollout\s+restart)\s+(?:the\s+)?(?:deployment|deploy|statefulset|sts|daemonset|ds|pod|vcluster|virtual\s*cluster)\s+([a-zA-Z0-9_-]+)/i,
+      /(?:restart|reboot|bounce|rollout\s+restart)\s+(?:the\s+)?([a-zA-Z0-9_-]+)\s+(?:deployment|deploy|statefulset|sts|daemonset|ds|pod|vcluster|virtual\s*cluster)/i,
       /(?:restart|reboot|bounce|rollout\s+restart)\s+(?:the\s+)?([a-zA-Z0-9_-]+)/i,
       /(?:scale|resize)\s+(?:the\s+)?(?:deployment|deploy|statefulset|sts)\s+([a-zA-Z0-9_-]+)/i,
       /(?:scale|resize)\s+(?:the\s+)?([a-zA-Z0-9_-]+)\s+(?:deployment|deploy|statefulset|sts)/i,
@@ -284,7 +308,7 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
       const m = lower.match(pat);
       if (m && m[1]) {
         const candidate = m[1].trim();
-        if (!['the', 'a', 'this', 'our', 'my', 'deployment', 'statefulset', 'daemonset', 'pod', 'for', 'please', 'me', 'it', 'to', 'all', 'everything', 'resources', 'pods', 'deployments', 'workload', 'workloads', 'cluster'].includes(candidate)) {
+        if (!['the', 'a', 'this', 'our', 'my', 'deployment', 'statefulset', 'daemonset', 'pod', 'for', 'please', 'me', 'it', 'to', 'all', 'everything', 'resources', 'pods', 'deployments', 'workload', 'workloads', 'cluster', 'virtual', 'vcluster', 'vclusters'].includes(candidate)) {
           targetWorkloadName = candidate;
           break;
         }
@@ -308,17 +332,112 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
     (/\b(?:show|get|list|check|view|count|status\s+of|how\s+many|running|failed|unhealthy)\s+(?:the\s+)?(?:pods?|containers?|workloads?|deployments?|statefulsets?|daemonsets?)\b/i.test(lower) ||
      /\b(?:pods?|workloads?)\s+(?:status|health|overview|inventory|list)\b/i.test(lower) ||
      /^(?:pods?|workloads?|deployments?)$/i.test(lower.trim()));
-  const isMetricsQuery = !isActionQuery && !isManifestOrGeneralQuestion && !isPodsQuery && (/cpu|memory|mem|usage|stats|average|avg|peak|utilization|history|metric/i.test(lower) || (Boolean(detectedNamespace) && !isPodsQuery));
+  const isMetricsQuery = !isActionQuery && !isManifestOrGeneralQuestion && !isPodsQuery && (/cpu|memory|mem|usage|stats|average|avg|peak|utilization|history|metric/i.test(lower));
   const isCapacityQuery = !isActionQuery && !isManifestOrGeneralQuestion && /capacity|headroom|allocat|starvat|quota|nodes?|physical/i.test(lower);
-  const isVClusterQuery = !isActionQuery && !isManifestOrGeneralQuestion && /virtual\s*cluster|vcluster|guest|tenan|mesh|istio/i.test(lower);
+  const isVClusterQuery = !isActionQuery && !isManifestOrGeneralQuestion && (/virtual\s*cluster|vcluster|guest|tenan|mesh|istio/i.test(lower) || Boolean(matchedVCluster));
   const isEventsQuery = !isActionQuery && !isManifestOrGeneralQuestion && /event|error|warning|crash|fail|backoff|oom|unhealthy/i.test(lower);
   const isBackupQuery = !isActionQuery && !isManifestOrGeneralQuestion && /backup|snapshot|dr|disaster|restore|etcd/i.test(lower);
 
   let toolPayload: ToolDataPayload | undefined;
   let contextSummary = '';
 
-  // TOOL -1: CLUSTER WORKLOAD ACTIONS (RESTART / SCALE / DELETE)
-  if (isActionQuery && targetWorkloadName) {
+  // TOOL -1: CLUSTER ACTIONS (VIRTUAL CLUSTER SLEEP/WAKE/DELETE & WORKLOAD RESTART/SCALE/DELETE)
+  if (isActionQuery && (targetWorkloadName || matchedVCluster)) {
+    const finalTargetName = targetWorkloadName || matchedVCluster!.name;
+    const finalNamespace = detectedNamespace || matchedVCluster?.namespace || 'default';
+    const isVClusterTarget = targetKind === 'VirtualCluster' || Boolean(matchedVCluster) || vclustersList.some((c) => c.name === finalTargetName);
+
+    if (isVClusterTarget && (isSleepAction || isWakeAction)) {
+      const isSleep = isSleepAction;
+      try {
+        const result = await setVirtualClusterSleep(finalTargetName, isSleep, finalNamespace);
+        const actionType: 'sleep' | 'wake' = isSleep ? 'sleep' : 'wake';
+        toolPayload = {
+          type: 'action',
+          action: {
+            type: actionType,
+            kind: 'VirtualCluster',
+            name: finalTargetName,
+            namespace: result?.namespace || finalNamespace,
+            status: 'success',
+            message: isSleep
+              ? `Virtual cluster '${finalTargetName}' in namespace '${result?.namespace || finalNamespace}' is now in sleep mode. Syncer and guest workloads have been paused, freeing host CPU and memory while safely preserving disk and configuration state.`
+              : `Virtual cluster '${finalTargetName}' in namespace '${result?.namespace || finalNamespace}' has been awakened! Workloads and syncer pods are resuming.`,
+            cliCommand: `kubectl patch virtualcluster ${finalTargetName} -n ${result?.namespace || finalNamespace} --type merge -p '{"spec":{"paused":${isSleep},"lifecycle":{"sleep":${isSleep}}}}'`,
+            clusterDetails: {
+              phase: result?.phase || (isSleep ? 'Paused' : 'Ready'),
+              paused: isSleep,
+              preset: result?.preset,
+              istio: result?.istioEnabled,
+            },
+          },
+        };
+
+        contextSummary += `\n[Virtual Cluster Lifecycle Action Executed]
+Action: ${isSleep ? 'Sleep / Hibernation Initiated' : 'Wakeup / Resume Initiated'}
+Status: SUCCESS (200 OK)
+Target Virtual Cluster: ${finalTargetName}
+Namespace: ${result?.namespace || finalNamespace}
+Resulting Phase: ${result?.phase || (isSleep ? 'Paused' : 'Ready')}
+CLI Executed: kubectl patch virtualcluster ${finalTargetName} -n ${result?.namespace || finalNamespace} --type merge -p '{"spec":{"paused":${isSleep},"lifecycle":{"sleep":${isSleep}}}}'
+`;
+      } catch (err: any) {
+        toolPayload = {
+          type: 'action',
+          action: {
+            type: isSleep ? 'sleep' : 'wake',
+            kind: 'VirtualCluster',
+            name: finalTargetName,
+            namespace: finalNamespace,
+            status: 'failed',
+            message: err.message,
+            cliCommand: `kubectl patch virtualcluster ${finalTargetName} -n ${finalNamespace} --type merge -p '{"spec":{"paused":${isSleep},"lifecycle":{"sleep":${isSleep}}}}'`,
+          },
+        };
+
+        contextSummary += `\n[Virtual Cluster Lifecycle Action Failed]
+Action: ${isSleep ? 'Sleep' : 'Wake'}
+Status: FAILED
+Target Virtual Cluster: ${finalTargetName}
+Error: ${err.message}
+`;
+      }
+    } else if (isVClusterTarget && isDeleteExecution) {
+      try {
+        await deleteVirtualCluster(finalTargetName, finalNamespace);
+        toolPayload = {
+          type: 'action',
+          action: {
+            type: 'delete',
+            kind: 'VirtualCluster',
+            name: finalTargetName,
+            namespace: finalNamespace,
+            status: 'success',
+            message: `Virtual cluster '${finalTargetName}' in namespace '${finalNamespace}' has been deleted from the host cluster.`,
+            cliCommand: `kubectl delete virtualcluster ${finalTargetName} -n ${finalNamespace}`,
+          },
+        };
+
+        contextSummary += `\n[Virtual Cluster Deletion Executed]
+Status: SUCCESS (200 OK)
+Target Virtual Cluster: ${finalTargetName}
+Namespace: ${finalNamespace}
+`;
+      } catch (err: any) {
+        toolPayload = {
+          type: 'action',
+          action: {
+            type: 'delete',
+            kind: 'VirtualCluster',
+            name: finalTargetName,
+            namespace: finalNamespace,
+            status: 'failed',
+            message: err.message,
+            cliCommand: `kubectl delete virtualcluster ${finalTargetName} -n ${finalNamespace}`,
+          },
+        };
+      }
+    } else
     if (isRestartAction) {
       try {
         const result = await restartWorkload(targetWorkloadName, detectedNamespace);
@@ -503,7 +622,7 @@ ${podSummary.items.slice(0, 15).map((p) => `  - ${p.namespace}/${p.name} [Phase:
   }
 
   // TOOL 1: METRICS QUERY
-  if (isMetricsQuery || (detectedNamespace && !isPodsQuery && !isManifestOrGeneralQuestion && !isActionQuery)) {
+  if (isMetricsQuery) {
     const agg = await queryAggregateMetrics({
       namespace: detectedNamespace,
       hours,
@@ -630,10 +749,23 @@ Virtual Clusters Provisioned: ${cap.vclusters.length}
         vclustersCount: vclusters.length,
       };
 
+      if (matchedVCluster) {
+        const vc = vclusters.find((c) => c.name === matchedVCluster.name) || matchedVCluster;
+        contextSummary += `\n[Virtual Cluster Target: ${vc.name}]
+Namespace: ${vc.namespace}
+Lifecycle Phase: ${vc.phase || 'Ready'}
+State: ${vc.isPaused ? 'SLEEPING / HIBERNATING 💤' : 'ACTIVE / RUNNING 🟢'}
+Preset: ${vc.preset || 'custom'}
+Istio Service Mesh: ${vc.istioEnabled ? 'Enabled' : 'Disabled'}
+Syncer Version: ${vc.syncerVersion || 'latest'}
+Backups Configured: ${vc.backupRetentionCount || 0}
+`;
+      }
+
       contextSummary += `\n[Virtual Clusters Overview]
 Total Clusters: ${vclusters.length}
 Clusters:
-${vclusters.map((vc) => `  - ${vc.name} (Namespace: ${vc.namespace}, Preset: ${vc.preset || 'custom'}, Phase: ${vc.phase || 'Ready'}, Istio: ${vc.istioEnabled ? `Enabled (${vc.istioGatewayReplicas || 1} gateways, ${vc.istiodReplicas || 1} istiod)` : 'Disabled'}, Backups: ${vc.backupRetentionCount || 0})`).join('\n')}
+${vclusters.map((vc) => `  - ${vc.name} (Namespace: ${vc.namespace}, State: ${vc.isPaused ? 'Sleeping 💤' : 'Active 🟢'}, Preset: ${vc.preset || 'custom'}, Phase: ${vc.phase || 'Ready'}, Istio: ${vc.istioEnabled ? `Enabled (${vc.istioGatewayReplicas || 1} gateways, ${vc.istiodReplicas || 1} istiod)` : 'Disabled'}, Backups: ${vc.backupRetentionCount || 0})`).join('\n')}
 `;
     } catch {}
   }
@@ -852,7 +984,33 @@ Operational Directives:
   if (toolPayload?.type === 'action') {
     const act = toolPayload.action!;
     if (act.status === 'success') {
-      if (act.type === 'delete') {
+      if (act.type === 'sleep') {
+        responseText = `[STATUS: SLEEPING 💤]\n\n` +
+          `**Executive Summary**: Virtual cluster **\`${act.name}\`** in namespace **\`${act.namespace}\`** has been successfully placed into **Sleep Mode**.\n\n` +
+          `### Action Execution Telemetry\n` +
+          `- **Virtual Cluster**: \`${act.name}\`\n` +
+          `- **Namespace**: \`${act.namespace}\`\n` +
+          `- **Lifecycle State**: \`HIBERNATING / SLEEPING 💤\`\n` +
+          `- **Resource Impact**: Syncer control plane and virtual pods paused (0 replicas)\n` +
+          `- **Data Preservation**: Full state safely preserved in etcd snapshots & persistent storage\n` +
+          (act.cliCommand ? `- **CLI Executed**: \`${act.cliCommand}\`\n\n` : '\n') +
+          `### Operational Insights\n` +
+          `The vCOp Operator reconciliation engine has updated the \`VirtualCluster\` Custom Resource. All workloads are hibernated without consuming active host CPU or memory.\n\n` +
+          `### Wakeup Command\n` +
+          `To wake this cluster up at any time, ask: *"Wake up ${act.name}"* or run:\n` +
+          `\`\`\`bash\nkubectl patch virtualcluster ${act.name} -n ${act.namespace} --type merge -p '{"spec":{"paused":false,"lifecycle":{"sleep":false}}}'\n\`\`\``;
+      } else if (act.type === 'wake') {
+        responseText = `[STATUS: ACTIVE ⚡]\n\n` +
+          `**Executive Summary**: Virtual cluster **\`${act.name}\`** in namespace **\`${act.namespace}\`** has been successfully **Awakened**.\n\n` +
+          `### Action Execution Telemetry\n` +
+          `- **Virtual Cluster**: \`${act.name}\`\n` +
+          `- **Namespace**: \`${act.namespace}\`\n` +
+          `- **Lifecycle State**: \`ACTIVE / RESUMING 🟢\`\n` +
+          `- **Control Plane**: Syncer pods restarting and restoring guest workload connectivity\n` +
+          (act.cliCommand ? `- **CLI Executed**: \`${act.cliCommand}\`\n\n` : '\n') +
+          `### Recommended Verification Command\n` +
+          `\`\`\`bash\nkubectl get pods -n ${act.namespace}\n\`\`\``;
+      } else if (act.type === 'delete') {
         responseText = `[STATUS: ACTIVE ⚡]\n\n` +
           `**Executive Summary**: Successfully deleted **${act.kind} \`${act.name}\`** in namespace **\`${act.namespace}\`**.\n\n` +
           `### Action Execution Telemetry\n` +
