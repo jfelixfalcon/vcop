@@ -232,6 +232,7 @@ rules:
     resources:
       - secrets
       - pods
+      - pods/log
       - services
       - namespaces
       - nodes
@@ -315,4 +316,76 @@ rules:
       - get
       - list
       - watch
+  # DevSecOps (DSO): Network policies and ingresses for zero-trust traffic control
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - networkpolicies
+      - ingresses
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # DevSecOps (DSO): RBAC audit & least privilege policy management
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - roles
+      - rolebindings
+      - clusterroles
+      - clusterrolebindings
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # DevSecOps (DSO): Istio mTLS & zero-trust authorization policies
+  - apiGroups:
+      - security.istio.io
+    resources:
+      - peerauthentications
+      - authorizationpolicies
+      - requestauthentications
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # PodDisruptionBudgets for high-availability SRE governance
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # HorizontalPodAutoscalers for dynamic elasticity
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+
 

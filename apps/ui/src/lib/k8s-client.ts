@@ -3137,6 +3137,437 @@ export async function listStorageClasses(): Promise<StorageClassInfo[]> {
   }
 }
 
+export interface SecurityAuditFinding {
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+  category: 'Pod Security' | 'Network Isolation' | 'RBAC & Identity' | 'Data Protection & DR' | 'Service Mesh';
+  title: string;
+  description: string;
+  resource?: string;
+  remediation?: string;
+}
 
+export interface SecurityAuditReport {
+  targetScope: string;
+  score: number;
+  grade: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F';
+  summary: {
+    totalEvaluated: number;
+    passed: number;
+    failed: number;
+    criticalCount: number;
+    highCount: number;
+    mediumCount: number;
+    lowCount: number;
+  };
+  metrics: {
+    totalPods: number;
+    restrictedPodsPct: number;
+    nonRootPodsPct: number;
+    readOnlyRootFsPct: number;
+    networkPoliciesConfigured: number;
+    rbacClusterAdminBindings: number;
+    activeEtcdBackups: number;
+  };
+  findings: SecurityAuditFinding[];
+}
 
+/**
+ * Retrieves the standard output/error stream logs for a pod.
+ */
+export async function getPodLogs(
+  podName: string,
+  namespace?: string,
+  tailLines = 60,
+  container?: string
+): Promise<{ pod: string; namespace: string; logs: string; lineCount: number; cliCommand: string }> {
+  let targetNs = namespace;
+  let targetPod = podName.trim();
 
+  if (!targetNs) {
+    const summary = await listClusterPods().catch(() => ({ total: 0, items: [] } as any));
+    const found = summary.items.find(
+      (p: any) => p.name.toLowerCase() === targetPod.toLowerCase() || p.name.toLowerCase().includes(targetPod.toLowerCase())
+    );
+    if (found) {
+      targetNs = found.namespace;
+      targetPod = found.name;
+    } else {
+      targetNs = 'default';
+    }
+  }
+
+  const query = new URLSearchParams({ tailLines: String(tailLines) });
+  if (container) query.set('container', container);
+
+  const url = `/api/v1/namespaces/${targetNs}/pods/${targetPod}/log?${query.toString()}`;
+  const res = await k8sRequest<string>(url, 'GET');
+
+  if (res.statusCode >= 400) {
+    const errMsg = typeof res.data === 'object' ? (res.data as any)?.message : String(res.data);
+    throw new Error(`Failed to retrieve logs for pod '${targetPod}': HTTP ${res.statusCode} (${errMsg || 'Error'})`);
+  }
+
+  const raw = typeof res.data === 'string' ? res.data : JSON.stringify(res.data, null, 2);
+  const lines = raw ? raw.trim().split('\n') : [];
+  const cliCommand = `kubectl logs ${targetPod} -n ${targetNs} --tail=${tailLines}${container ? ` -c ${container}` : ''}`;
+
+  return {
+    pod: targetPod,
+    namespace: targetNs,
+    logs: raw.trim() || '(Container output stream is empty - 0 bytes written to stdout/stderr)',
+    lineCount: lines.length,
+    cliCommand,
+  };
+}
+
+/**
+ * Cordon or uncordon a Kubernetes node to control pod scheduling.
+ */
+export async function cordonNode(
+  nodeName: string,
+  unschedulable: boolean
+): Promise<{ node: string; unschedulable: boolean; message: string; cliCommand: string }> {
+  const patchBody = {
+    spec: {
+      unschedulable,
+    },
+  };
+
+  const url = `/api/v1/nodes/${nodeName}`;
+  const res = await k8sRequest<any>(url, 'PATCH', patchBody, 'application/strategic-merge-patch+json');
+
+  if (res.statusCode >= 400) {
+    throw new Error(`Failed to update node '${nodeName}': HTTP ${res.statusCode} (${res.data?.message || 'Failed'})`);
+  }
+
+  const actionStr = unschedulable ? 'cordoned (scheduling disabled)' : 'uncordoned (scheduling active)';
+  return {
+    node: nodeName,
+    unschedulable,
+    message: `Node '${nodeName}' has been successfully ${actionStr}.`,
+    cliCommand: `kubectl ${unschedulable ? 'cordon' : 'uncordon'} ${nodeName}`,
+  };
+}
+
+/**
+ * Rolls back a Deployment, StatefulSet, or DaemonSet to its previous revision.
+ */
+export async function rollbackWorkload(
+  name: string,
+  namespace?: string
+): Promise<{ success: boolean; kind: string; name: string; namespace: string; message: string; cliCommand: string }> {
+  const found = await findWorkload(name, namespace);
+  if (!found) {
+    throw new Error(`Workload '${name}' not found${namespace ? ` in namespace '${namespace}'` : ' across the cluster'}`);
+  }
+
+  const cliCommand = `kubectl rollout undo ${found.kind.toLowerCase()}/${found.name} -n ${found.namespace}`;
+  const { exec } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const execAsync = promisify(exec);
+
+  try {
+    await execAsync(cliCommand);
+    return {
+      success: true,
+      kind: found.kind,
+      name: found.name,
+      namespace: found.namespace,
+      message: `Rollout undo successfully initiated for ${found.kind} '${found.name}' in namespace '${found.namespace}'. Restoring previous healthy revision.`,
+      cliCommand,
+    };
+  } catch (err: any) {
+    throw new Error(`Rollout undo failed: ${err.message}`);
+  }
+}
+
+/**
+ * Applies a raw YAML or JSON Kubernetes manifest directly to the cluster via kubectl.
+ */
+export async function applyKubernetesManifest(
+  manifestYaml: string
+): Promise<{ success: boolean; output: string; cliCommand: string }> {
+  const { spawn } = await import('node:child_process');
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn('kubectl', ['apply', '-f', '-']);
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve({
+          success: true,
+          output: stdout.trim() || 'Resources successfully applied to cluster.',
+          cliCommand: 'kubectl apply -f -',
+        });
+      } else {
+        reject(new Error(stderr.trim() || `kubectl apply exited with code ${code}`));
+      }
+    });
+
+    proc.stdin.write(manifestYaml);
+    proc.stdin.end();
+  });
+}
+
+/**
+ * Performs a comprehensive DevSecOps (DSO) security audit on the cluster or a target namespace.
+ * Evaluates Pod Security Standards (PSS), Zero-Trust Network Policies, RBAC least privilege,
+ * and Disaster Recovery readiness.
+ */
+export async function performSecurityAudit(namespace?: string): Promise<SecurityAuditReport> {
+  const targetScope = namespace ? `Namespace '${namespace}'` : 'Cluster-Wide (All Namespaces)';
+  const findings: SecurityAuditFinding[] = [];
+
+  let totalPods = 0;
+  let nonRootCount = 0;
+  let readOnlyRootFsCount = 0;
+  let restrictedPodCount = 0;
+  let networkPoliciesConfigured = 0;
+  let rbacClusterAdminBindings = 0;
+  let activeEtcdBackups = 0;
+
+  // 1. Audit Pod Security Standards (PSS) & Container Hardening
+  try {
+    const podsUrl = namespace ? `/api/v1/namespaces/${namespace}/pods` : '/api/v1/pods';
+    const podsRes = await k8sRequest<{ items: any[] }>(podsUrl);
+    const pods = podsRes.data?.items || [];
+    totalPods = pods.length;
+
+    for (const pod of pods) {
+      const pName = pod.metadata?.name || 'unknown';
+      const pNs = pod.metadata?.namespace || 'default';
+      const spec = pod.spec || {};
+      const podSec = spec.securityContext || {};
+      const containers = spec.containers || [];
+
+      // Critical Checks: Privileged containers or host namespaces
+      if (spec.hostNetwork) {
+        findings.push({
+          severity: 'CRITICAL',
+          category: 'Pod Security',
+          title: `Pod '${pName}' shares host network namespace (hostNetwork: true)`,
+          description: `Pod ${pNs}/${pName} has hostNetwork enabled, allowing it to bypass network isolation and sniff host interfaces.`,
+          resource: `pod/${pName} in ${pNs}`,
+          remediation: `Remove 'hostNetwork: true' from pod spec.`,
+        });
+      }
+      if (spec.hostPID || spec.hostIPC) {
+        findings.push({
+          severity: 'CRITICAL',
+          category: 'Pod Security',
+          title: `Pod '${pName}' shares host PID/IPC namespace`,
+          description: `Pod ${pNs}/${pName} can inspect host processes and memory segments.`,
+          resource: `pod/${pName} in ${pNs}`,
+          remediation: `Remove 'hostPID' and 'hostIPC' flags from workload specification.`,
+        });
+      }
+
+      let podIsFullyHardened = true;
+      for (const c of containers) {
+        const cSec = c.securityContext || {};
+        const isPrivileged = cSec.privileged === true;
+        const runAsNonRoot = cSec.runAsNonRoot === true || podSec.runAsNonRoot === true || (cSec.runAsUser && cSec.runAsUser > 0);
+        const readOnlyRoot = cSec.readOnlyRootFilesystem === true;
+        const allowPrivilegeEscalation = cSec.allowPrivilegeEscalation === false;
+        const dropsAllCaps = Array.isArray(cSec.capabilities?.drop) && cSec.capabilities.drop.includes('ALL');
+
+        if (isPrivileged) {
+          findings.push({
+            severity: 'CRITICAL',
+            category: 'Pod Security',
+            title: `Container '${c.name}' runs with full root privilege (privileged: true)`,
+            description: `Privileged containers can easily break out of cgroup boundaries and compromise the host node kernel.`,
+            resource: `pod/${pName} (container: ${c.name}) in ${pNs}`,
+            remediation: `Set 'securityContext.privileged: false' and grant only required Linux capabilities.`,
+          });
+          podIsFullyHardened = false;
+        }
+
+        if (runAsNonRoot) {
+          nonRootCount++;
+        } else if (!pNs.startsWith('kube-')) {
+          findings.push({
+            severity: 'HIGH',
+            category: 'Pod Security',
+            title: `Container '${c.name}' missing 'runAsNonRoot: true'`,
+            description: `Container runs without explicit non-root enforcement. May execute as UID 0 (root).`,
+            resource: `pod/${pName} (container: ${c.name}) in ${pNs}`,
+            remediation: `Configure 'securityContext.runAsNonRoot: true' and 'runAsUser: 10001'.`,
+          });
+          podIsFullyHardened = false;
+        }
+
+        if (readOnlyRoot) {
+          readOnlyRootFsCount++;
+        } else if (!pNs.startsWith('kube-')) {
+          findings.push({
+            severity: 'MEDIUM',
+            category: 'Pod Security',
+            title: `Container '${c.name}' root filesystem is writable`,
+            description: `A writable root filesystem enables malicious persistence and binary tampering if an application is exploited.`,
+            resource: `pod/${pName} (container: ${c.name}) in ${pNs}`,
+            remediation: `Set 'securityContext.readOnlyRootFilesystem: true' and mount emptyDir volumes for writable temp directories.`,
+          });
+          podIsFullyHardened = false;
+        }
+
+        if (!allowPrivilegeEscalation && !pNs.startsWith('kube-')) {
+          findings.push({
+            severity: 'LOW',
+            category: 'Pod Security',
+            title: `Container '${c.name}' allows privilege escalation`,
+            description: `Child processes can gain more privileges than their parent (setuid binaries).`,
+            resource: `pod/${pName} (container: ${c.name}) in ${pNs}`,
+            remediation: `Set 'securityContext.allowPrivilegeEscalation: false'.`,
+          });
+          podIsFullyHardened = false;
+        }
+
+        if (!dropsAllCaps && !pNs.startsWith('kube-')) {
+          podIsFullyHardened = false;
+        }
+      }
+
+      if (podIsFullyHardened) {
+        restrictedPodCount++;
+      }
+    }
+  } catch (err: any) {
+    console.warn('[auditSecurityPosture] Pods check error:', err.message);
+  }
+
+  // 2. Audit Zero Trust Network Isolation (NetworkPolicies)
+  try {
+    const netUrl = namespace ? `/apis/networking.k8s.io/v1/namespaces/${namespace}/networkpolicies` : '/apis/networking.k8s.io/v1/networkpolicies';
+    const netRes = await k8sRequest<{ items: any[] }>(netUrl);
+    const netpols = netRes.data?.items || [];
+    networkPoliciesConfigured = netpols.length;
+
+    if (networkPoliciesConfigured === 0) {
+      findings.push({
+        severity: 'HIGH',
+        category: 'Network Isolation',
+        title: `No NetworkPolicies enforced in scope (${targetScope})`,
+        description: `Zero-Trust Default-Deny is missing. By default, all Kubernetes pods can communicate with all other pods across the cluster without restriction.`,
+        remediation: `Apply a default-deny Ingress and Egress NetworkPolicy to enforce least-privilege East-West traffic.`,
+      });
+    } else {
+      findings.push({
+        severity: 'INFO',
+        category: 'Network Isolation',
+        title: `${networkPoliciesConfigured} NetworkPolicy rules configured`,
+        description: `Active network segmentation policies detected protecting workloads.`,
+      });
+    }
+  } catch (err: any) {
+    console.warn('[auditSecurityPosture] NetworkPolicies check error:', err.message);
+  }
+
+  // 3. Audit RBAC Least Privilege (ClusterRoleBindings)
+  try {
+    const rbacRes = await k8sRequest<{ items: any[] }>('/apis/rbac.authorization.k8s.io/v1/clusterrolebindings');
+    const crbs = rbacRes.data?.items || [];
+
+    const adminBindings = crbs.filter(
+      (b) => b.roleRef?.name === 'cluster-admin' &&
+        b.subjects?.some((s: any) => s.namespace && !['kube-system', 'vcop-system'].includes(s.namespace))
+    );
+    rbacClusterAdminBindings = adminBindings.length;
+
+    if (adminBindings.length > 0) {
+      findings.push({
+        severity: 'HIGH',
+        category: 'RBAC & Identity',
+        title: `${adminBindings.length} third-party subjects granted full 'cluster-admin'`,
+        description: `Overly permissive cluster-admin bindings detected outside system namespaces: ${adminBindings.map((b) => b.metadata?.name).join(', ')}.`,
+        remediation: `Replace cluster-admin with scoped Roles and RoleBindings granting only explicit verbs (least privilege).`,
+      });
+    } else {
+      findings.push({
+        severity: 'INFO',
+        category: 'RBAC & Identity',
+        title: `RBAC cluster-admin bindings tightly scoped to system namespaces`,
+        description: `No unapproved third-party service accounts hold unrestricted root cluster privileges.`,
+      });
+    }
+  } catch (err: any) {
+    console.warn('[auditSecurityPosture] RBAC check error:', err.message);
+  }
+
+  // 4. Audit Disaster Recovery & etcd Backup Schedules
+  try {
+    const cronRes = await k8sRequest<{ items: any[] }>('/apis/batch/v1/cronjobs');
+    const cronjobs = cronRes.data?.items || [];
+    const backupJobs = cronjobs.filter((c) => /backup|etcd|snapshot|dr/i.test(c.metadata?.name || ''));
+    activeEtcdBackups = backupJobs.length;
+
+    if (activeEtcdBackups === 0) {
+      findings.push({
+        severity: 'MEDIUM',
+        category: 'Data Protection & DR',
+        title: `No automated etcd backup CronJobs detected`,
+        description: `Disaster Recovery automation is not scheduled. Unrecoverable control plane loss risk in the event of etcd corruption.`,
+        remediation: `Enable automated etcd snapshot CronJobs via the vCOp Operations Center DR dashboard.`,
+      });
+    } else {
+      findings.push({
+        severity: 'INFO',
+        category: 'Data Protection & DR',
+        title: `${activeEtcdBackups} automated backup schedules active`,
+        description: `Scheduled etcd snapshots configured for rapid recovery and RTO/RPO compliance.`,
+      });
+    }
+  } catch (err: any) {
+    console.warn('[auditSecurityPosture] DR check error:', err.message);
+  }
+
+  // Calculate DSO Score (0 - 100)
+  const criticals = findings.filter((f) => f.severity === 'CRITICAL').length;
+  const highs = findings.filter((f) => f.severity === 'HIGH').length;
+  const mediums = findings.filter((f) => f.severity === 'MEDIUM').length;
+  const lows = findings.filter((f) => f.severity === 'LOW').length;
+
+  let penalty = criticals * 25 + highs * 15 + mediums * 8 + lows * 3;
+  const score = Math.max(10, Math.min(100, 100 - penalty));
+
+  let grade: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F' = 'F';
+  if (score >= 95) grade = 'A+';
+  else if (score >= 88) grade = 'A';
+  else if (score >= 78) grade = 'B';
+  else if (score >= 68) grade = 'C';
+  else if (score >= 55) grade = 'D';
+
+  const nonRootPct = totalPods > 0 ? Math.round((nonRootCount / totalPods) * 100) : 100;
+  const readOnlyPct = totalPods > 0 ? Math.round((readOnlyRootFsCount / totalPods) * 100) : 100;
+  const restrictedPct = totalPods > 0 ? Math.round((restrictedPodCount / totalPods) * 100) : 100;
+
+  return {
+    targetScope,
+    score,
+    grade,
+    summary: {
+      totalEvaluated: totalPods + networkPoliciesConfigured + rbacClusterAdminBindings + activeEtcdBackups,
+      passed: findings.filter((f) => f.severity === 'INFO').length,
+      failed: criticals + highs + mediums + lows,
+      criticalCount: criticals,
+      highCount: highs,
+      mediumCount: mediums,
+      lowCount: lows,
+    },
+    metrics: {
+      totalPods,
+      restrictedPodsPct: restrictedPct,
+      nonRootPodsPct: nonRootPct,
+      readOnlyRootFsPct: readOnlyPct,
+      networkPoliciesConfigured,
+      rbacClusterAdminBindings,
+      activeEtcdBackups,
+    },
+    findings,
+  };
+}

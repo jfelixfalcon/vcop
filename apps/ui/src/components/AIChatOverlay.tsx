@@ -28,6 +28,11 @@ import {
   Trash2,
   Moon,
   Sun,
+  Shield,
+  FileText,
+  Undo2,
+  Lock,
+  Server,
 } from 'lucide-react';
 import { AISettingsPanel } from './AISettingsPanel';
 
@@ -42,13 +47,13 @@ interface ChatMessage {
 }
 
 const DEFAULT_SUGGESTIONS = [
+  'Run a DevSecOps (DSO) security posture audit',
   'Put virtual cluster vc-dev to sleep',
-  'Can you restart the keycloak-operator deployment for me?',
+  'Show logs for the vc-dev-0 pod',
+  'Take an ad-hoc etcd backup of cluster vc-dev',
   'How many pods are running across the cluster?',
-  'What is the average CPU usage of namespace alpha for the past 10 hours?',
+  'Can you restart the keycloak-operator deployment?',
   'Show cluster capacity and resource headroom',
-  'Scan for warning events or crashloops',
-  'List all virtual clusters and their Istio status',
 ];
 
 export default function AIChatOverlay() {
@@ -770,6 +775,214 @@ export default function AIChatOverlay() {
                         </div>
                       )}
 
+                      {/* Rich DevSecOps Security Posture Scorecard Widget */}
+                      {(msg.toolData?.type === 'security_audit' || msg.toolData?.securityAudit) && (
+                        (() => {
+                          const audit = msg.toolData.securityAudit || msg.toolData.action?.auditReport;
+                          if (!audit) return null;
+                          const isHigh = audit.score >= 80;
+                          const isMed = audit.score >= 60 && audit.score < 80;
+                          const scoreColor = isHigh ? 'text-emerald-400' : isMed ? 'text-amber-400' : 'text-rose-400';
+                          const gradeBg = isHigh
+                            ? 'bg-emerald-950/80 border-emerald-500/40 text-emerald-300'
+                            : isMed
+                            ? 'bg-amber-950/80 border-amber-500/40 text-amber-300'
+                            : 'bg-rose-950/80 border-rose-500/40 text-rose-300';
+
+                          return (
+                            <div className="mt-3 pt-3 border-t border-cyber-800/80 space-y-2.5 font-mono">
+                              <div className="flex items-center justify-between text-xs text-slate-400">
+                                <span className="flex items-center gap-1.5 text-cyan-300 font-medium">
+                                  <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                                  DevSecOps (DSO) Security Posture
+                                </span>
+                                <span className="text-[10px] text-slate-500">{audit.targetScope}</span>
+                              </div>
+
+                              {/* Score and Grade Banner */}
+                              <div className="bg-cyber-950/90 border border-cyber-800 p-3 rounded-xl">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-bold text-xl border ${gradeBg}`}>
+                                      {audit.grade}
+                                    </div>
+                                    <div>
+                                      <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Overall Compliance</div>
+                                      <div className="flex items-baseline gap-1.5">
+                                        <span className={`text-2xl font-bold font-mono ${scoreColor}`}>{audit.score}</span>
+                                        <span className="text-xs text-slate-500">/ 100</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-2 text-right">
+                                    <div className="px-2 py-1 bg-cyber-900/80 rounded-lg border border-cyber-800 text-[10px]">
+                                      <div className="text-rose-400 font-bold">{audit.summary?.criticalCount || 0}</div>
+                                      <div className="text-slate-500 uppercase">Critical</div>
+                                    </div>
+                                    <div className="px-2 py-1 bg-cyber-900/80 rounded-lg border border-cyber-800 text-[10px]">
+                                      <div className="text-amber-400 font-bold">{audit.summary?.highCount || 0}</div>
+                                      <div className="text-slate-500 uppercase">High</div>
+                                    </div>
+                                    <div className="px-2 py-1 bg-cyber-900/80 rounded-lg border border-cyber-800 text-[10px]">
+                                      <div className="text-blue-400 font-bold">{audit.summary?.mediumCount || 0}</div>
+                                      <div className="text-slate-500 uppercase">Medium</div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Score Bar */}
+                                <div className="w-full bg-cyber-900 rounded-full h-1.5 mt-3 overflow-hidden border border-cyber-800">
+                                  <div
+                                    className={`h-full rounded-full transition-all duration-500 ${isHigh ? 'bg-gradient-to-r from-emerald-500 to-teal-400' : isMed ? 'bg-gradient-to-r from-amber-500 to-yellow-400' : 'bg-gradient-to-r from-rose-500 to-red-400'}`}
+                                    style={{ width: `${audit.score}%` }}
+                                  />
+                                </div>
+                              </div>
+
+                              {/* 4 DSO Compliance Key Metric Cards */}
+                              {audit.metrics && (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                                  <div className="bg-cyber-950/70 border border-cyber-800/80 p-2.5 rounded-xl">
+                                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block">PSS Restricted</span>
+                                    <div className={`text-sm font-bold mt-1 ${audit.metrics.restrictedPodsPct >= 70 ? 'text-emerald-400' : audit.metrics.restrictedPodsPct >= 40 ? 'text-amber-400' : 'text-rose-400'}`}>
+                                      {audit.metrics.restrictedPodsPct}%
+                                    </div>
+                                    <span className="text-[9px] text-slate-500">Security Standard</span>
+                                  </div>
+                                  <div className="bg-cyber-950/70 border border-cyber-800/80 p-2.5 rounded-xl">
+                                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Non-Root Pods</span>
+                                    <div className={`text-sm font-bold mt-1 ${audit.metrics.nonRootPodsPct >= 70 ? 'text-emerald-400' : audit.metrics.nonRootPodsPct >= 40 ? 'text-amber-400' : 'text-rose-400'}`}>
+                                      {audit.metrics.nonRootPodsPct}%
+                                    </div>
+                                    <span className="text-[9px] text-slate-500">UID &gt; 0 Enforced</span>
+                                  </div>
+                                  <div className="bg-cyber-950/70 border border-cyber-800/80 p-2.5 rounded-xl">
+                                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Zero-Trust NetPol</span>
+                                    <div className={`text-sm font-bold mt-1 ${audit.metrics.networkPoliciesConfigured > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                      {audit.metrics.networkPoliciesConfigured} Rules
+                                    </div>
+                                    <span className="text-[9px] text-slate-500">Microsegmentation</span>
+                                  </div>
+                                  <div className="bg-cyber-950/70 border border-cyber-800/80 p-2.5 rounded-xl">
+                                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block">etcd Backups</span>
+                                    <div className={`text-sm font-bold mt-1 ${audit.metrics.activeEtcdBackups > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                      {audit.metrics.activeEtcdBackups} Active
+                                    </div>
+                                    <span className="text-[9px] text-slate-500">DR Automation</span>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Top Findings & Remediation Items */}
+                              {audit.findings && audit.findings.length > 0 && (
+                                <div className="bg-cyber-950/60 border border-cyber-800/60 rounded-xl p-2.5 space-y-2">
+                                  <span className="text-[11px] font-semibold text-slate-300 block">
+                                    Identified DevSecOps Findings ({audit.findings.length}):
+                                  </span>
+                                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                                    {audit.findings.slice(0, 6).map((f: any, idx: number) => (
+                                      <div key={idx} className="bg-cyber-900/60 border border-cyber-800/60 rounded-lg p-2 text-[11px]">
+                                        <div className="flex items-center justify-between mb-1">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
+                                              f.severity === 'CRITICAL' ? 'bg-rose-950 text-rose-300 border border-rose-500/50' :
+                                              f.severity === 'HIGH' ? 'bg-amber-950 text-amber-300 border border-amber-500/50' :
+                                              f.severity === 'MEDIUM' ? 'bg-blue-950 text-blue-300 border border-blue-500/50' :
+                                              'bg-slate-900 text-slate-400 border border-slate-700'
+                                            }`}>
+                                              {f.severity}
+                                            </span>
+                                            <span className="text-slate-200 font-semibold truncate max-w-[200px]">{f.title}</span>
+                                          </div>
+                                          <span className="text-[10px] text-slate-500 font-mono">{f.category}</span>
+                                        </div>
+                                        <p className="text-slate-400 text-[10px] font-sans leading-relaxed">{f.description}</p>
+                                        {f.remediation && (
+                                          <div className="mt-1 pt-1 border-t border-cyber-800/40 text-[10px] font-mono text-cyan-300 flex items-center justify-between">
+                                            <span className="truncate max-w-[280px]">Remediation: {f.remediation}</span>
+                                            <button
+                                              onClick={() => {
+                                                navigator.clipboard.writeText(f.remediation);
+                                                setCopiedId(`audit-rem-${idx}`);
+                                                setTimeout(() => setCopiedId(null), 2000);
+                                              }}
+                                              className="text-slate-400 hover:text-white px-1 py-0.5 rounded bg-cyber-950 border border-cyber-800 text-[9px] shrink-0"
+                                            >
+                                              {copiedId === `audit-rem-${idx}` ? 'Copied' : 'Copy'}
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()
+                      )}
+
+                      {/* Rich Pod Logs Terminal Widget */}
+                      {(msg.toolData?.type === 'logs' || msg.toolData?.logs) && (
+                        (() => {
+                          const logs = msg.toolData.logs || msg.toolData.action?.logsData;
+                          if (!logs) return null;
+                          return (
+                            <div className="mt-3 pt-3 border-t border-cyber-800/80 space-y-2.5 font-mono">
+                              <div className="flex items-center justify-between text-xs text-slate-400">
+                                <span className="flex items-center gap-1.5 text-cyan-300 font-medium">
+                                  <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                                  Pod Diagnostic Log Stream
+                                </span>
+                                <span className="text-[10px] text-slate-500">{logs.pod} ({logs.namespace})</span>
+                              </div>
+
+                              <div className="bg-cyber-950 border border-cyber-800 rounded-xl overflow-hidden shadow-lg">
+                                <div className="flex items-center justify-between px-3 py-1.5 bg-cyber-900/90 border-b border-cyber-800/70 text-[11px] font-mono text-slate-400">
+                                  <span className="flex items-center gap-1.5 text-cyan-300 text-[10px]">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                                    <span>{logs.lineCount || 0} lines captured</span>
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(logs.logs || '');
+                                      setCopiedId(`logs-${msg.id}`);
+                                      setTimeout(() => setCopiedId(null), 2000);
+                                    }}
+                                    className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-white px-2 py-0.5 rounded bg-cyber-950 hover:bg-cyber-800 border border-cyber-800 transition-colors"
+                                  >
+                                    {copiedId === `logs-${msg.id}` ? (
+                                      <>
+                                        <Check className="w-3 h-3 text-emerald-400" />
+                                        <span className="text-emerald-400">Copied</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3 h-3" />
+                                        <span>Copy Logs</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                                <pre className="p-3 text-[11px] font-mono text-cyan-200/90 overflow-x-auto max-h-56 overflow-y-auto whitespace-pre selection:bg-cyan-500/30 leading-relaxed scrollbar-thin">
+                                  <code>{logs.logs || '(No log output returned)'}</code>
+                                </pre>
+                              </div>
+
+                              <div className="flex items-center justify-between text-[10px] text-slate-500">
+                                <span className="truncate max-w-[280px]" title={logs.cliCommand}>{logs.cliCommand || `kubectl logs ${logs.pod} -n ${logs.namespace}`}</span>
+                                <button
+                                  onClick={() => handleSendMessage(`Run a DevSecOps security audit on ${logs.namespace}`)}
+                                  className="text-cyan-400 hover:text-cyan-300 underline"
+                                >
+                                  Audit {logs.namespace}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()
+                      )}
+
                       {/* Rich Action Execution Widget */}
                       {msg.toolData?.type === 'action' && msg.toolData.action && (
                         <div className="mt-3 pt-3 border-t border-cyber-800/80 space-y-2.5 font-mono">
@@ -781,6 +994,20 @@ export default function AIChatOverlay() {
                                 <Moon className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-blue-400' : 'text-amber-400'}`} />
                               ) : msg.toolData.action.type === 'wake' ? (
                                 <Sun className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-amber-400' : 'text-amber-400'}`} />
+                              ) : msg.toolData.action.type === 'backup' ? (
+                                <Shield className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-blue-400' : 'text-amber-400'}`} />
+                              ) : msg.toolData.action.type === 'rollback' ? (
+                                <Undo2 className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-amber-400' : 'text-rose-400'}`} />
+                              ) : msg.toolData.action.type === 'cordon' ? (
+                                <Lock className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-rose-400' : 'text-amber-400'}`} />
+                              ) : msg.toolData.action.type === 'uncordon' ? (
+                                <Server className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-emerald-400' : 'text-amber-400'}`} />
+                              ) : msg.toolData.action.type === 'apply' ? (
+                                <FileText className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-cyan-400' : 'text-amber-400'}`} />
+                              ) : msg.toolData.action.type === 'logs' ? (
+                                <Terminal className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-cyan-400' : 'text-amber-400'}`} />
+                              ) : msg.toolData.action.type === 'security_audit' ? (
+                                <ShieldAlert className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-emerald-400' : 'text-amber-400'}`} />
                               ) : (
                                 <RotateCw className={`w-3.5 h-3.5 ${msg.toolData.action.status === 'success' ? 'text-emerald-400 animate-spin [animation-duration:3s]' : 'text-amber-400'}`} />
                               )}
@@ -789,6 +1016,13 @@ export default function AIChatOverlay() {
                                 msg.toolData.action.type === 'delete' ? 'Resource Deletion' :
                                 msg.toolData.action.type === 'sleep' ? 'Virtual Cluster Sleep' :
                                 msg.toolData.action.type === 'wake' ? 'Virtual Cluster Wake' :
+                                msg.toolData.action.type === 'backup' ? 'Disaster Recovery Backup' :
+                                msg.toolData.action.type === 'rollback' ? 'Rollout Rollback / Undo' :
+                                msg.toolData.action.type === 'cordon' ? 'Node Cordon (Unschedulable)' :
+                                msg.toolData.action.type === 'uncordon' ? 'Node Uncordon (Schedulable)' :
+                                msg.toolData.action.type === 'apply' ? 'Manifest Application' :
+                                msg.toolData.action.type === 'logs' ? 'Pod Log Stream' :
+                                msg.toolData.action.type === 'security_audit' ? 'Security Audit' :
                                 'Scale Workload'
                               }
                             </span>
@@ -800,6 +1034,14 @@ export default function AIChatOverlay() {
                                     ? 'bg-blue-950/80 border border-blue-500/40 text-blue-300'
                                     : msg.toolData.action.type === 'wake'
                                     ? 'bg-amber-950/80 border border-amber-500/40 text-amber-300'
+                                    : msg.toolData.action.type === 'backup'
+                                    ? 'bg-blue-950/80 border border-blue-500/40 text-blue-300'
+                                    : msg.toolData.action.type === 'rollback'
+                                    ? 'bg-amber-950/80 border border-amber-500/40 text-amber-300'
+                                    : msg.toolData.action.type === 'cordon'
+                                    ? 'bg-rose-950/80 border border-rose-500/40 text-rose-300'
+                                    : msg.toolData.action.type === 'uncordon'
+                                    ? 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-300'
                                     : 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-300')
                                 : 'bg-amber-950/80 border border-amber-500/40 text-amber-300'
                             }`}>
@@ -810,6 +1052,16 @@ export default function AIChatOverlay() {
                                     ? 'Sleeping 💤'
                                     : msg.toolData.action.type === 'wake'
                                     ? 'Awakened ⚡'
+                                    : msg.toolData.action.type === 'backup'
+                                    ? 'Snapshot Dispatched 💾'
+                                    : msg.toolData.action.type === 'rollback'
+                                    ? 'Rolled Back ⏪'
+                                    : msg.toolData.action.type === 'cordon'
+                                    ? 'Cordoned 🚫'
+                                    : msg.toolData.action.type === 'uncordon'
+                                    ? 'Uncordoned 🔓'
+                                    : msg.toolData.action.type === 'apply'
+                                    ? 'Applied 📄'
                                     : 'Executed ⚡')
                                 : 'Failed ⚠️'}
                             </span>
@@ -900,6 +1152,33 @@ export default function AIChatOverlay() {
                                   Re-trigger Restart
                                 </button>
                               )}
+                              {msg.toolData.action.type === 'cordon' && (
+                                <button
+                                  onClick={() => handleSendMessage(`Uncordon node ${msg.toolData.action.name}`)}
+                                  className="px-2.5 py-1 bg-cyber-900 hover:bg-emerald-950/60 border border-cyber-700 hover:border-emerald-500/50 rounded-lg text-[10px] text-slate-300 hover:text-emerald-300 transition-all flex items-center gap-1"
+                                >
+                                  <Server className="w-3 h-3 text-emerald-400" />
+                                  Uncordon Node
+                                </button>
+                              )}
+                              {msg.toolData.action.type === 'uncordon' && (
+                                <button
+                                  onClick={() => handleSendMessage(`Cordon node ${msg.toolData.action.name}`)}
+                                  className="px-2.5 py-1 bg-cyber-900 hover:bg-rose-950/60 border border-cyber-700 hover:border-rose-500/50 rounded-lg text-[10px] text-slate-300 hover:text-rose-300 transition-all flex items-center gap-1"
+                                >
+                                  <Lock className="w-3 h-3 text-rose-400" />
+                                  Cordon Node
+                                </button>
+                              )}
+                              {msg.toolData.action.type === 'backup' && (
+                                <button
+                                  onClick={() => handleSendMessage(`Run a DevSecOps security audit on ${msg.toolData.action.namespace}`)}
+                                  className="px-2.5 py-1 bg-cyber-900 hover:bg-emerald-950/60 border border-cyber-700 hover:border-emerald-500/50 rounded-lg text-[10px] text-slate-300 hover:text-emerald-300 transition-all flex items-center gap-1"
+                                >
+                                  <Shield className="w-3 h-3 text-emerald-400" />
+                                  Audit {msg.toolData.action.namespace}
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -937,7 +1216,49 @@ export default function AIChatOverlay() {
                       {/* Contextual Follow-up Chips */}
                       <div className="mt-2 pt-2 border-t border-cyber-800/30 flex flex-wrap items-center gap-1.5">
                         <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider mr-1">Suggested:</span>
-                        {msg.toolData?.type === 'action' ? (
+                        {msg.toolData?.type === 'security_audit' || msg.toolData?.securityAudit ? (
+                          <>
+                            <button
+                              onClick={() => handleSendMessage('Take an ad-hoc etcd backup of vc-dev')}
+                              className="px-2 py-0.5 bg-cyber-950 hover:bg-cyber-800 border border-cyber-800 hover:border-cyan-500/40 rounded-lg text-[10px] text-slate-300 hover:text-cyan-300 transition-colors"
+                            >
+                              Ad-hoc etcd Backup
+                            </button>
+                            <button
+                              onClick={() => handleSendMessage('Show host cluster capacity and headroom')}
+                              className="px-2 py-0.5 bg-cyber-950 hover:bg-cyber-800 border border-cyber-800 hover:border-cyan-500/40 rounded-lg text-[10px] text-slate-300 hover:text-cyan-300 transition-colors"
+                            >
+                              Cluster Headroom
+                            </button>
+                            <button
+                              onClick={() => handleSendMessage('Scan for warning events or crashloops')}
+                              className="px-2 py-0.5 bg-cyber-950 hover:bg-cyber-800 border border-cyber-800 hover:border-cyan-500/40 rounded-lg text-[10px] text-slate-300 hover:text-cyan-300 transition-colors"
+                            >
+                              Warning Events
+                            </button>
+                          </>
+                        ) : msg.toolData?.type === 'logs' || msg.toolData?.logs ? (
+                          <>
+                            <button
+                              onClick={() => handleSendMessage(`Run a DevSecOps security audit on ${(msg.toolData.logs || msg.toolData.action?.logsData)?.namespace || 'default'}`)}
+                              className="px-2 py-0.5 bg-cyber-950 hover:bg-cyber-800 border border-cyber-800 hover:border-cyan-500/40 rounded-lg text-[10px] text-slate-300 hover:text-cyan-300 transition-colors"
+                            >
+                              Security Audit
+                            </button>
+                            <button
+                              onClick={() => handleSendMessage('Scan for warning events or crashloops')}
+                              className="px-2 py-0.5 bg-cyber-950 hover:bg-cyber-800 border border-cyber-800 hover:border-cyan-500/40 rounded-lg text-[10px] text-slate-300 hover:text-cyan-300 transition-colors"
+                            >
+                              Warning Events
+                            </button>
+                            <button
+                              onClick={() => handleSendMessage('Show host cluster capacity and headroom')}
+                              className="px-2 py-0.5 bg-cyber-950 hover:bg-cyber-800 border border-cyber-800 hover:border-cyan-500/40 rounded-lg text-[10px] text-slate-300 hover:text-cyan-300 transition-colors"
+                            >
+                              Cluster Capacity
+                            </button>
+                          </>
+                        ) : msg.toolData?.type === 'action' ? (
                           <>
                             <button
                               onClick={() => handleSendMessage(`How many pods are in namespace ${msg.toolData.action.namespace}?`)}

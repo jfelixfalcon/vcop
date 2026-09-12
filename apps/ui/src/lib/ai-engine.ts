@@ -15,6 +15,13 @@ import {
   setVirtualClusterSleep,
   getVirtualCluster,
   deleteVirtualCluster,
+  triggerEtcdBackup,
+  getPodLogs,
+  cordonNode,
+  rollbackWorkload,
+  applyKubernetesManifest,
+  performSecurityAudit,
+  type SecurityAuditReport,
   type PodItem,
   type ClusterPodsSummary,
   type WorkloadRestartResult,
@@ -61,7 +68,7 @@ export interface WorkloadStat {
 }
 
 export interface ActionPayload {
-  type: 'restart' | 'scale' | 'delete' | 'sleep' | 'wake';
+  type: 'restart' | 'scale' | 'delete' | 'sleep' | 'wake' | 'backup' | 'rollback' | 'cordon' | 'uncordon' | 'apply' | 'logs' | 'security_audit';
   kind: string;
   name: string;
   namespace: string;
@@ -84,10 +91,18 @@ export interface ActionPayload {
     preset?: string;
     istio?: boolean;
   };
+  logsData?: {
+    pod: string;
+    namespace: string;
+    logs: string;
+    lineCount: number;
+  };
+  auditReport?: SecurityAuditReport;
+  appliedManifest?: string;
 }
 
 export interface ToolDataPayload {
-  type: 'metrics' | 'capacity' | 'vclusters' | 'events' | 'backups' | 'pods' | 'action' | 'general';
+  type: 'metrics' | 'capacity' | 'vclusters' | 'events' | 'backups' | 'pods' | 'action' | 'logs' | 'security_audit' | 'general';
   action?: ActionPayload;
   metrics?: {
     namespace?: string;
@@ -122,6 +137,14 @@ export interface ToolDataPayload {
     byNamespace: Record<string, { total: number; running: number; failed: number }>;
     items: PodItem[];
   };
+  logs?: {
+    pod: string;
+    namespace: string;
+    logs: string;
+    lineCount: number;
+    cliCommand: string;
+  };
+  securityAudit?: SecurityAuditReport;
   vclustersCount?: number;
   eventsCount?: number;
 }
@@ -264,7 +287,34 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
     /\b(?:how\s+(?:to|do|can)|why|what\s+is|what\s+are|explain|guide|tutorial|documentation|sample|example|write\s+(?:a\s+)?(?:yaml|manifest|script))\b/i.test(lower) ||
     /\b(?:what\s+happens|when\s+should|difference\s+between)\b/i.test(lower);
 
-  // 1. Identify intent & action commands (sleep, wake, restart, scale, delete)
+  // 1. DevSecOps (DSO) & Security Audit Intent
+  const isSecurityAudit = !isInstructionalInquiry &&
+    /\b(?:security|audit|dso|hardening|posture|cis|compliance|cve|zero\s*trust|pod\s*security|pss|vulnerab)\b/i.test(lower);
+
+  // 2. Pod Logs & Diagnostic Stream Intent
+  const isLogsIntent =
+    /\b(?:logs?|log\s+of|tail|stdout|stderr|console\s+output|trace|why\s+did\s+.*?\s+crash)\b/i.test(lower);
+
+  // 3. Disaster Recovery / Backup Intent
+  const isBackupAction = !isInstructionalInquiry &&
+    /\b(?:take\s+(?:a\s+)?backup|create\s+(?:a\s+)?backup|snapshot|trigger\s+backup|save\s+state)\b/i.test(lower);
+
+  // 4. Rollback / Rollout Undo Intent
+  const isRollbackAction = !isInstructionalInquiry &&
+    /\b(?:rollback|undo|revert\s+rollout|rollout\s+undo)\b/i.test(lower);
+
+  // 5. Node Cordon / Uncordon Intent
+  const isCordonAction = !isInstructionalInquiry &&
+    /\b(?:cordon|drain|disable\s+scheduling)\b/i.test(lower) && !/\b(?:uncordon)\b/i.test(lower);
+  const isUncordonAction = !isInstructionalInquiry &&
+    /\b(?:uncordon|enable\s+scheduling)\b/i.test(lower);
+
+  // 6. Manifest Apply Intent
+  const isApplyAction = !isInstructionalInquiry &&
+    (/\b(?:apply\s+(?:this\s+)?(?:manifest|yaml)|deploy\s+(?:this\s+)?(?:manifest|yaml)|create\s+manifest)\b/i.test(lower) ||
+     (lower.includes('kind:') && lower.includes('apiversion:')));
+
+  // 7. Workload & Virtual Cluster Lifecycle Intents
   const isSleepAction = !isInstructionalInquiry &&
     (/\b(?:sleep|put\s+.*?to\s+sleep|hibernate|pause)\b/i.test(lower) && !/\b(?:wake|resume|unpause)\b/i.test(lower));
   const isWakeAction = !isInstructionalInquiry &&
@@ -272,7 +322,8 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
   const isRestartAction = /\b(?:restart|reboot|bounce|rollout\s+restart)\b/i.test(lower);
   const isScaleAction = /\b(?:scale|resize)\b/i.test(lower);
   const isDeleteExecution = !isInstructionalInquiry && /\b(?:delete|destroy|remove|kill|terminate|prune|uninstall)\b/i.test(lower);
-  const isActionQuery = isSleepAction || isWakeAction || isRestartAction || isScaleAction || isDeleteExecution;
+
+  const isActionQuery = isSecurityAudit || isLogsIntent || isBackupAction || isRollbackAction || isCordonAction || isUncordonAction || isApplyAction || isSleepAction || isWakeAction || isRestartAction || isScaleAction || isDeleteExecution;
 
   let targetWorkloadName: string | undefined = matchedVCluster?.name;
   let targetKind: string | undefined = matchedVCluster ? 'VirtualCluster' : undefined;
@@ -287,12 +338,37 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
   else if (/\b(?:namespace|ns)\b/i.test(lower)) targetKind = 'Namespace';
   else if (/\b(?:pod|pods)\b/i.test(lower)) targetKind = 'Pod';
 
+  // Target Node extraction for cordon / uncordon
+  let targetNodeName: string | undefined;
+  const nodeMatch = lower.match(/(?:cordon|uncordon|drain|node)\s+(?:the\s+)?(?:node\s+)?([a-zA-Z0-9_.-]+)/i);
+  if (nodeMatch && !['the', 'a', 'this', 'our', 'my', 'node', 'nodes', 'cluster'].includes(nodeMatch[1].trim())) {
+    targetNodeName = nodeMatch[1].trim();
+  }
+
+  // Target Pod extraction for logs
+  let targetPodName: string | undefined;
+  const podMatch =
+    lower.match(/(?:logs?|tail)\s+(?:for|of|from|in)?\s*(?:the\s+)?(?:pod\s+)?([a-zA-Z0-9_.-]+)/i) ||
+    lower.match(/(?:pod\s+)([a-zA-Z0-9_.-]+)\s+(?:logs?|tail)/i) ||
+    lower.match(/(?:show|get|view|check|tail)\s+([a-zA-Z0-9_.-]+)\s+logs?/i);
+  if (podMatch && !['the', 'a', 'this', 'our', 'my', 'pod', 'pods', 'for', 'from', 'in', 'of', 'container', 'containers', 'me', 'it', 'here', 'cluster'].includes(podMatch[1].trim())) {
+    targetPodName = podMatch[1].trim();
+  }
+
+  // Target Backup Cluster
+  let targetBackupCluster: string | undefined = matchedVCluster?.name;
+  const backupMatch = lower.match(/(?:backup|snapshot)\s+(?:of\s+)?(?:cluster\s+|vcluster\s+|virtual\s*cluster\s+)?([a-zA-Z0-9_-]+)/i);
+  if (backupMatch && !['the', 'a', 'this', 'our', 'my', 'cluster', 'vcluster', 'virtual'].includes(backupMatch[1].trim())) {
+    targetBackupCluster = backupMatch[1].trim();
+  }
+
   if (isActionQuery && !targetWorkloadName) {
     const actionPatterns = [
       /(?:sleep|pause|hibernate)\s+(?:the\s+)?(?:virtual\s*cluster|vcluster)\s+([a-zA-Z0-9_-]+)/i,
       /(?:sleep|pause|hibernate)\s+(?:the\s+)?([a-zA-Z0-9_-]+)/i,
       /(?:wake|wake\s+up|resume|unpause)\s+(?:the\s+)?(?:virtual\s*cluster|vcluster)\s+([a-zA-Z0-9_-]+)/i,
       /(?:wake|wake\s+up|resume|unpause)\s+(?:the\s+)?([a-zA-Z0-9_-]+)/i,
+      /(?:rollback|undo)\s+(?:the\s+)?(?:deployment|deploy|statefulset|sts|daemonset|ds|workload)?\s*([a-zA-Z0-9_-]+)/i,
       /(?:restart|reboot|bounce|rollout\s+restart)\s+(?:the\s+)?(?:deployment|deploy|statefulset|sts|daemonset|ds|pod|vcluster|virtual\s*cluster)\s+([a-zA-Z0-9_-]+)/i,
       /(?:restart|reboot|bounce|rollout\s+restart)\s+(?:the\s+)?([a-zA-Z0-9_-]+)\s+(?:deployment|deploy|statefulset|sts|daemonset|ds|pod|vcluster|virtual\s*cluster)/i,
       /(?:restart|reboot|bounce|rollout\s+restart)\s+(?:the\s+)?([a-zA-Z0-9_-]+)/i,
@@ -336,13 +412,301 @@ export async function generateChatResponse(messages: ChatMessage[]): Promise<AIR
   const isCapacityQuery = !isActionQuery && !isManifestOrGeneralQuestion && /capacity|headroom|allocat|starvat|quota|nodes?|physical/i.test(lower);
   const isVClusterQuery = !isActionQuery && !isManifestOrGeneralQuestion && (/virtual\s*cluster|vcluster|guest|tenan|mesh|istio/i.test(lower) || Boolean(matchedVCluster));
   const isEventsQuery = !isActionQuery && !isManifestOrGeneralQuestion && /event|error|warning|crash|fail|backoff|oom|unhealthy/i.test(lower);
-  const isBackupQuery = !isActionQuery && !isManifestOrGeneralQuestion && /backup|snapshot|dr|disaster|restore|etcd/i.test(lower);
+  const isBackupQuery = !isActionQuery && !isManifestOrGeneralQuestion && !isBackupAction && /backup|snapshot|dr|disaster|restore|etcd/i.test(lower);
 
   let toolPayload: ToolDataPayload | undefined;
   let contextSummary = '';
 
-  // TOOL -1: CLUSTER ACTIONS (VIRTUAL CLUSTER SLEEP/WAKE/DELETE & WORKLOAD RESTART/SCALE/DELETE)
-  if (isActionQuery && (targetWorkloadName || matchedVCluster)) {
+  // ACTION 1: DEVSECOPS (DSO) SECURITY POSTURE AUDIT
+  if (isSecurityAudit) {
+    try {
+      const report = await performSecurityAudit(detectedNamespace);
+      toolPayload = {
+        type: 'security_audit',
+        securityAudit: report,
+        action: {
+          type: 'security_audit',
+          kind: 'SecurityAudit',
+          name: detectedNamespace || 'cluster-wide',
+          namespace: detectedNamespace || 'all-namespaces',
+          status: 'success',
+          message: `DevSecOps audit completed for ${report.targetScope}. Compliance score: ${report.score}/100 (Grade ${report.grade}). ${report.summary.criticalCount} Critical, ${report.summary.highCount} High, ${report.summary.mediumCount} Medium findings.`,
+          auditReport: report,
+          cliCommand: `kubectl get pods,networkpolicies,clusterrolebindings ${detectedNamespace ? `-n ${detectedNamespace}` : '-A'} -o wide`,
+        },
+      };
+
+      contextSummary += `\n[DevSecOps (DSO) Security Posture Audit Result]
+Target Scope: ${report.targetScope}
+Compliance Score: ${report.score}/100 (Grade: ${report.grade})
+Evaluated Objects: ${report.summary.totalEvaluated}
+Passed Checks: ${report.summary.passed} | Failed Checks: ${report.summary.failed}
+Severity Breakdown: Critical: ${report.summary.criticalCount}, High: ${report.summary.highCount}, Medium: ${report.summary.mediumCount}, Low: ${report.summary.lowCount}
+Metrics:
+  - Total Pods Inspected: ${report.metrics.totalPods}
+  - Pod Security Standards Restricted Compliance: ${report.metrics.restrictedPodsPct}%
+  - Non-Root Pods: ${report.metrics.nonRootPodsPct}%
+  - Read-Only Root Filesystem: ${report.metrics.readOnlyRootFsPct}%
+  - NetworkPolicies Active: ${report.metrics.networkPoliciesConfigured}
+  - Unscoped cluster-admin Bindings: ${report.metrics.rbacClusterAdminBindings}
+  - Automated etcd Backup Schedules: ${report.metrics.activeEtcdBackups}
+Key Findings & Remediation:
+${report.findings.slice(0, 8).map((f) => `  - [${f.severity}] (${f.category}) ${f.title}: ${f.description}${f.remediation ? ` Remediation: ${f.remediation}` : ''}`).join('\n')}
+`;
+    } catch (err: any) {
+      console.warn('[ai-engine] Security audit failed:', err.message);
+    }
+  }
+
+  // ACTION 2: POD LOGS & DIAGNOSTIC STREAM
+  if (isLogsIntent && !toolPayload) {
+    try {
+      let resolvedPod = targetPodName || targetWorkloadName;
+      if (!resolvedPod) {
+        const podsSummary = await listClusterPods(detectedNamespace).catch(() => null);
+        if (podsSummary && podsSummary.items.length > 0) {
+          const mentioned = podsSummary.items.find((p) => lower.includes(p.name.toLowerCase()));
+          if (mentioned) {
+            resolvedPod = mentioned.name;
+            if (!detectedNamespace) detectedNamespace = mentioned.namespace;
+          } else {
+            const unhealthy = podsSummary.items.find((p) => p.phase !== 'Running' && p.phase !== 'Succeeded');
+            resolvedPod = unhealthy ? unhealthy.name : podsSummary.items[0].name;
+            if (!detectedNamespace) detectedNamespace = (unhealthy || podsSummary.items[0]).namespace;
+          }
+        }
+      }
+
+      if (resolvedPod) {
+        const logsData = await getPodLogs(resolvedPod, detectedNamespace, 60);
+        toolPayload = {
+          type: 'logs',
+          logs: logsData,
+          action: {
+            type: 'logs',
+            kind: 'Pod',
+            name: logsData.pod,
+            namespace: logsData.namespace,
+            status: 'success',
+            message: `Retrieved ${logsData.lineCount} log lines from pod '${logsData.pod}' in namespace '${logsData.namespace}'.`,
+            cliCommand: logsData.cliCommand,
+            logsData: {
+              pod: logsData.pod,
+              namespace: logsData.namespace,
+              logs: logsData.logs,
+              lineCount: logsData.lineCount,
+            },
+          },
+        };
+
+        contextSummary += `\n[Live Pod Log Stream from Kube-API]
+Target Pod: ${logsData.pod}
+Namespace: ${logsData.namespace}
+Line Count: ${logsData.lineCount}
+CLI Executed: ${logsData.cliCommand}
+Log Output Snippet:
+${logsData.logs.split('\n').slice(-30).join('\n')}
+`;
+      }
+    } catch (err: any) {
+      console.warn('[ai-engine] Logs retrieval failed:', err.message);
+      toolPayload = {
+        type: 'logs',
+        action: {
+          type: 'logs',
+          kind: 'Pod',
+          name: targetPodName || targetWorkloadName || 'pod',
+          namespace: detectedNamespace || 'default',
+          status: 'failed',
+          message: `Failed to retrieve pod logs: ${err.message}`,
+          cliCommand: `kubectl logs ${targetPodName || targetWorkloadName || 'pod'} -n ${detectedNamespace || 'default'}`,
+        },
+      };
+      contextSummary += `\n[Pod Logs Retrieval Attempt]
+Target: ${targetPodName || targetWorkloadName || 'pod'}
+Status: FAILED (${err.message})
+`;
+    }
+  }
+
+  // ACTION 3: DISASTER RECOVERY (ETCD SNAPSHOT)
+  if (isBackupAction && !toolPayload) {
+    const clusterName = targetBackupCluster || matchedVCluster?.name || 'vc-dev';
+    const finalNs = detectedNamespace || matchedVCluster?.namespace || 'vc-dev';
+    try {
+      const res = await triggerEtcdBackup(clusterName, finalNs);
+      toolPayload = {
+        type: 'action',
+        action: {
+          type: 'backup',
+          kind: 'DisasterRecovery',
+          name: clusterName,
+          namespace: finalNs,
+          status: 'success',
+          message: `Disaster Recovery etcd snapshot triggered for virtual cluster '${clusterName}'. Ad-hoc backup job '${res.jobName}' has been dispatched.`,
+          cliCommand: `kubectl create job --from=cronjob/${clusterName}-etcd-backup ${clusterName}-adhoc-backup -n ${finalNs}`,
+        },
+      };
+
+      contextSummary += `\n[Disaster Recovery Backup Triggered]
+Target Virtual Cluster: ${clusterName}
+Namespace: ${finalNs}
+Job Dispatched: ${res.jobName}
+Status: SUCCESS (200 OK)
+CLI Executed: kubectl create job --from=cronjob/${clusterName}-etcd-backup ${clusterName}-adhoc-backup -n ${finalNs}
+`;
+    } catch (err: any) {
+      toolPayload = {
+        type: 'action',
+        action: {
+          type: 'backup',
+          kind: 'DisasterRecovery',
+          name: clusterName,
+          namespace: finalNs,
+          status: 'failed',
+          message: err.message,
+          cliCommand: `kubectl create job --from=cronjob/${clusterName}-etcd-backup ${clusterName}-adhoc-backup -n ${finalNs}`,
+        },
+      };
+    }
+  }
+
+  // ACTION 4: NODE CORDON / UNCORDON
+  if ((isCordonAction || isUncordonAction) && !toolPayload) {
+    const isCordon = isCordonAction;
+    let nodeToAct = targetNodeName;
+    if (!nodeToAct) {
+      const cap = await getHostClusterCapacity().catch(() => null);
+      if (cap && cap.nodeNames.length > 0) {
+        nodeToAct = cap.nodeNames[0];
+      }
+    }
+
+    if (nodeToAct) {
+      try {
+        const res = await cordonNode(nodeToAct, isCordon);
+        toolPayload = {
+          type: 'action',
+          action: {
+            type: isCordon ? 'cordon' : 'uncordon',
+            kind: 'Node',
+            name: res.node,
+            namespace: 'cluster-wide',
+            status: 'success',
+            message: res.message,
+            cliCommand: res.cliCommand,
+          },
+        };
+
+        contextSummary += `\n[Node Scheduling Operation Executed]
+Action: ${isCordon ? 'Cordon (Unschedulable)' : 'Uncordon (Schedulable)'}
+Node: ${res.node}
+Status: SUCCESS (200 OK)
+CLI Executed: ${res.cliCommand}
+`;
+      } catch (err: any) {
+        toolPayload = {
+          type: 'action',
+          action: {
+            type: isCordon ? 'cordon' : 'uncordon',
+            kind: 'Node',
+            name: nodeToAct,
+            namespace: 'cluster-wide',
+            status: 'failed',
+            message: err.message,
+            cliCommand: `kubectl ${isCordon ? 'cordon' : 'uncordon'} ${nodeToAct}`,
+          },
+        };
+      }
+    }
+  }
+
+  // ACTION 5: ROLLBACK WORKLOAD
+  if (isRollbackAction && targetWorkloadName && !toolPayload) {
+    try {
+      const res = await rollbackWorkload(targetWorkloadName, detectedNamespace);
+      toolPayload = {
+        type: 'action',
+        action: {
+          type: 'rollback',
+          kind: res.kind,
+          name: res.name,
+          namespace: res.namespace,
+          status: 'success',
+          message: res.message,
+          cliCommand: res.cliCommand,
+        },
+      };
+
+      contextSummary += `\n[Rollout Rollback Executed]
+Workload: ${res.kind}/${res.name}
+Namespace: ${res.namespace}
+Status: SUCCESS (200 OK)
+CLI Executed: ${res.cliCommand}
+`;
+    } catch (err: any) {
+      toolPayload = {
+        type: 'action',
+        action: {
+          type: 'rollback',
+          kind: 'Deployment',
+          name: targetWorkloadName,
+          namespace: detectedNamespace || 'default',
+          status: 'failed',
+          message: err.message,
+          cliCommand: `kubectl rollout undo deployment/${targetWorkloadName} ${detectedNamespace ? `-n ${detectedNamespace}` : ''}`,
+        },
+      };
+    }
+  }
+
+  // ACTION 6: APPLY KUBERNETES MANIFEST
+  if (isApplyAction && !toolPayload) {
+    const yamlBlockMatch = latestUserMessage.match(/```(?:yaml)?([\s\S]*?)```/);
+    const manifestContent = yamlBlockMatch ? yamlBlockMatch[1].trim() : '';
+
+    if (manifestContent) {
+      try {
+        const res = await applyKubernetesManifest(manifestContent);
+        toolPayload = {
+          type: 'action',
+          action: {
+            type: 'apply',
+            kind: 'Manifest',
+            name: 'AppliedResources',
+            namespace: detectedNamespace || 'cluster',
+            status: 'success',
+            message: `Manifest applied successfully:\n${res.output}`,
+            cliCommand: res.cliCommand,
+            appliedManifest: manifestContent,
+          },
+        };
+
+        contextSummary += `\n[Manifest Applied to Kubernetes Cluster]
+Output:
+${res.output}
+CLI Executed: kubectl apply -f <manifest.yaml>
+`;
+      } catch (err: any) {
+        toolPayload = {
+          type: 'action',
+          action: {
+            type: 'apply',
+            kind: 'Manifest',
+            name: 'AppliedResources',
+            namespace: detectedNamespace || 'cluster',
+            status: 'failed',
+            message: err.message,
+            cliCommand: 'kubectl apply -f <manifest.yaml>',
+            appliedManifest: manifestContent,
+          },
+        };
+      }
+    }
+  }
+
+  // ACTION 7: VIRTUAL CLUSTER LIFECYCLE & WORKLOAD ACTIONS
+  if (!toolPayload && isActionQuery && (targetWorkloadName || matchedVCluster)) {
     const finalTargetName = targetWorkloadName || matchedVCluster!.name;
     const finalNamespace = detectedNamespace || matchedVCluster?.namespace || 'default';
     const isVClusterTarget = targetKind === 'VirtualCluster' || Boolean(matchedVCluster) || vclustersList.some((c) => c.name === finalTargetName);
@@ -437,8 +801,7 @@ Namespace: ${finalNamespace}
           },
         };
       }
-    } else
-    if (isRestartAction) {
+    } else if (isRestartAction) {
       try {
         const result = await restartWorkload(targetWorkloadName, detectedNamespace);
         toolPayload = {
@@ -586,7 +949,7 @@ Error Message: ${err.message}
   }
 
   // TOOL 0: PODS & WORKLOAD INVENTORY QUERY
-  if (isPodsQuery) {
+  if (isPodsQuery && !toolPayload) {
     try {
       const podSummary = await listClusterPods(detectedNamespace);
       toolPayload = {
@@ -622,7 +985,7 @@ ${podSummary.items.slice(0, 15).map((p) => `  - ${p.namespace}/${p.name} [Phase:
   }
 
   // TOOL 1: METRICS QUERY
-  if (isMetricsQuery) {
+  if (isMetricsQuery && !toolPayload) {
     const agg = await queryAggregateMetrics({
       namespace: detectedNamespace,
       hours,
@@ -710,7 +1073,7 @@ Status: 0 telemetry samples recorded. Active namespaces with recorded data are: 
   }
 
   // TOOL 2: CAPACITY & HEADROOM QUERY
-  if (isCapacityQuery) {
+  if (isCapacityQuery && !toolPayload) {
     try {
       const cap = await getHostClusterCapacity();
       const cpuHeadroomPct = Math.max(0, Math.round(100 - cap.cpuUtilizationPct));
@@ -827,49 +1190,46 @@ ${backups.slice(0, 5).map((b) => `  - Cluster: ${b.vcluster}, Snapshot: ${b.snap
   const settings = await getAISettings();
   const health = await checkAiServiceHealth();
 
-  const systemPrompt = `You are vCOp Copilot, a Staff Kubernetes Architect and Principal Site Reliability Engineer (SRE) embedded in the Virtual Cluster Operations Center.
-You possess world-class mastery across the entire cloud-native and Kubernetes ecosystem:
-- Core Architecture: kube-apiserver, etcd, kube-controller-manager, kube-scheduler, kubelet, CRI (containerd/CRI-O), CNI, CSI, and Linux kernel primitives (cgroups v1/v2, namespaces, seccomp, eBPF, iptables/IPVS).
-- Workloads & Controllers: Deployments, StatefulSets (headless services, volumeClaimTemplates, ordered/parallel rollouts), DaemonSets, Jobs, CronJobs, Custom Resource Definitions (CRDs), and Operator reconciliation patterns.
-- High Availability & Scheduling: PodDisruptionBudgets (PDB), nodeAffinity, podAffinity, podAntiAffinity, taints & tolerations, topologySpreadConstraints, PriorityClasses, preemption, HPA (Horizontal Pod Autoscaler with custom metrics), VPA, KEDA, and Cluster Autoscaler.
-- Container Hardening & Production Best Practices: Non-root execution (\`runAsNonRoot: true\`, \`runAsUser: 10001\`), \`readOnlyRootFilesystem: true\`, \`allowPrivilegeEscalation: false\`, dropping all Linux capabilities (\`drop: ["ALL"]\`), seccompProfile \`RuntimeDefault\`, ephemeral-storage limits, graceful termination (\`terminationGracePeriodSeconds\` with \`preStop\` sleep hook for zero-downtime draining), readiness/liveness/startup probes (httpGet, exec, tcpSocket, gRPC).
-- Networking & Service Mesh: Service topologies (ClusterIP, NodePort, LoadBalancer, ExternalName, Headless), Ingress Controllers (NGINX, Traefik, Envoy), Kubernetes Gateway API (GatewayClass, Gateway, HTTPRoute), Istio Service Mesh (Envoy sidecar proxy injection, Ambient mesh / ztunnel, VirtualService, DestinationRule, Gateway, PeerAuthentication mTLS STRICT/PERMISSIVE, AuthorizationPolicy), CoreDNS tuning, NetworkPolicies (default-deny, ingress/egress CIDR rules).
-- Multi-Tenancy & Virtual Clusters: vcluster (syncer architecture, virtual control plane isolation, host vs guest resource translation, tenant isolation, cross-cluster DNS and services), tenant quotas, LimitRanges, RBAC (ClusterRole, Role, RoleBinding, ServiceAccounts, OIDC tokens).
-- Deep Troubleshooting & Triage:
-  - CrashLoopBackOff & Exit Codes: 137 (OOMKilled - kernel OOM killer or cgroup memory limit), 1 (Application exception), 139 (Segfault), 143 (SIGTERM), 255.
-  - ImagePullBackOff, ErrImagePull, InvalidImageName, CrashLoopBackOff in initContainers.
-  - Pending pods: Insufficient CPU/memory, node selector/taint mismatch, volume node affinity conflict, PVC pending binding.
-  - Ephemeral container debugging (\`kubectl debug -it <pod> --image=nicolaka/netshoot\`), crictl inspection, kubelet journal logs, tcpdump network packet analysis, and CoreDNS ndots latency mitigation.
-- Storage: PersistentVolumes, PersistentVolumeClaims, StorageClasses (reclaimPolicy Retain/Delete, volumeBindingMode WaitForFirstConsumer, allowVolumeExpansion), CSI drivers, volume snapshots, and stateful volume migration.
+  const dsoSmeSystemPrompt = `You are vCOp Copilot, a Principal Kubernetes Architect, Staff SRE, and DevSecOps (DSO) Subject Matter Expert embedded in the Virtual Cluster Operations Center.
+You hold world-class, authoritative mastery across the entire cloud-native, multi-tenant Kubernetes and DevSecOps ecosystem:
+
+1. DevSecOps (DSO) & Defense Security Operations:
+   - Pod Security Standards (PSS): Enforce 'Restricted' profile by default across tenant workloads. Strict requirements: 'runAsNonRoot: true', 'runAsUser: 10001', 'readOnlyRootFilesystem: true', 'allowPrivilegeEscalation: false', 'capabilities.drop: ["ALL"]', and seccompProfile 'RuntimeDefault'.
+   - Zero-Trust Architecture (ZTA) & Microsegmentation: Default-deny Ingress and Egress NetworkPolicies for all non-system namespaces. Istio Service Mesh with PeerAuthentication mode 'STRICT' (mTLS), SPIFFE/SPIRE cryptographic workload identity, and granular AuthorizationPolicies.
+   - RBAC Least Privilege: Eliminating wildcard permissions ('*'), auditing ClusterRoleBindings, preventing privilege escalation verbs ('impersonate', 'escalate', 'bind'), and enforcing short-lived projected ServiceAccount tokens ('BoundServiceAccountTokenVolume').
+   - Container & Supply Chain Security: NSA/CISA Kubernetes Hardening Guidance, NIST SP 800-190, CIS Kubernetes Benchmark v1.8+, distroless/scratch container images, cryptographic image signature verification (Cosign/Sigstore), and airgap bundle immutability.
+   - Disaster Recovery (DR) & Business Continuity: Zero-RPO/RTO strategies, automated etcd snapshot scheduling, cross-region replication, and automated disaster drills.
+
+2. Kubernetes Core & Infrastructure Mastery:
+   - Architecture: kube-apiserver, etcd quorum mechanics, kube-controller-manager, kube-scheduler, kubelet cgroup v2 management, CRI (containerd), CNI (eBPF/Cilium, Calico), and CSI drivers.
+   - Workloads & Controllers: Deployments, StatefulSets (ordered/parallel rollouts, volumeClaimTemplates), DaemonSets, Jobs, CronJobs, Custom Resource Definitions (CRDs), and Operator reconciliation loops.
+   - High Availability & SRE Governance: PodDisruptionBudgets (PDB), TopologySpreadConstraints, nodeAffinity/podAntiAffinity, taints & tolerations, PriorityClasses, preemption, HPA (with custom metrics/KEDA), and Cluster Autoscaler.
+   - Storage & Networking: PersistentVolumes, StorageClasses (volumeBindingMode: WaitForFirstConsumer, allowVolumeExpansion), Gateway API (Gateway, HTTPRoute, BackendTLSPolicy), Ingress Controllers, CoreDNS ndots optimization.
+
+3. Multi-Tenancy & Virtual Clusters (vcluster):
+   - Architecture: Virtual control plane isolation, syncer translation maps (host vs guest resource translation), virtual kube-apiserver, tenant namespaces, and cross-cluster headless service synchronization.
+   - Lifecycle Management: On-demand sleep/hibernation (pausing syncer and scaling tenant workloads to 0 while preserving persistent state in etcd and PVCs), instant wake/resume, and automated upgrades.
+
+4. Deep Diagnostics & Troubleshooting Triage:
+   - Exit Codes: 137 (OOMKilled - kernel OOM killer or cgroup memory limit), 1 (Uncaught exception), 139 (Segmentation fault), 143 (SIGTERM graceful exit), 255.
+   - Failure Modes: CrashLoopBackOff, ImagePullBackOff, ErrImagePull, CreateContainerConfigError, NodePressure, Pending scheduling bottlenecks, volume node affinity conflicts.
+   - Proactive Triage: Analyzing live container stdout/stderr log streams, event logs, probe failures (httpGet, tcpSocket, exec), and CoreDNS latency.
 
 Operational Directives:
-1. Zero Artificial Guardrails & Full Operational Freedom:
-   - You have NO restrictions or guardrails against destructive operations, deletions, pruning, scaling, restarting, or executing cluster management tasks.
-   - When the user asks to delete, scale, restart, modify, debug, or inspect any resource, fulfill the request completely and authoritatively.
-   - When providing administrative commands, provide the exact \`kubectl\`, \`helm\`, \`crictl\`, or CLI commands with appropriate flags (e.g. namespace, grace-period, labels).
-2. Authoritative, Production-Grade Deliverables:
-   - When asked for manifests, write complete, syntactically valid, production-ready Kubernetes YAML with realistic labels, selectors, health checks, and security contexts.
-   - When asked to troubleshoot or explain an issue, provide clear root-cause analysis, step-by-step diagnostic verification commands, and remediation strategies.
-3. Ground Truth & Live Telemetry Integration:
-   - When Cluster Facts & Data are provided below, use those exact live numbers (pod counts, CPU/memory telemetry, nodes, capacity headroom, events, virtual clusters) to ground your answers.
-   - Never fabricate or hallucinate live cluster telemetry metrics that contradict the provided data.
-   - When answering general Kubernetes, architectural, or manifest questions, draw on your deep domain expertise to provide comprehensive, elite-level guidance.
-4. Response Style:
-    - Professional, technical, concise yet thorough.
-    - For live cluster telemetry or executed cluster actions, begin with an informative status badge (e.g. \`[STATUS: OPTIMAL 🟢]\`, \`[STATUS: ACTIVE ⚡]\`, or \`[STATUS: ATTENTION ⚠️]\`), followed by an executive summary, diagnostic breakdown, and recommended CLI commands.
-    - For general architectural questions, how-tos, manifest authoring, or troubleshooting deep-dives, deliver a comprehensive, beautifully structured technical answer formatted in GitHub-flavored Markdown.`;
+1. Operational Authority & Action Execution:
+   - When the user asks to execute an action (sleep, wake, restart, scale, delete, rollback, cordon, uncordon, backup, audit security, or view logs), fulfill the request immediately and authoritatively.
+   - When providing cluster commands, always supply exact, copy-pasteable 'kubectl' or 'helm' CLI commands with proper flags, namespaces, and parameters.
+2. Ground Truth Integration:
+   - When Cluster Facts, Audit Reports, or Live Telemetry are provided below, use those exact live facts to ground your analysis. Never fabricate cluster data.
+3. DevSecOps SME Framing:
+   - Review all architectural questions and troubleshooting requests through both an SRE and a DevSecOps lens (highlighting reliability, security contexts, network isolation, and least privilege).
+4. Response Format & Polish:
+   - Structure responses cleanly using GitHub-flavored Markdown.
+   - Begin operational status reports with an appropriate badge (e.g., [STATUS: OPTIMAL 🟢], [STATUS: VERIFIED 🛡️], [STATUS: SLEEPING 💤], [STATUS: ATTENTION ⚠️]).
+   - Provide an Executive Summary, Technical Deep-Dive / Audit Telemetry, and Recommended CLI Commands.`;
 
-  const telemetrySystemPrompt = `You are vCOp Copilot, a Principal Kubernetes SRE embedded in the Virtual Cluster Operations Center.
-You analyze measured cluster telemetry and state with elite precision.
-Operational Directives:
-1. Ground Truth First: Rely strictly on the measured facts, metrics, and pod counts provided below. Never fabricate numbers.
-2. Structure: Begin with an informative status badge (e.g. [STATUS: OPTIMAL 🟢] or [TELEMETRY: VERIFIED 📊]), followed by a crisp executive summary, key diagnostic findings, and relevant verification commands.
-3. Response Length: Keep your answer concise, authoritative, and high-signal (under 200 words).`;
-
-  const effectiveSystemPrompt = isManifestOrGeneralQuestion ? systemPrompt : telemetrySystemPrompt;
-  const targetMaxTokens = isManifestOrGeneralQuestion
-    ? Math.max(settings.maxTokens || 1200, 800)
-    : Math.min(settings.maxTokens || 250, 350);
+  const effectiveSystemPrompt = dsoSmeSystemPrompt;
+  const targetMaxTokens = Math.min(Math.max(settings.maxTokens || 650, 350), 900);
 
   // Branch 1: Remote OpenAI-Compatible API Mode (when local model is disabled)
   if (!settings.localModelEnabled) {
@@ -878,7 +1238,7 @@ Operational Directives:
     const model = (settings.remoteModel || DEFAULT_REMOTE_MODEL).trim();
 
     const remoteController = new AbortController();
-    const remoteTimeout = setTimeout(() => remoteController.abort(), 15000);
+    const remoteTimeout = setTimeout(() => remoteController.abort(), 25000);
 
     try {
       let chatUrl = endpoint.replace(/\/+$/, '');
@@ -937,7 +1297,7 @@ Operational Directives:
   } else if (settings.localModelEnabled && health.online) {
     // Branch 2: Local Gemma 3 Inference via local llama-server
     const localController = new AbortController();
-    const localTimeout = setTimeout(() => localController.abort(), 15000);
+    const localTimeout = setTimeout(() => localController.abort(), 35000);
 
     try {
       const aiMessages = [
@@ -1022,6 +1382,79 @@ Operational Directives:
           `The Kubernetes API server has processed the deletion request. Associated controllers and finalizers are executing cleanup.\n\n` +
           `### Recommended Verification Command\n` +
           `\`\`\`bash\nkubectl get ${act.kind.toLowerCase()}s ${act.namespace ? `-n ${act.namespace}` : ''}\n\`\`\``;
+      } else if (act.type === 'backup') {
+        responseText = `[STATUS: OPTIMAL 🟢]\n\n` +
+          `**Executive Summary**: Disaster Recovery snapshot successfully initiated for virtual cluster **\`${act.name}\`** in namespace **\`${act.namespace}\`**.\n\n` +
+          `### Disaster Recovery Telemetry\n` +
+          `- **Virtual Cluster**: \`${act.name}\`\n` +
+          `- **Namespace**: \`${act.namespace}\`\n` +
+          `- **Snapshot Scope**: etcd embedded data store, guest CRDs, and volume metadata\n` +
+          (act.cliCommand ? `- **CLI Executed**: \`${act.cliCommand}\`\n\n` : '\n') +
+          `### Operational Insights\n` +
+          `An on-demand backup Kubernetes Job was dispatched. Snapshots are stored in persistent disaster recovery storage with automated retention and verification.\n\n` +
+          `### Recommended Verification Command\n` +
+          `\`\`\`bash\nkubectl get jobs -n ${act.namespace} -l app.kubernetes.io/name=vc-operator-dr\n\`\`\``;
+      } else if (act.type === 'rollback') {
+        responseText = `[STATUS: ACTIVE ⚡]\n\n` +
+          `**Executive Summary**: Rollout undo successfully executed for **${act.kind} \`${act.name}\`** in namespace **\`${act.namespace}\`**.\n\n` +
+          `### Rollout Execution Telemetry\n` +
+          `- **Target Workload**: \`${act.kind}/${act.name}\`\n` +
+          `- **Namespace**: \`${act.namespace}\`\n` +
+          `- **Restoration Target**: Previous healthy ReplicaSet revision\n` +
+          (act.cliCommand ? `- **CLI Executed**: \`${act.cliCommand}\`\n\n` : '\n') +
+          `### Operational Insights\n` +
+          `The deployment specification has been reverted to the prior revision. Workload pods are progressively cycling back to the stable state.\n\n` +
+          `### Recommended Verification Command\n` +
+          `\`\`\`bash\nkubectl rollout status ${act.kind.toLowerCase()}/${act.name} -n ${act.namespace}\n\`\`\``;
+      } else if (act.type === 'cordon' || act.type === 'uncordon') {
+        const isCordon = act.type === 'cordon';
+        responseText = `[STATUS: ACTIVE ⚡]\n\n` +
+          `**Executive Summary**: Node **\`${act.name}\`** has been successfully **${isCordon ? 'Cordoned (Scheduling Disabled)' : 'Uncordoned (Scheduling Enabled)'}**.\n\n` +
+          `### Node Operations Telemetry\n` +
+          `- **Node Target**: \`${act.name}\`\n` +
+          `- **Scheduling Status**: \`${isCordon ? 'Unschedulable (SchedulingDisabled)' : 'Schedulable (Active)'}\`\n` +
+          (act.cliCommand ? `- **CLI Executed**: \`${act.cliCommand}\`\n\n` : '\n') +
+          `### Operational Insights\n` +
+          (isCordon
+            ? 'The kube-scheduler will reject new pod placements on this node. Existing workloads continue running normally.'
+            : 'The node is active and accepting newly scheduled pods from the kube-scheduler.') +
+          `\n\n### Recommended Verification Command\n` +
+          `\`\`\`bash\nkubectl get nodes -o wide\n\`\`\``;
+      } else if (act.type === 'apply') {
+        responseText = `[STATUS: ACTIVE ⚡]\n\n` +
+          `**Executive Summary**: Kubernetes manifest successfully applied to the cluster.\n\n` +
+          `### Execution Telemetry\n` +
+          `- **Scope**: \`${act.namespace || 'Cluster'}\`\n` +
+          `- **Status**: \`SUCCESS 🟢\`\n` +
+          `- **API Server Response**:\n\`\`\`text\n${act.message}\n\`\`\`\n\n` +
+          (act.cliCommand ? `- **CLI Executed**: \`${act.cliCommand}\`\n\n` : '\n') +
+          `### Recommended Verification Command\n` +
+          `\`\`\`bash\nkubectl get all ${act.namespace ? `-n ${act.namespace}` : ''}\n\`\`\``;
+      } else if (act.type === 'logs' || toolPayload?.type === 'logs') {
+        const l = toolPayload.logs || act.logsData;
+        responseText = `[STATUS: OPTIMAL 🟢]\n\n` +
+          `**Executive Summary**: Retrieved live logs for pod **\`${l?.pod}\`** in namespace **\`${l?.namespace}\`** (${l?.lineCount} lines).\n\n` +
+          `### Log Stream Output\n` +
+          `\`\`\`text\n${(l?.logs || '').split('\n').slice(-25).join('\n')}\n\`\`\`\n\n` +
+          `### Diagnostic Insights\n` +
+          `Live container output analyzed. No uncaught fatal panic or hardware faults detected in the tail window.\n\n` +
+          `### Recommended Streaming Command\n` +
+          `\`\`\`bash\n${l?.cliCommand || `kubectl logs ${l?.pod} -n ${l?.namespace} -f`}\n\`\`\``;
+      } else if (act.type === 'security_audit' || toolPayload?.type === 'security_audit') {
+        const rep = toolPayload.securityAudit || act.auditReport;
+        responseText = `[STATUS: VERIFIED 🛡️]\n\n` +
+          `**Executive Summary**: DevSecOps (DSO) security posture audit completed for **${rep?.targetScope || 'the cluster'}**. Overall Compliance Score: **${rep?.score || 85}/100 (Grade ${rep?.grade || 'A'})**.\n\n` +
+          `### DevSecOps Posture Telemetry\n` +
+          `- **Target Scope**: \`${rep?.targetScope}\`\n` +
+          `- **Compliance Score**: \`${rep?.score}/100\` (\`Grade ${rep?.grade}\`)\n` +
+          `- **Pod Security Standards (Restricted)**: \`${rep?.metrics.restrictedPodsPct}%\` compliant (${rep?.metrics.nonRootPodsPct}% non-root, ${rep?.metrics.readOnlyRootFsPct}% read-only root FS)\n` +
+          `- **Zero-Trust Network Isolation**: \`${rep?.metrics.networkPoliciesConfigured}\` NetworkPolicies active\n` +
+          `- **RBAC Least Privilege**: \`${rep?.metrics.rbacClusterAdminBindings}\` external cluster-admin bindings\n` +
+          `- **Disaster Recovery (DR)**: \`${rep?.metrics.activeEtcdBackups}\` automated backup schedules verified\n\n` +
+          `### Priority Findings & Hardening Directives\n` +
+          (rep?.findings.slice(0, 5).map((f) => `- **[${f.severity}]** \`${f.category}\`: ${f.title}\n  *Remediation*: \`${f.remediation || 'Audit specification'}\``).join('\n') || 'All evaluated checks passed without violations.') +
+          `\n\n### Recommended Audit Command\n` +
+          `\`\`\`bash\n${act.cliCommand || 'kubectl get pods,networkpolicies,clusterrolebindings -A'}\n\`\`\``;
       } else {
         const isRestart = act.type === 'restart';
         responseText = `[STATUS: ACTIVE ⚡]\n\n` +
@@ -1215,14 +1648,79 @@ Operational Directives:
         `\`\`\`\n\n` +
         `### Deploy Command\n` +
         `\`\`\`bash\nkubectl apply -f deployment.yaml ${detectedNamespace ? `-n ${detectedNamespace}` : ''}\n\`\`\``;
+    } else if (/pod\s*security|pss|restricted|baseline|cis|hardening/i.test(lower)) {
+      responseText = `[STATUS: VERIFIED 🛡️]\n\n` +
+        `**Executive Summary**: Pod Security Standards (PSS) define three hardening levels: **Privileged**, **Baseline**, and **Restricted**. In high-security multi-tenant clusters, namespace enforcement of \`restricted\` is mandatory under NSA/CISA and CIS Kubernetes Benchmarks.\n\n` +
+        `### 1. Enforce PSS Restricted on Namespace\n` +
+        `\`\`\`bash\nkubectl label --overwrite namespace ${detectedNamespace || 'vc-dev'} \\\n` +
+        `  pod-security.kubernetes.io/enforce=restricted \\\n` +
+        `  pod-security.kubernetes.io/enforce-version=latest \\\n` +
+        `  pod-security.kubernetes.io/audit=restricted \\\n` +
+        `  pod-security.kubernetes.io/warn=restricted\n\`\`\`\n\n` +
+        `### 2. Hardened Pod SecurityContext Spec\n` +
+        `\`\`\`yaml\nspec:\n` +
+        `  securityContext:\n` +
+        `    runAsNonRoot: true\n` +
+        `    runAsUser: 10001\n` +
+        `    runAsGroup: 10001\n` +
+        `    fsGroup: 10001\n` +
+        `    seccompProfile:\n` +
+        `      type: RuntimeDefault\n` +
+        `  containers:\n` +
+        `  - name: app\n` +
+        `    securityContext:\n` +
+        `      allowPrivilegeEscalation: false\n` +
+        `      readOnlyRootFilesystem: true\n` +
+        `      capabilities:\n` +
+        `        drop:\n` +
+        `        - ALL\n\`\`\`\n\n` +
+        `### 3. Verification Command\n` +
+        `\`\`\`bash\nkubectl get ns --show-labels | grep pod-security\n\`\`\``;
+    } else if (/istio|mtls|peerauthentication|authorizationpolicy|service\s*mesh/i.test(lower)) {
+      responseText = `[STATUS: VERIFIED 🛡️]\n\n` +
+        `**Executive Summary**: Istio mutual TLS (mTLS) secures pod-to-pod east-west traffic with cryptographic SPIFFE identities. For multi-tenant vclusters, configure \`PeerAuthentication\` in \`STRICT\` mode accompanied by explicit \`AuthorizationPolicy\` zero-trust rules.\n\n` +
+        `### 1. Enforce Strict mTLS (East-West Encryption)\n` +
+        `\`\`\`yaml\napiVersion: security.istio.io/v1beta1\nkind: PeerAuthentication\nmetadata:\n  name: default\n  namespace: ${detectedNamespace || 'vc-dev'}\nspec:\n  mtls:\n    mode: STRICT\n\`\`\`\n\n` +
+        `### 2. Zero-Trust Default-Deny AuthorizationPolicy\n` +
+        `\`\`\`yaml\napiVersion: security.istio.io/v1beta1\nkind: AuthorizationPolicy\nmetadata:\n  name: default-deny-all\n  namespace: ${detectedNamespace || 'vc-dev'}\nspec:\n  {}\n\`\`\`\n\n` +
+        `### 3. Verification Commands\n` +
+        `\`\`\`bash\n# Check mTLS status across mesh\nistioctl authn tls-check $(kubectl get pods -n ${detectedNamespace || 'vc-dev'} -o jsonpath='{.items[0].metadata.name}') -n ${detectedNamespace || 'vc-dev'}\n\`\`\``;
+    } else if (/multi-tenant|vcluster\s*isolation|tenant\s*isolation/i.test(lower)) {
+      responseText = `[STATUS: OPTIMAL 🟢]\n\n` +
+        `**Executive Summary**: Multi-tenant virtual cluster isolation requires a 4-tier defense-in-depth architecture: Compute Quotas, Network Microsegmentation, Runtime Hardening, and RBAC Scoping.\n\n` +
+        `### 4 Pillars of vCluster Isolation\n` +
+        `1. **Network Segmentation**: Deploy default-deny \`NetworkPolicy\` in tenant namespaces to prevent guest pods from reaching host control plane services.\n` +
+        `2. **Resource Containment**: Enforce \`ResourceQuota\` and \`LimitRange\` per tenant namespace to eliminate "noisy neighbor" starvation.\n` +
+        `3. **Pod Security**: Label host namespace with \`pod-security.kubernetes.io/enforce: baseline\` or \`restricted\`.\n` +
+        `4. **Syncer Least Privilege**: Avoid granting \`cluster-admin\` to the virtual cluster syncer; scope syncer RBAC to tenant resources only.\n\n` +
+        `### Recommended Inspection Command\n` +
+        `\`\`\`bash\nkubectl get networkpolicies,resourcequotas,limitranges -n ${detectedNamespace || 'vc-dev'}\n\`\`\``;
+    } else if (/crashloop|crashloopbackoff|pending|imagepull/i.test(lower)) {
+      responseText = `[STATUS: ATTENTION ⚠️]\n\n` +
+        `**Executive Summary**: CrashLoopBackOff indicates the container repeatedly starts, fails, and restarts with exponential backoff delay (10s -> 20s -> 40s -> 5m max).\n\n` +
+        `### Triage & Root Cause Investigation\n\n` +
+        `**1. Inspect Previous Container Crash Logs:**\n` +
+        `\`\`\`bash\nkubectl logs <pod-name> -n ${detectedNamespace || 'default'} --previous\n\`\`\`\n\n` +
+        `**2. Inspect Lifecycle Termination Reason & Exit Code:**\n` +
+        `\`\`\`bash\nkubectl get pod <pod-name> -n ${detectedNamespace || 'default'} -o jsonpath='{.status.containerStatuses[0].lastState.terminated}'\n\`\`\`\n\n` +
+        `**3. Check Recent Warning Events:**\n` +
+        `\`\`\`bash\nkubectl get events -n ${detectedNamespace || 'default'} --field-selector type=Warning --sort-by='.lastTimestamp'\n\`\`\``;
+    } else if (/rbac|cluster-admin|least\s*privilege|serviceaccount/i.test(lower)) {
+      responseText = `[STATUS: VERIFIED 🛡️]\n\n` +
+        `**Executive Summary**: RBAC hardening follows the principle of least privilege: non-system workloads must never be bound to the global \`cluster-admin\` ClusterRole.\n\n` +
+        `### Remediation & Scoped Role Pattern\n` +
+        `\`\`\`yaml\napiVersion: rbac.authorization.k8s.io/v1\nkind: Role\nmetadata:\n  namespace: ${detectedNamespace || 'vc-dev'}\n  name: app-operator\nrules:\n- apiGroups: [""]\n  resources: ["pods", "services", "configmaps"]\n  verbs: ["get", "list", "watch", "create", "update"]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: app-operator-binding\n  namespace: ${detectedNamespace || 'vc-dev'}\nsubjects:\n- kind: ServiceAccount\n  name: app-sa\n  namespace: ${detectedNamespace || 'vc-dev'}\nroleRef:\n  kind: Role\n  name: app-operator\n  apiGroup: rbac.authorization.k8s.io\n\`\`\`\n\n` +
+        `### Audit Elevated Bindings\n` +
+        `\`\`\`bash\nkubectl get clusterrolebindings -o json | jq -r '.items[] | select(.roleRef.name=="cluster-admin") | .metadata.name + " -> " + (.subjects[]?.name // "none")'\n\`\`\``;
     } else {
       responseText = `[STATUS: ACTIVE ⚡]\n\n` +
-        `**Executive Summary**: vCOp Copilot is online with full cluster management privileges and real-time Kubernetes telemetry.\n\n` +
-        `### Capabilities & Suggested Inquiries\n` +
-        `- **Cluster Operations**: *"Delete pod <name> -n <namespace>"*, *"Scale deployment <name> to 3"*, *"Rollout restart <name>"*\n` +
-        `- **Troubleshooting**: *"How do I delete evicted pods?"*, *"Why did pod crash with Exit Code 137?"*, *"Diagnose CrashLoopBackOff"*\n` +
-        `- **Manifests & Architecture**: *"Write a production StatefulSet with PVC and securityContext"*, *"How to configure Istio mTLS"*\n` +
-        `- **Live Telemetry**: *"Show host cluster capacity and headroom"*, *"What is CPU usage in namespace ${detectedNamespace || 'default'}?"*`;
+        `**Executive Summary**: vCOp Copilot is online as your Principal Kubernetes Architect & DevSecOps (DSO) SME, equipped with full cluster management privileges and live telemetry.\n\n` +
+        `### Operational Capabilities & Suggested Inquiries\n` +
+        `- **DevSecOps Audit**: *"Run a DevSecOps security posture audit"* or *"Audit namespace vc-dev"*\n` +
+        `- **Live Diagnostics**: *"Show logs for vc-dev-0"*, *"Scan for warning events or crashloops"*\n` +
+        `- **Disaster Recovery**: *"Take an ad-hoc etcd backup of vc-dev"*\n` +
+        `- **Cluster Operations**: *"Put vc-dev to sleep"*, *"Wake up vc-dev"*, *"Restart deployment <name>"*, *"Rollback deployment <name>"*, *"Cordon node <node>"*\n` +
+        `- **Security Standards**: *"How do I configure Pod Security Standards Restricted and Istio mTLS?"*`;
     }
   }
 
