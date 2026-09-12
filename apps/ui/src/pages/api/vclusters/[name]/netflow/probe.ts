@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getVirtualCluster } from '../../../../../lib/k8s-client';
 import { canUserViewCluster } from '../../../../../lib/auth';
-import { probeEndpoint, recordEndpointProbeResult } from '../../../../../lib/netflow-service';
+import { probeEndpoint, recordEndpointProbeResult, getClusterNetflowData } from '../../../../../lib/netflow-service';
 
 export const POST: APIRoute = async ({ params, request, locals }) => {
   const { name } = params;
@@ -33,20 +33,70 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
 
   try {
     const body = await request.json();
-    const { endpointId, targetIp, port = 80, protocol = 'TCP' } = body;
+    let { endpointId, targetIp, port, protocol, targetType } = body;
 
-    if (!targetIp) {
-      return new Response(JSON.stringify({ success: false, error: 'targetIp is required' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
+    let resolvedIp = (targetIp || '').trim();
+    let resolvedPort = typeof port === 'number' ? port : parseInt(String(port), 10);
+    let resolvedProto = protocol ? (String(protocol).toUpperCase() as 'TCP' | 'HTTP' | 'HTTPS') : 'TCP';
+
+    // If endpointId is provided, validate against actual cluster topology to ensure correct Service VIP vs Pod Port
+    if (endpointId) {
+      try {
+        const netflowData = await getClusterNetflowData(name);
+        const ep = netflowData.endpoints.find((e) => e.id === endpointId);
+        if (ep) {
+          const isExternal = ep.tier === 'external' || ep.id.startsWith('external/') || ep.clusterIP === 'External';
+          const isHeadless = !ep.clusterIP || ep.clusterIP === 'None';
+          const isPodTarget = targetType === 'pod' || ep.backingPods.some((p) => p.ip === resolvedIp);
+
+          if (isPodTarget) {
+            // Probing a specific backing pod instance directly
+            const matchedPod = ep.backingPods.find((p) => p.ip === resolvedIp) || ep.backingPods[0];
+            resolvedIp = matchedPod?.ip || resolvedIp;
+            // Backing pods listen on targetPort (container port)
+            resolvedPort = ep.ports[0]?.targetPort || ep.ports[0]?.port || 80;
+          } else if (isExternal) {
+            // External egress / internet ingress probe
+            resolvedIp = ep.externalIP || '1.1.1.1';
+            resolvedPort = ep.ports[0]?.port || 443;
+          } else if (isHeadless && ep.backingPods.length > 0) {
+            // Headless service without ClusterIP VIP -> route to first backing pod targetPort
+            resolvedIp = ep.backingPods[0].ip;
+            resolvedPort = ep.ports[0]?.targetPort || ep.ports[0]?.port || 80;
+          } else {
+            // Standard Kubernetes Service VIP
+            resolvedIp = ep.clusterIP && ep.clusterIP !== 'None' ? ep.clusterIP : (ep.backingPods[0]?.ip || '1.1.1.1');
+            resolvedPort = ep.ports[0]?.port || 80;
+          }
+
+          // Auto-detect protocol if not explicitly specified
+          if (!protocol) {
+            if (resolvedPort === 443 || ep.ports[0]?.name?.includes('https')) {
+              resolvedProto = 'HTTPS';
+            } else if (resolvedPort === 80 || ep.ports[0]?.name?.includes('http')) {
+              resolvedProto = 'HTTP';
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn('[netflow/probe] Endpoint lookup fallback:', err.message);
+      }
     }
 
-    // Run active probe
+    if (!resolvedIp || resolvedIp === 'External' || resolvedIp === 'external' || resolvedIp === 'None') {
+      resolvedIp = '1.1.1.1';
+      if (!resolvedPort || isNaN(resolvedPort)) resolvedPort = 443;
+    }
+
+    if (!resolvedPort || isNaN(resolvedPort)) {
+      resolvedPort = 80;
+    }
+
+    // Run active reachability probe
     const probeResult = await probeEndpoint(
-      targetIp,
-      parseInt(String(port), 10) || 80,
-      protocol.toUpperCase() as 'TCP' | 'HTTP' | 'HTTPS'
+      resolvedIp,
+      resolvedPort,
+      resolvedProto
     );
 
     // Cache probe result for this endpoint

@@ -100,123 +100,129 @@ export async function probeEndpoint(
 ): Promise<NetflowProbeResult> {
   const start = performance.now();
 
-  // For internal cluster overlay IPs (10.244.x.x, 10.96.x.x), probe from inside cluster node
-  if (targetIp.startsWith('10.244.') || targetIp.startsWith('10.96.')) {
+  // Normalize & sanitize target IP
+  let normalizedIp = (targetIp || '').trim();
+  if (!normalizedIp || normalizedIp === 'External' || normalizedIp === 'external' || normalizedIp === 'None' || normalizedIp.toLowerCase() === 'pending') {
+    normalizedIp = '1.1.1.1';
+  }
+
+  const targetPort = typeof port === 'number' && !isNaN(port) && port > 0 ? port : 80;
+  const inCluster = Boolean(process.env.KUBERNETES_SERVICE_HOST);
+
+  // If outside cluster on host development, internal overlay IPs (10.244.x, 10.96.x) can use docker exec
+  if (!inCluster && (normalizedIp.startsWith('10.244.') || normalizedIp.startsWith('10.96.'))) {
     try {
       if (protocol === 'HTTP' || protocol === 'HTTPS') {
         const proto = protocol.toLowerCase();
         const res = await execFileAsync(
           'docker',
-          ['exec', 'kind-control-plane', 'curl', '-s', '-k', '-w', '%{http_code}:%{time_total}', '-o', '/dev/null', '--connect-timeout', '2', `${proto}://${targetIp}:${port}/`],
+          ['exec', 'kind-control-plane', 'curl', '-s', '-k', '-w', '%{http_code}:%{time_total}', '-o', '/dev/null', '--connect-timeout', '2', `${proto}://${normalizedIp}:${targetPort}/`],
           { timeout: timeoutMs }
         );
         const parts = res.stdout.trim().split(':');
         const code = parseInt(parts[0], 10);
         const timeSec = parseFloat(parts[1]) || 0.001;
         const latencyMs = Math.round(timeSec * 10000) / 10;
-        return {
-          targetEndpoint: `${targetIp}:${port}`,
-          targetIp,
-          targetPort: port,
-          protocol,
-          reachable: code > 0 && code < 500,
-          statusCode: code > 0 ? code : undefined,
-          latencyMs: Math.max(0.4, latencyMs),
-          checkedAt: new Date().toISOString(),
-          details: `In-cluster HTTP probe returned status ${code} in ${latencyMs}ms`,
-        };
+        if (code > 0) {
+          return {
+            targetEndpoint: `${normalizedIp}:${targetPort}`,
+            targetIp: normalizedIp,
+            targetPort,
+            protocol,
+            reachable: code < 500,
+            statusCode: code,
+            latencyMs: Math.max(0.4, latencyMs),
+            checkedAt: new Date().toISOString(),
+            details: `In-cluster HTTP probe returned status ${code} in ${latencyMs}ms`,
+          };
+        }
       } else {
         const res = await execFileAsync(
           'docker',
-          ['exec', 'kind-control-plane', 'bash', '-c', `timeout 2 bash -c "</dev/tcp/${targetIp}/${port}" && echo TCP_OK`],
+          ['exec', 'kind-control-plane', 'bash', '-c', `timeout 2 bash -c "</dev/tcp/${normalizedIp}/${targetPort}" && echo TCP_OK`],
           { timeout: timeoutMs }
         );
         const latencyMs = Math.round((performance.now() - start) * 10) / 10;
         if (res.stdout.includes('TCP_OK')) {
           return {
-            targetEndpoint: `${targetIp}:${port}`,
-            targetIp,
-            targetPort: port,
+            targetEndpoint: `${normalizedIp}:${targetPort}`,
+            targetIp: normalizedIp,
+            targetPort,
             protocol: 'TCP',
             reachable: true,
-            latencyMs: Math.max(0.6, latencyMs),
+            latencyMs: Math.max(0.4, latencyMs),
             checkedAt: new Date().toISOString(),
             details: `In-cluster TCP handshake verified (SYN/ACK: ${latencyMs}ms)`,
           };
         }
       }
     } catch {
-      // Fallback to socket probe if docker exec is unavailable
+      // Fallback to direct network socket probe
     }
   }
 
+  // Direct In-cluster / Network Probe
   if (protocol === 'HTTP' || protocol === 'HTTPS') {
-    return new Promise((resolve) => {
-      const client = protocol === 'HTTPS' ? https : http;
+    const client = protocol === 'HTTPS' ? https : http;
+    const httpResult = await new Promise<NetflowProbeResult | null>((resolve) => {
+      let settled = false;
       const req = client.get(
-        `${protocol.toLowerCase()}://${targetIp}:${port}/healthz`,
+        `${protocol.toLowerCase()}://${normalizedIp}:${targetPort}/`,
         { timeout: timeoutMs, rejectUnauthorized: false },
         (res) => {
+          if (settled) return;
+          settled = true;
+          res.resume();
           const latencyMs = Math.round((performance.now() - start) * 10) / 10;
           resolve({
-            targetEndpoint: `${targetIp}:${port}`,
-            targetIp,
-            targetPort: port,
+            targetEndpoint: `${normalizedIp}:${targetPort}`,
+            targetIp: normalizedIp,
+            targetPort,
             protocol,
             reachable: (res.statusCode ?? 500) < 500,
             statusCode: res.statusCode,
-            latencyMs,
+            latencyMs: Math.max(0.4, latencyMs),
             checkedAt: new Date().toISOString(),
-            details: `HTTP GET returned status ${res.statusCode} in ${latencyMs}ms`,
+            details: `${protocol} probe returned HTTP ${res.statusCode} in ${latencyMs}ms`,
           });
         }
       );
 
       req.on('timeout', () => {
+        if (settled) return;
+        settled = true;
         req.destroy();
-        resolve({
-          targetEndpoint: `${targetIp}:${port}`,
-          targetIp,
-          targetPort: port,
-          protocol,
-          reachable: false,
-          latencyMs: timeoutMs,
-          checkedAt: new Date().toISOString(),
-          details: `Connection timed out after ${timeoutMs}ms`,
-        });
+        resolve(null); // Fallback to TCP socket check
       });
 
-      req.on('error', (err) => {
-        const latencyMs = Math.round((performance.now() - start) * 10) / 10;
-        resolve({
-          targetEndpoint: `${targetIp}:${port}`,
-          targetIp,
-          targetPort: port,
-          protocol,
-          reachable: false,
-          latencyMs,
-          checkedAt: new Date().toISOString(),
-          details: `Probe error: ${err.message}`,
-        });
+      req.on('error', () => {
+        if (settled) return;
+        settled = true;
+        req.destroy();
+        resolve(null); // Fallback to TCP socket check
       });
     });
+
+    if (httpResult) {
+      return httpResult;
+    }
   }
 
-  // TCP Socket Probe
+  // TCP Socket Probe (standard handshake)
   return new Promise((resolve) => {
     const socket = new net.Socket();
     socket.setTimeout(timeoutMs);
 
-    socket.connect(port, targetIp, () => {
+    socket.connect(targetPort, normalizedIp, () => {
       const latencyMs = Math.round((performance.now() - start) * 10) / 10;
       socket.destroy();
       resolve({
-        targetEndpoint: `${targetIp}:${port}`,
-        targetIp,
-        targetPort: port,
+        targetEndpoint: `${normalizedIp}:${targetPort}`,
+        targetIp: normalizedIp,
+        targetPort,
         protocol: 'TCP',
         reachable: true,
-        latencyMs,
+        latencyMs: Math.max(0.4, latencyMs),
         checkedAt: new Date().toISOString(),
         details: `TCP connection successfully established (SYN/ACK: ${latencyMs}ms)`,
       });
@@ -225,14 +231,14 @@ export async function probeEndpoint(
     socket.on('timeout', () => {
       socket.destroy();
       resolve({
-        targetEndpoint: `${targetIp}:${port}`,
-        targetIp,
-        targetPort: port,
+        targetEndpoint: `${normalizedIp}:${targetPort}`,
+        targetIp: normalizedIp,
+        targetPort,
         protocol: 'TCP',
         reachable: false,
         latencyMs: timeoutMs,
         checkedAt: new Date().toISOString(),
-        details: `TCP SYN timeout after ${timeoutMs}ms`,
+        details: `Connection timed out after ${timeoutMs}ms`,
       });
     });
 
@@ -240,9 +246,9 @@ export async function probeEndpoint(
       const latencyMs = Math.round((performance.now() - start) * 10) / 10;
       socket.destroy();
       resolve({
-        targetEndpoint: `${targetIp}:${port}`,
-        targetIp,
-        targetPort: port,
+        targetEndpoint: `${normalizedIp}:${targetPort}`,
+        targetIp: normalizedIp,
+        targetPort,
         protocol: 'TCP',
         reachable: false,
         latencyMs,
@@ -367,12 +373,26 @@ export async function getClusterNetflowData(clusterName: string): Promise<Netflo
         healthStatus = 'degraded';
       }
 
-      const ports = (svc.spec?.ports || []).map((p: any) => ({
-        port: p.port,
-        targetPort: p.targetPort || p.port,
-        protocol: p.protocol || 'TCP',
-        name: p.name,
-      }));
+      const ports = (svc.spec?.ports || []).map((p: any) => {
+        let numericTargetPort = typeof p.targetPort === 'number' ? p.targetPort : parseInt(p.targetPort, 10);
+        if (isNaN(numericTargetPort) || !numericTargetPort) {
+          // Check subset ports for resolved container port
+          const subsetPort = subsets[0]?.ports?.find((sp: any) => sp.name === p.name || sp.port);
+          if (subsetPort?.port) {
+            numericTargetPort = subsetPort.port;
+          } else if (p.name === 'https' || p.port === 443) {
+            numericTargetPort = 8443;
+          } else {
+            numericTargetPort = p.port || 80;
+          }
+        }
+        return {
+          port: p.port,
+          targetPort: numericTargetPort,
+          protocol: p.protocol || 'TCP',
+          name: p.name,
+        };
+      });
 
       const tier = determineTier(originalName, originalNamespace);
       const endpointId = `${originalNamespace}/${originalName}`;

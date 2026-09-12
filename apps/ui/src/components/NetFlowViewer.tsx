@@ -243,13 +243,61 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
     });
   }, [data?.recentFlows, selectedNamespace, selectedApplication, selectedVerdict, selectedProtocol, searchQuery]);
 
-  // Run Active Live Endpoint Probe
-  const handleRunProbe = async (endpoint: NetflowEndpoint) => {
-    setProbingEndpointId(endpoint.id);
+  // Set selected endpoint and sync/reset probe result
+  const handleSelectEndpoint = (ep: NetflowEndpoint | null) => {
+    setSelectedEndpoint(ep);
+    if (ep?.lastProbeStatus) {
+      setProbeResult({
+        targetEndpoint: ep.clusterIP && ep.clusterIP !== 'None' && ep.clusterIP !== 'External'
+          ? `${ep.clusterIP}:${ep.ports[0]?.port || 80}`
+          : ep.backingPods[0]?.ip
+          ? `${ep.backingPods[0].ip}:${ep.ports[0]?.targetPort || ep.ports[0]?.port || 80}`
+          : `${ep.externalIP || '1.1.1.1'}:${ep.ports[0]?.port || 443}`,
+        targetIp: ep.clusterIP || '1.1.1.1',
+        targetPort: ep.ports[0]?.port || 80,
+        protocol: 'TCP',
+        reachable: ep.lastProbeStatus.reachable,
+        statusCode: ep.lastProbeStatus.statusCode,
+        latencyMs: ep.lastProbeStatus.latencyMs,
+        details: ep.lastProbeStatus.message,
+        checkedAt: new Date().toISOString(),
+      });
+    } else {
+      setProbeResult(null);
+    }
+  };
+
+  // Run Active Live Endpoint Probe (Service VIP or specific Pod instance)
+  const handleRunProbe = async (endpoint: NetflowEndpoint, podTarget?: { ip: string; name: string }) => {
+    const isPodProbe = Boolean(podTarget);
+    setProbingEndpointId(podTarget ? `${endpoint.id}:${podTarget.name}` : endpoint.id);
     setProbeResult(null);
 
-    const targetPort = endpoint.ports[0]?.port || 80;
-    const protocol = endpoint.ports[0]?.name?.includes('https') ? 'HTTPS' : 'TCP';
+    const isExternal = endpoint.tier === 'external' || endpoint.id.startsWith('external/') || endpoint.clusterIP === 'External';
+    const isHeadless = !endpoint.clusterIP || endpoint.clusterIP === 'None';
+
+    let targetIp: string;
+    let targetPort: number;
+
+    if (podTarget) {
+      targetIp = podTarget.ip;
+      targetPort = endpoint.ports[0]?.targetPort || endpoint.ports[0]?.port || 80;
+    } else if (isExternal) {
+      targetIp = endpoint.externalIP || '1.1.1.1';
+      targetPort = endpoint.ports[0]?.port || 443;
+    } else if (isHeadless && endpoint.backingPods.length > 0) {
+      targetIp = endpoint.backingPods[0].ip;
+      targetPort = endpoint.ports[0]?.targetPort || endpoint.ports[0]?.port || 80;
+    } else {
+      targetIp = endpoint.clusterIP;
+      targetPort = endpoint.ports[0]?.port || 80;
+    }
+
+    const protocol = (targetPort === 443 || endpoint.ports[0]?.name?.includes('https'))
+      ? 'HTTPS'
+      : (targetPort === 80 || endpoint.ports[0]?.name?.includes('http'))
+      ? 'HTTP'
+      : 'TCP';
 
     try {
       const res = await fetch(`/api/vclusters/${cluster.name}/netflow/probe`, {
@@ -257,9 +305,10 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           endpointId: endpoint.id,
-          targetIp: endpoint.backingPods[0]?.ip || endpoint.clusterIP,
+          targetIp,
           port: targetPort,
           protocol,
+          targetType: isPodProbe ? 'pod' : 'service',
         }),
       });
       const json = await res.json();
@@ -282,9 +331,30 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
           );
           setData({ ...data, endpoints: updatedEndpoints });
         }
+      } else {
+        setProbeResult({
+          targetEndpoint: `${targetIp}:${targetPort}`,
+          targetIp,
+          targetPort,
+          protocol,
+          reachable: false,
+          latencyMs: 0,
+          checkedAt: new Date().toISOString(),
+          details: json.error || 'Probe failed',
+        });
       }
     } catch (err: any) {
       console.error('Probe failed:', err);
+      setProbeResult({
+        targetEndpoint: `${targetIp}:${targetPort}`,
+        targetIp,
+        targetPort,
+        protocol,
+        reachable: false,
+        latencyMs: 0,
+        checkedAt: new Date().toISOString(),
+        details: err.message || 'Probe request failed',
+      });
     } finally {
       setProbingEndpointId(null);
     }
@@ -848,7 +918,7 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
                   onMouseDown={(e) => handleNodeMouseDown(e, endpoint.id)}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setSelectedEndpoint(endpoint);
+                    handleSelectEndpoint(endpoint);
                   }}
                 >
                   {/* Ambient Health Glow Aura */}
@@ -1072,7 +1142,7 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
                       <span>{isProbing ? 'Probing...' : 'Test Probe'}</span>
                     </button>
                     <button
-                      onClick={() => setSelectedEndpoint(ep)}
+                      onClick={() => handleSelectEndpoint(ep)}
                       className="py-1.5 px-3 rounded-xl bg-cyber-800 hover:bg-cyber-700 text-slate-300 hover:text-white border border-cyber-700 text-xs transition-all"
                     >
                       Details
@@ -1248,7 +1318,7 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
                   <p className="text-xs text-slate-400 mt-1">Namespace: {selectedEndpoint.namespace}</p>
                 </div>
                 <button
-                  onClick={() => setSelectedEndpoint(null)}
+                  onClick={() => handleSelectEndpoint(null)}
                   className="p-1.5 text-slate-400 hover:text-white rounded-xl bg-cyber-900 hover:bg-cyber-800 transition-colors"
                 >
                   <X className="w-5 h-5" />
@@ -1280,16 +1350,31 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
               {/* Live Probe Section */}
               <div className="bg-cyber-950/90 border border-cyber-800 p-4 rounded-2xl space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <Zap className="w-4 h-4 text-cyan-400" />
-                    <span>Active Endpoint Reachability Probe</span>
-                  </span>
+                  <div>
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Zap className="w-4 h-4 text-cyan-400" />
+                      <span>Active Network Reachability Probe</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500 mt-0.5 block">
+                      Direct TCP SYN / HTTP reachability handshake
+                    </span>
+                  </div>
                   <button
                     onClick={() => handleRunProbe(selectedEndpoint)}
-                    disabled={probingEndpointId === selectedEndpoint.id}
-                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 text-xs font-bold transition-all shadow-[0_0_12px_rgba(6,182,212,0.3)] disabled:opacity-50"
+                    disabled={Boolean(probingEndpointId)}
+                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 text-xs font-bold transition-all shadow-[0_0_12px_rgba(6,182,212,0.3)] disabled:opacity-50 flex items-center gap-1.5"
                   >
-                    {probingEndpointId === selectedEndpoint.id ? 'Running Probe...' : 'Run Probe Now'}
+                    {probingEndpointId === selectedEndpoint.id ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Probing VIP...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>Probe Service VIP</span>
+                      </>
+                    )}
                   </button>
                 </div>
 
@@ -1302,43 +1387,77 @@ export const NetFlowViewer: React.FC<Props> = ({ cluster }) => {
                     }`}
                   >
                     <div className="flex items-center justify-between font-bold">
-                      <span>Status: {probeResult.reachable ? 'REACHABLE (Healthy)' : 'UNREACHABLE'}</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${probeResult.reachable ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+                        <span>Status: {probeResult.reachable ? 'REACHABLE (Healthy)' : 'UNREACHABLE'}</span>
+                      </span>
                       <span>RTT: {probeResult.latencyMs}ms</span>
                     </div>
                     <p className="text-[11px] opacity-80">{probeResult.details}</p>
-                    <p className="text-[10px] opacity-60">Target: {probeResult.targetEndpoint}</p>
+                    <p className="text-[10px] opacity-60 font-mono">Target: {probeResult.targetEndpoint}</p>
                   </div>
                 ) : (
                   <p className="text-xs text-slate-500">
-                    Click 'Run Probe Now' to perform a real-time TCP/HTTP handshake test against this endpoint.
+                    Click 'Probe Service VIP' or test an individual backing pod below to execute a real-time cluster probe.
                   </p>
                 )}
               </div>
 
               {/* Backing Pod Instances List */}
               <div className="space-y-2">
-                <span className="text-xs font-bold text-white block">Backing Pod Endpoints ({selectedEndpoint.backingPods.length})</span>
-                <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
-                  {selectedEndpoint.backingPods.map((pod) => (
-                    <div
-                      key={pod.ip}
-                      className="flex items-center justify-between p-2.5 rounded-xl bg-cyber-950 border border-cyber-800 text-xs"
-                    >
-                      <div>
-                        <span className="font-semibold text-white">{pod.name}</span>
-                        <div className="text-[10px] text-slate-500">
-                          IP: {pod.ip} • Node: {pod.nodeName || 'kind-control-plane'} • Restarts: {pod.restarts}
-                        </div>
-                      </div>
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          pod.ready ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
-                        }`}
-                      >
-                        {pod.ready ? 'Ready' : 'Not Ready'}
-                      </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-white block">
+                    Backing Pod Instances ({selectedEndpoint.backingPods.length})
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    Container TargetPort: {selectedEndpoint.ports[0]?.targetPort || selectedEndpoint.ports[0]?.port || 80}
+                  </span>
+                </div>
+                <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                  {selectedEndpoint.backingPods.length === 0 ? (
+                    <div className="p-3 text-center text-xs text-slate-500 bg-cyber-950 rounded-xl border border-cyber-800">
+                      No direct backing pods (External or Virtual Endpoint)
                     </div>
-                  ))}
+                  ) : (
+                    selectedEndpoint.backingPods.map((pod) => {
+                      const isPodProbing = probingEndpointId === `${selectedEndpoint.id}:${pod.name}`;
+                      return (
+                        <div
+                          key={pod.name || pod.ip}
+                          className="flex items-center justify-between p-2.5 rounded-xl bg-cyber-950 border border-cyber-800 text-xs hover:border-cyber-700 transition-colors"
+                        >
+                          <div className="min-w-0 flex-1 mr-2">
+                            <span className="font-semibold text-white truncate block">{pod.name}</span>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              IP: <span className="font-mono text-cyan-300">{pod.ip}</span> • Node: {pod.nodeName || 'kind-control-plane'} • Restarts: {pod.restarts}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                pod.ready ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                              }`}
+                            >
+                              {pod.ready ? 'Ready' : 'Not Ready'}
+                            </span>
+                            <button
+                              onClick={() => handleRunProbe(selectedEndpoint, { ip: pod.ip, name: pod.name })}
+                              disabled={Boolean(probingEndpointId)}
+                              title={`Directly probe pod ${pod.name} (${pod.ip}:${selectedEndpoint.ports[0]?.targetPort || 80})`}
+                              className="p-1 px-2.5 rounded-lg bg-cyber-800 hover:bg-cyber-700 text-cyan-300 border border-cyan-500/30 hover:border-cyan-400 text-[10px] font-bold transition-all flex items-center gap-1 disabled:opacity-50"
+                            >
+                              {isPodProbing ? (
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Zap className="w-3 h-3" />
+                              )}
+                              <span>{isPodProbing ? 'Probing...' : 'Probe Pod'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             </div>
